@@ -27,7 +27,7 @@ discovery → brainstorming → plano → dev/db → docs + revisores (security,
 
 - A skill `manager` orquestra a entrega e mantém o ledger (`.superpowers/ledger.jsonl`) que sincroniza os agentes; o agente `gate` é a checagem final.
 - Commits ficam locais, no branch do worktree. Merge na branch principal e push só depois do veredito APROVADO do `gate`, e só quando o usuário pedir. Correções voltam ao agente dono do arquivo (`dev` ou `db`).
-- O plugin `pipeline` está habilitado neste repo (`--scope local`), o que liga o fluxo pessoal aqui. O hook do plugin escaneia segredos em todo `git commit` e nos commits de todo `git push`; onde existe `docs/quality-reports/`, também bloqueia push sem aprovação do `gate` para a árvore atual.
+- O plugin `pipeline` está habilitado neste repo (`--scope local`), o que liga o fluxo pessoal aqui. O hook do plugin escaneia segredos em todo `git commit` e nos commits de todo `git push`; onde existe `docs/quality-reports/`, também bloqueia push sem aprovação do `gate` para a árvore de cada ref enviada.
 - Cada entrega aprovada gera um relatório em `docs/quality-reports/` e uma linha em `history.jsonl`.
 
 ## Regras que valem sempre

@@ -20,6 +20,10 @@ must_flag = {
     "remote DB URL with password": "+DATABASE_URL=postgresql://postgres:S3nh4Forte99@db.abcdefgh.supabase.co:5432/postgres",
     "AWS": '+key = "AKIAABCDEFGHIJKLMNOP"',
     "token = value": '+token = "abcdefghijklmnopqrstuv1234"',
+    "unquoted .env value": "+API_KEY=AbC123dEf456GhI789jKl",
+    "unquoted token = value": "+token = abcdefghijklmnopqrstuv1234",
+    "quoted dotted literal": '+api_key: "abc.def.ghi.jkl.mno.pqr"',
+    "remote Redis URL with password": "+REDIS_URL=redis://default:Xk29fLq81@cache.example.com:6379",
 }
 must_pass = {
     "anon JWT (public by design)": f"+NEXT_PUBLIC_SUPABASE_ANON_KEY={anon}",
@@ -28,6 +32,12 @@ must_pass = {
     "short example password": '+password: "changeme"',
     "prose about a token": "+O token do convite expira em 7 dias e a service role key nunca vai ao cliente.",
     "function name": "+export function createServiceRoleClient() {",
+    "token from a method call": "+const token = this.jwtService.signAsync(payload);",
+    "key read from process.env": "+const accessKey = process.env.AWS_ACCESS_KEY_ID;",
+    "key read from os.environ": "+secret_value = os.environ.get('APP_SECRET')",
+    "property set from a call": "+  refreshToken: createRefreshTokenFor(user),",
+    "docker-compose service URL": "+DATABASE_URL=postgresql://postgres:postgres@db:5432/app",
+    "docker-compose redis URL": "+REDIS_URL=redis://default:redispass@redis:6379",
 }
 results = []
 for name, line in must_flag.items():
