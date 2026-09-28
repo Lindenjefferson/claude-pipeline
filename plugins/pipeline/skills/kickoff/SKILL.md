@@ -1,6 +1,6 @@
 ---
 name: kickoff
-description: Use when starting a new personal project, or when the user asks to add the multiagent structure (CLAUDE.md, docs/ convention, knowledge graph, graph gitignore) to an existing personal project. Exists only where the `pipeline` plugin is enabled (`claude plugin install pipeline@linde-local --scope local`, run once in the project folder). Triggers on "kickoff", "novo projeto", "iniciar projeto", "preparar o projeto".
+description: Use when starting a new personal project, or when the user asks to add the multiagent structure (CLAUDE.md, docs/ convention, knowledge graph, graph gitignore) to an existing personal project. Exists only where the `pipeline` plugin is enabled (`claude plugin install pipeline@linden-plugins --scope local`, run once in the project folder). Triggers on "kickoff", "novo projeto", "iniciar projeto", "preparar o projeto".
 ---
 
 # Project Kickoff
@@ -26,7 +26,7 @@ Prepares a project so the `pipeline` plugin's agents work from day one. **Idempo
       sed -i '/graphify-out\/graph.json merge=graphify/d' .gitattributes; [ -s .gitattributes ] || rm .gitattributes
       git config --local --unset-all merge.graphify.name; git config --local --unset-all merge.graphify.driver
       ```
-7. **Verify with evidence**, then report each result: the plugin is enabled for this repo (`claude plugin list` shows `pipeline@linde-local` enabled); `git check-ignore graphify-out/graph.json` prints the path; `git status` shows only intended new files; if step 2 installed it, `.git/hooks/pre-push` contains `secretscan-managed`. If 6.3 and 6.4 ran, also: `.claude/settings.json` parses as JSON and its hook commands start with `python -m graphify`; `python -m graphify --help` exits 0; `git config --local --get-regexp merge` prints nothing. If they did not run, say so.
+7. **Verify with evidence**, then report each result: the plugin is enabled for this repo (`claude plugin list` shows `pipeline@linden-plugins` enabled); `git check-ignore graphify-out/graph.json` prints the path; `git status` shows only intended new files; if step 2 installed it, `.git/hooks/pre-push` contains `secretscan-managed`. If 6.3 and 6.4 ran, also: `.claude/settings.json` parses as JSON and its hook commands start with `python -m graphify`; `python -m graphify --help` exits 0; `git config --local --get-regexp merge` prints nothing. If they did not run, say so.
 8. **Hand off.** State the pipeline and ask whether to start `discovery` now: discovery → brainstorming → writing-plans → dev/db → docs + reviewers → gate (quality report). The `manager` skill runs everything from the plan onward and keeps the ledger that syncs the agents.
 
 ## Notes

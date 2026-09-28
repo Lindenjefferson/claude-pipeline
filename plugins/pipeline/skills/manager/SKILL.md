@@ -1,6 +1,6 @@
 ---
 name: manager
-description: Use when asked to develop, implement, or deliver a module, feature, or bug fix in a personal project where the `pipeline` plugin is enabled (`claude plugin install pipeline@linde-local --scope local`). Orchestrates the agents, keeps the delivery ledger that syncs them, and ends at the `gate` agent. Triggers on "manager", "desenvolver módulo", "implementar módulo", "nova feature", "corrigir bug", "deliver".
+description: Use when asked to develop, implement, or deliver a module, feature, or bug fix in a personal project where the `pipeline` plugin is enabled (`claude plugin install pipeline@linden-plugins --scope local`). Orchestrates the agents, keeps the delivery ledger that syncs them, and ends at the `gate` agent. Triggers on "manager", "desenvolver módulo", "implementar módulo", "nova feature", "corrigir bug", "deliver".
 ---
 
 # Manager
