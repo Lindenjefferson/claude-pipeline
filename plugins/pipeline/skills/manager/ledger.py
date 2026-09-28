@@ -21,6 +21,8 @@ AGENT_VERDICTS = {
     "qa": REVIEWER_VERDICTS,
 }
 NOTE_KINDS = ("ruling", "deferred", "parked", "condition")
+SPEC_TASK = "spec"
+SPEC_REVIEWERS = ("security", "db", "audit", "design", "code-review")
 
 
 def role(entry):
@@ -93,7 +95,17 @@ def entry_problem(entry):
     for field in ("task", "from", "head", "round", "report"):
         if not entry.get(field):
             return f"agent entry lacks '{field}'"
-    return verdict_problem(entry)
+    return verdict_problem(entry) or spec_problem(entry)
+
+
+def spec_problem(entry):
+    if entry.get("task") != SPEC_TASK:
+        return "'spec' is only valid on the spec task" if "spec" in entry else None
+    if entry.get("agent") not in SPEC_REVIEWERS or entry.get("verdict") not in REVIEWER_VERDICTS:
+        return f"the spec task takes reviewer lines from: {', '.join(SPEC_REVIEWERS)}"
+    if not entry.get("spec"):
+        return "spec review entry lacks 'spec' (the reviewed document)"
+    return None
 
 
 def read_ledger(path):
@@ -159,11 +171,21 @@ def append(args):
         sys.exit(f"--from {args.from_sha} is not an ancestor of --head {args.head}")
     if not os.path.isfile(args.report):
         sys.exit(f"--report does not exist: {args.report} (save the agent's report first)")
+    entry.pop("spec", None)
+    if args.spec:
+        spec = os.path.normpath(args.spec).replace("\\", "/")
+        if git("cat-file", "-e", f"{head}:./{spec}")[0] != 0:
+            sys.exit(f"--spec {args.spec} is not in --head {args.head} (commit the spec first)")
+        entry["spec"] = spec
+    entry["task"] = args.task
+    problem = spec_problem(entry)
+    if problem:
+        sys.exit(f"agent line rejected: {problem}")
     entries, invalid = read_ledger(args.ledger)
     warn_invalid(args.ledger, invalid)
     earlier = [e for e in entries if e.get("agent") == entry["agent"] and e.get("task") == args.task
                and role(e) == role(entry)]
-    entry.update({"ts": now(), "task": args.task, "from": from_sha, "head": head,
+    entry.update({"ts": now(), "from": from_sha, "head": head,
                   "round": len(earlier) + 1, "report": args.report})
     write_line(args.ledger, entry)
     print(f"{entry['agent']} {entry['verdict']} task={args.task} round={entry['round']}")
@@ -180,20 +202,23 @@ def note(args):
 def summarize(entries):
     latest = {}
     totals = {}
+    spec_totals = {}
     for entry in entries:
         agent = entry.get("agent")
         if not agent:
             continue
         latest[(entry["task"], agent, role(entry))] = entry
-        bucket = totals.setdefault(agent, {**{s: 0 for s in SEVERITIES}, "rounds": 0})
+        scope = spec_totals if entry["task"] == SPEC_TASK else totals
+        bucket = scope.setdefault(agent, {**{s: 0 for s in SEVERITIES}, "rounds": 0})
         for severity in SEVERITIES:
             bucket[severity] += (entry.get("new") or {}).get(severity, 0)
         bucket["rounds"] = max(bucket["rounds"], entry.get("round", 1))
-    return list(latest.values()), totals
+    return list(latest.values()), totals, spec_totals
 
 
-def commits_after(entry_head, head):
-    code, count = git("rev-list", "--count", f"{entry_head}..{head}")
+def commits_after(entry_head, head, path=None):
+    paths = ["--", path] if path else []
+    code, count = git("rev-list", "--count", f"{entry_head}..{head}", *paths)
     return int(count or 0) if code == 0 else None
 
 
@@ -202,22 +227,27 @@ def stale_entries(latest, head):
     for entry in latest:
         if entry.get("verdict") not in REVIEWER_VERDICTS:
             continue
-        behind = commits_after(entry.get("head"), head)
+        spec = entry.get("spec") if entry["task"] == SPEC_TASK else None
+        behind = commits_after(entry.get("head"), head, spec)
         if behind != 0:
-            stale.append({"task": entry["task"], "agent": entry["agent"],
-                          "head": entry.get("head"), "commits_after": behind})
+            item = {"task": entry["task"], "agent": entry["agent"],
+                    "head": entry.get("head"), "commits_after": behind}
+            if spec:
+                item["spec"] = spec
+            stale.append(item)
     return stale
 
 
 def status(args):
     entries, invalid = read_ledger(args.ledger)
-    latest, totals = summarize(entries)
+    latest, totals, spec_totals = summarize(entries)
     notes = [{k: e[k] for k in ("kind", "task", "text", "ts")} for e in entries
              if e.get("event") == "note"]
     stale = stale_entries(latest, args.head) if args.head else []
     behind = {(s["task"], s["agent"]): s["commits_after"] for s in stale}
     if args.json:
-        report = {"latest": latest, "totals": totals, "notes": notes, "invalid": invalid}
+        report = {"latest": latest, "totals": totals, "spec_totals": spec_totals,
+                  "notes": notes, "invalid": invalid}
         if args.head:
             report["stale"] = stale
         print(json.dumps(report, indent=2))
@@ -233,9 +263,10 @@ def status(args):
         print(f"{entry['task']:<10} {label(entry):<16} {entry['verdict']:<20} "
               f"{str(entry.get('from'))[:8]}..{str(entry.get('head'))[:8]}  round {entry.get('round')}"
               f"{flag}")
-    for agent, bucket in totals.items():
-        raised = ", ".join(f"{bucket[s]} {s}" for s in SEVERITIES)
-        print(f"total {agent:<12} raised: {raised}; rounds: {bucket['rounds']}")
+    for scope, buckets in (("total", totals), ("spec ", spec_totals)):
+        for agent, bucket in buckets.items():
+            raised = ", ".join(f"{bucket[s]} {s}" for s in SEVERITIES)
+            print(f"{scope} {agent:<12} raised: {raised}; rounds: {bucket['rounds']}")
     for item in notes:
         print(f"note {item['kind']:<10} {item['task']:<10} {item['text']}")
 
@@ -256,6 +287,7 @@ def main():
     append_cmd.add_argument("--head", required=True)
     append_cmd.add_argument("--report", required=True)
     append_cmd.add_argument("--line", required=True)
+    append_cmd.add_argument("--spec", help="the reviewed spec document; required with --task spec")
     append_cmd.set_defaults(run=append)
 
     note_cmd = commands.add_parser("note")

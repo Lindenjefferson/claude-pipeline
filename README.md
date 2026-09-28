@@ -7,13 +7,14 @@ O plugin é habilitado **por projeto**, nunca globalmente: onde não está ativo
 ## Como funciona
 
 ```
-discovery → brainstorming → plano → dev / db → docs + revisores → gate
+discovery → brainstorming → revisão do spec → plano → dev / db → docs + revisores → gate
 ```
 
 1. **`pipeline:kickoff`** prepara o projeto: `CLAUDE.md`, convenção de documentação em `docs/`, `.gitignore`, grafo de conhecimento opcional e o hook `pre-push` de segredos.
 2. **`pipeline:manager`** conduz cada entrega: planeja, despacha os agentes, encaminha cada problema ao dono do arquivo e registra tudo em um ledger.
-3. Os **revisores** analisam cada tarefa em paralelo, cada um no seu domínio.
-4. O **`gate`** confere se todos os revisores exigidos aprovaram os commits atuais, varre o histórico em busca de segredos e, ao aprovar, grava um relatório de qualidade com nota.
+3. Na **revisão do spec**, antes do plano, os revisores leem o spec aprovado pelo brainstorming (ainda sem código) e ele é corrigido até todos aprovarem.
+4. Os **revisores** analisam cada tarefa em paralelo, cada um no seu domínio.
+5. O **`gate`** confere se todos os revisores exigidos aprovaram os commits atuais, varre o histórico em busca de segredos e, ao aprovar, grava um relatório de qualidade com nota.
 
 ## Componentes
 
@@ -33,9 +34,26 @@ discovery → brainstorming → plano → dev / db → docs + revisores → gate
 | `pipeline:gate` | Verificação final e relatório de qualidade. |
 | Hook de segredos | Bloqueia `git commit` e `git push` do Claude que contenham segredos e exige a aprovação do `gate` para o push em projetos com `docs/quality-reports/`. No commit, considera também o que o mesmo comando adiciona (`git add ... && git commit`), os arquivos passados ao commit e o `-a`; no push, os refs enviados (refspecs, tags, `--all`), não só o `HEAD`. Entende aliases do git. |
 
+### Revisão do spec
+
+Um erro de design (uma política de acesso no escopo errado, um convite que atravessa a fronteira entre contas, uma escrita financeira sem rastro) pego no spec custa uma edição; pego depois do código, custa uma migration nova e retrabalho. Por isso, depois que o brainstorming aprova o spec e antes do `writing-plans`, o `manager` despacha em paralelo os revisores do domínio do spec, em **modo spec** (somente leitura, entrada é o documento, não um diff):
+
+| O spec toca | Revisor |
+|---|---|
+| Auth, permissões, sessões, segredos, RLS | `security` |
+| Schema, migrations, RLS, queries | `db` (modo revisor) |
+| Escrita de dados sensíveis ou financeiros | `audit` |
+| Telas e fluxos de UI | `design` |
+| Contratos e interfaces complexos | `code-review` (opcional) |
+
+- **Obrigatória** quando o spec toca auth, permissões, RLS, schema/migrations, segredos ou dados sensíveis/financeiros; nos demais casos o `manager` pergunta ao usuário. Quando não roda, o motivo fica registrado como nota `ruling` da tarefa `spec`.
+- Cada achado aponta a seção do spec, o cenário concreto e a correção proposta no design. Achados Critical/Important são corrigidos no spec pela sessão principal (decisões de produto vão ao usuário) e os mesmos revisores rodam de novo até aprovar, com no máximo 5 rodadas. Minors são aplicados ou registrados como `deferred`.
+- Evidência: relatórios em `.superpowers/reports/spec-<agente>-r<rodada>.md` e entradas no ledger com a tarefa `spec` e o caminho do spec revisado. Esses achados ficam fora das notas de qualidade (foram pegos antes do código) e aparecem à parte no relatório do `gate`.
+- O `gate` bloqueia a entrega que toca esses domínios sem revisão de spec aprovada nem nota explicando a ausência, e pede nova revisão se o spec mudou depois dela.
+
 ### Ledger
 
-Cada entrega tem um ledger em `.superpowers/ledger.jsonl`, escrito só pelo `ledger.py`. Ele registra, por tarefa e agente, o intervalo de commits revisado, o veredito, os problemas encontrados e em aberto e as decisões tomadas. Linhas inválidas são recusadas na entrada, e `status --head HEAD` aponta revisões que ficaram para trás de commits novos.
+Cada entrega tem um ledger em `.superpowers/ledger.jsonl`, escrito só pelo `ledger.py`. Ele registra, por tarefa e agente, o intervalo de commits revisado, o veredito, os problemas encontrados e em aberto e as decisões tomadas. Linhas inválidas são recusadas na entrada, e `status --head HEAD` aponta revisões que ficaram para trás de commits novos (para a tarefa `spec`, só quando o próprio spec mudou).
 
 ### Relatórios de qualidade
 

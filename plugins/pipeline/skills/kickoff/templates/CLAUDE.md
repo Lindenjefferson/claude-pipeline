@@ -23,7 +23,9 @@ Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto. Pre
 
 ## Fluxo de entrega
 
-discovery → brainstorming → plano → dev/db → docs + revisores (security, audit, design, code-review, qa) → gate.
+discovery → brainstorming → revisão do spec → plano → dev/db → docs + revisores (security, audit, design, code-review, qa) → gate.
+
+- Antes do plano, os revisores leem o spec aprovado (sem código ainda) e ele é corrigido até todos aprovarem. Obrigatória quando o spec toca auth, permissões, RLS, schema/migrations, segredos ou dados sensíveis/financeiros; opcional nos demais casos.
 
 - A skill `manager` orquestra a entrega e mantém o ledger (`.superpowers/ledger.jsonl`) que sincroniza os agentes; o agente `gate` é a checagem final.
 - Commits ficam locais, no branch do worktree. Merge na branch principal e push só depois do veredito APROVADO do `gate`, e só quando o usuário pedir. Correções voltam ao agente dono do arquivo (`dev` ou `db`).
