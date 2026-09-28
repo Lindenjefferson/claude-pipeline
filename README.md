@@ -115,7 +115,7 @@ for t in plugins/pipeline/hooks/tests/test_*.py plugins/pipeline/skills/manager/
 
 Observações:
 
-- O hook `pre-push` que o `kickoff` instala em cada projeto aponta para o scanner no caminho do marketplace. Ao mover o clone, registre o marketplace no novo caminho e reinstale o hook em cada projeto com `python <clone>/plugins/pipeline/hooks/pre-commit-secret-scan.py --install-pre-push`.
+- O hook `pre-push` que o `kickoff` instala em cada projeto não guarda caminho: ele localiza o scanner pela variável `CLAUDE_PIPELINE_HOME` ou por `git config pipeline.home` (raiz do plugin, isto é, `<clone>/plugins/pipeline`). Configure uma vez por máquina com `git config --global pipeline.home "<clone>/plugins/pipeline"`. Se o clone mudar de lugar, só esse valor muda, sem reinstalar o hook nos projetos. Se o scanner não for encontrado, o push é bloqueado com uma mensagem, nunca liberado em silêncio.
 - Instalações feitas a partir do GitHub ficam fixas na `version` de `plugin.json`: aumente a versão a cada release para que `claude plugin update` traga as mudanças.
 - Os arquivos são mantidos em LF (`.gitattributes`).
 

@@ -118,6 +118,18 @@ def scan(diff, names):
 
 
 HOOK_MARKER = "secretscan-managed"
+HOME_VAR = "CLAUDE_PIPELINE_HOME"
+PRE_PUSH_SHIM = f"""#!/bin/sh
+# {HOOK_MARKER}
+root="${{{HOME_VAR}:-$(git config --get pipeline.home)}}"
+script="$root/hooks/pre-commit-secret-scan.py"
+if [ -z "$root" ] || [ ! -f "$script" ]; then
+  echo "Push blocked: secret scanner not found (looked in '$root')." >&2
+  echo "Set {HOME_VAR} or run: git config --global pipeline.home <pipeline plugin root>" >&2
+  exit 1
+fi
+exec python "$script" --pre-push "$@"
+"""
 ZERO_SHA = "0" * 40
 
 
@@ -156,13 +168,14 @@ def install_pre_push():
     if os.path.exists(target) and HOOK_MARKER not in open(target, encoding="utf-8").read():
         sys.stderr.write(f"A pre-push hook already exists at {target}; not overwriting it.\n")
         sys.exit(2)
-    script = os.path.abspath(__file__).replace("\\", "/")
     os.makedirs(hooks_dir, exist_ok=True)
     with open(target, "w", encoding="utf-8", newline="\n") as handle:
-        handle.write(f'#!/bin/sh\n# {HOOK_MARKER}\n[ -f "{script}" ] || exit 0\n'
-                     f'exec python "{script}" --pre-push "$@"\n')
+        handle.write(PRE_PUSH_SHIM)
     os.chmod(target, 0o755)
     print(f"installed {target}")
+    plugin_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__))).replace("\\", "/")
+    print(f"the hook finds the scanner through ${HOME_VAR} or `git config pipeline.home`; "
+          f"set it once per machine: git config --global pipeline.home \"{plugin_root}\"")
     sys.exit(0)
 
 

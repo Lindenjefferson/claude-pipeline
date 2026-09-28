@@ -1,7 +1,8 @@
 import tempfile
-import os, subprocess, sys, time
+import os, shutil, subprocess, sys, time
 
 HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "pre-commit-secret-scan.py")
+os.environ["CLAUDE_PIPELINE_HOME"] = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 base = os.path.join(tempfile.gettempdir(), f"prepush_{int(time.time())}")
 os.makedirs(base)
 remote = os.path.join(base, "remote.git")
@@ -64,5 +65,21 @@ run(other, "git", "init", "-q")
 open(os.path.join(other, ".git", "hooks", "pre-push"), "w").write("#!/bin/sh\necho mine\n")
 r = run(other, sys.executable, HOOK, "--install-pre-push", check=False)
 check("foreign hook is not overwritten", r.returncode == 2 and "mine" in open(os.path.join(other, ".git", "hooks", "pre-push")).read())
+
+no_home = {k: v for k, v in os.environ.items() if k != "CLAUDE_PIPELINE_HOME"}
+empty_global = os.path.join(base, "empty-gitconfig")
+open(empty_global, "w").close()
+no_home["GIT_CONFIG_GLOBAL"] = empty_global
+open(os.path.join(repo, "c.txt"), "w").write("more\n")
+run(repo, "git", "add", "-A"); run(repo, "git", "commit", "-q", "-m", "more")
+r = subprocess.run(["git", "push", "origin", "HEAD:refs/heads/main"], cwd=repo, capture_output=True, text=True, env=no_home)
+check("push is blocked when the scanner cannot be located", r.returncode != 0 and "secret scanner not found" in r.stderr)
+
+fake_home = os.path.join(base, "moved-plugin", "hooks"); os.makedirs(fake_home)
+shutil.copy(HOOK, os.path.join(fake_home, "pre-commit-secret-scan.py"))
+with open(empty_global, "w") as handle:
+    handle.write("[pipeline]\n\thome = " + os.path.dirname(fake_home).replace("\\", "/") + "\n")
+r = subprocess.run(["git", "push", "-q", "origin", "HEAD:refs/heads/main"], cwd=repo, capture_output=True, text=True, env=no_home)
+check("push works when pipeline.home points at a relocated plugin", r.returncode == 0)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
