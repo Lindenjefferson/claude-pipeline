@@ -23,6 +23,16 @@ AGENT_VERDICTS = {
 NOTE_KINDS = ("ruling", "deferred", "parked", "condition")
 
 
+def role(entry):
+    return "review" if entry.get("verdict") in REVIEWER_VERDICTS else "implement"
+
+
+def label(entry):
+    verdicts = AGENT_VERDICTS.get(entry["agent"], ())
+    both = REVIEWER_VERDICTS[0] in verdicts and IMPLEMENTER_VERDICTS[0] in verdicts
+    return f"{entry['agent']} ({role(entry)})" if both else entry["agent"]
+
+
 def now():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -151,7 +161,8 @@ def append(args):
         sys.exit(f"--report does not exist: {args.report} (save the agent's report first)")
     entries, invalid = read_ledger(args.ledger)
     warn_invalid(args.ledger, invalid)
-    earlier = [e for e in entries if e.get("agent") == entry["agent"] and e.get("task") == args.task]
+    earlier = [e for e in entries if e.get("agent") == entry["agent"] and e.get("task") == args.task
+               and role(e) == role(entry)]
     entry.update({"ts": now(), "task": args.task, "from": from_sha, "head": head,
                   "round": len(earlier) + 1, "report": args.report})
     write_line(args.ledger, entry)
@@ -173,7 +184,7 @@ def summarize(entries):
         agent = entry.get("agent")
         if not agent:
             continue
-        latest[(entry["task"], agent)] = entry
+        latest[(entry["task"], agent, role(entry))] = entry
         bucket = totals.setdefault(agent, {**{s: 0 for s in SEVERITIES}, "rounds": 0})
         for severity in SEVERITIES:
             bucket[severity] += (entry.get("new") or {}).get(severity, 0)
@@ -216,10 +227,10 @@ def status(args):
     for entry in latest:
         key = (entry["task"], entry["agent"])
         flag = ""
-        if key in behind:
+        if role(entry) == "review" and key in behind:
             count = behind[key]
             flag = "  STALE (unknown range)" if count is None else f"  STALE (+{count} commits)"
-        print(f"{entry['task']:<10} {entry['agent']:<12} {entry['verdict']:<20} "
+        print(f"{entry['task']:<10} {label(entry):<16} {entry['verdict']:<20} "
               f"{str(entry.get('from'))[:8]}..{str(entry.get('head'))[:8]}  round {entry.get('round')}"
               f"{flag}")
     for agent, bucket in totals.items():

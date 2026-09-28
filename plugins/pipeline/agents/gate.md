@@ -74,7 +74,7 @@ This is project history, so it lives in the project's own repo, not in your agen
 
 **Scoring — deterministic, computed from the ledger, not your impression:**
 
-`ledger.py status --json` gives two things per agent: `totals` (findings *raised* across the whole delivery, every task and round, including ones fixed along the way) and `latest` (the newest entry per task, whose `open` counts are what is *still open* now). For each review dimension, `raised` comes from `totals` and `open` is the sum of the `open` counts over that agent's `latest` entries; per severity, `fixed = raised - open` (never below 0). For each of the four dimensions (`security`, `audit`, `design`, `code-review`), start at 10 and apply:
+`ledger.py status --json` gives two things per agent: `totals` (findings *raised* across the whole delivery, every task and round, including ones fixed along the way) and `latest` (the newest entry per task, agent and role, whose `open` counts are what is *still open* now; `db` can have two per task, one as implementer and one as reviewer, and only the reviewer one carries counts). For each review dimension, `raised` comes from `totals` and `open` is the sum of the `open` counts over that agent's `latest` reviewer entries; per severity, `fixed = raised - open` (never below 0). For each of the five dimensions (`security`, `audit`, `design`, `code-review`, `db`), start at 10 and apply:
 - Fixed findings cost little, because the process worked: `-0.5` per fixed Critical, `-0.25` per fixed Important, `0` per fixed Minor.
 - Findings still open cost a lot: `-3` per open Critical, `-1` per open Important, `-0.25` per open Minor (a parked/deferred Minor). An approval has no open Critical or Important, so in practice only open Minors count here.
 - Floor at 0. A dimension with no reviewer required for this diff (e.g. no UI touched, so `design` didn't run) is omitted from the table, not scored as 10 by default.
@@ -97,7 +97,7 @@ This is project history, so it lives in the project's own repo, not in your agen
 
 **`history.jsonl` line schema** (one compact JSON object per line, no pretty-printing):
 ```json
-{"date":"YYYY-MM-DD","slug":"short-slug","scores":{"security":10,"audit":9.5,"design":10,"code_review":8,"test_coverage":10},"overall":9.5,"rounds":2,"commit":"<short-sha-of-approved-head>","report":"docs/quality-reports/YYYY-MM-DD-short-slug.md"}
+{"date":"YYYY-MM-DD","slug":"short-slug","scores":{"security":10,"audit":9.5,"design":10,"code_review":8,"db":10,"test_coverage":10},"overall":9.5,"rounds":2,"commit":"<short-sha-of-approved-head>","report":"docs/quality-reports/YYYY-MM-DD-short-slug.md"}
 ```
 
 This is the same artifact structure regardless of which project you're gating — the scoring formula and file layout are fixed so history stays comparable across deliveries and across projects, not just within one.

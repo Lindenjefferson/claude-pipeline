@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """PreToolUse hook for Claude Code Bash and PowerShell calls that run `git commit` or `git push`.
 
-commit: blocks when the staged diff (plus tracked changes for `commit -a`) adds a
-        secret-looking string or an .env-style file.
-push:   blocks when the commits about to leave the machine add such content, and,
-        in repos that opted in (a docs/quality-reports/ directory exists at the repo
-        root), blocks unless the gate agent recorded approval of the current tree
-        in <git-common-dir>/gate-approved (legacy name: manager-approved).
+commit: blocks when what the commit would record adds a secret-looking string or an
+        .env-style file. That is the staged diff plus whatever the same command stages
+        first (`git add ... && git commit`), the paths given to the commit and, for
+        `commit -a`, the tracked changes; they are staged into a throwaway copy of
+        the index, never into the real one.
+push:   blocks when the commits about to leave the machine add such content. Those
+        are the commits of the refs the command pushes (refspecs, tags, --all,
+        --mirror; HEAD when none is given) that no remote-tracking ref has yet. In
+        repos that opted in (a docs/quality-reports/ directory exists at the repo
+        root), it also blocks unless the gate agent recorded approval of the tree
+        of every such ref in <git-common-dir>/gate-approved (legacy name:
+        manager-approved).
 
 Run as a Claude hook it guards Claude's own git calls against accidents. It parses
 the command text (chained and nested commands, subshells, `bash -c` / `powershell
@@ -21,8 +27,10 @@ import base64
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 EXCLUDES = [":(exclude)*.lock", ":(exclude)package-lock.json"]
 PATTERNS = [
@@ -34,11 +42,13 @@ PATTERNS = [
     ("Supabase secret key", r"sb_secret_[A-Za-z0-9_\-]{20,}"),
     ("Anthropic API key", r"sk-ant-[A-Za-z0-9_\-]{20,}"),
     ("credentials in a connection URL",
-     r"\b[a-z][a-z0-9+.\-]*://[^\s:/@'\"]+:[^\s:/@'\"]{4,}@(?!localhost|127\.0\.0\.1)[^\s/'\"]+"),
-    ("generic API key/secret/token assignment",
-     r"(?i)(api[_-]?key|secret|token|passw(?:or)?d|private[_-]?key|service[_-]?role\w*"
-     r"|access[_-]?key)[\"' ]*[:=][\"' ]*[A-Za-z0-9/+_=.\-]{16,}"),
+     r"\b[a-z][a-z0-9+.\-]*://[^\s:/@'\"]+:[^\s:/@'\"]{4,}@(?!localhost|127\.0\.0\.1)"
+     r"[^\s/:'\"]*\.[^\s/'\"]+"),
 ]
+SECRET_ASSIGNMENT = re.compile(
+    r"(?i)(?:api[_-]?key|secret|token|passw(?:or)?d|private[_-]?key|service[_-]?role\w*"
+    r"|access[_-]?key)[\"' ]*[:=][ \t]*([\"']?)[ \t]*([A-Za-z0-9/+_=.\-]{16,})(.?)")
+DOTTED_NAME = re.compile(r"^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$")
 JWT = re.compile(r"eyJ[\w-]{8,}\.(eyJ[\w-]{8,})\.[\w-]{10,}")
 
 
@@ -65,9 +75,10 @@ def deny(reason):
     sys.exit(0)
 
 
-def git(args, cwd):
+def git(args, cwd, env=None):
     try:
         result = subprocess.run(["git"] + args, cwd=cwd, capture_output=True,
+                                stdin=subprocess.DEVNULL, env=env,
                                 encoding="utf-8", errors="replace", timeout=30)
         return result.returncode, result.stdout or ""
     except Exception:
@@ -97,6 +108,14 @@ def added_lines(diff):
                      if line.startswith("+") and not line.startswith("+++"))
 
 
+def assigns_secret(text):
+    for match in SECRET_ASSIGNMENT.finditer(text):
+        quote, value, after = match.groups()
+        if quote or not (after == "(" or DOTTED_NAME.match(value)):
+            return True
+    return False
+
+
 def scan(diff, names):
     findings = []
     env_files = sorted({n for n in names
@@ -108,6 +127,8 @@ def scan(diff, names):
     for label, pattern in PATTERNS:
         if re.search(pattern, text):
             findings.append(f"possible {label} in added lines")
+    if assigns_secret(text):
+        findings.append("possible generic API key/secret/token assignment in added lines")
     for token in JWT.finditer(text):
         role = jwt_role(token.group(1))
         if role != "anon":
@@ -128,7 +149,13 @@ if [ -z "$root" ] || [ ! -f "$script" ]; then
   echo "Set {HOME_VAR} or run: git config --global pipeline.home <pipeline plugin root>" >&2
   exit 1
 fi
-exec python "$script" --pre-push "$@"
+for py in python python3; do
+  if "$py" -c 'import sys; sys.exit(sys.version_info[0] < 3)' </dev/null >/dev/null 2>&1; then
+    exec "$py" "$script" --pre-push "$@"
+  fi
+done
+echo "Push blocked: no Python 3 interpreter found on PATH (tried python, python3)." >&2
+exit 1
 """
 ZERO_SHA = "0" * 40
 
@@ -146,8 +173,8 @@ def pre_push():
             revs = [f"{remote_sha}..{local_sha}"]
         code, diff = git(["log", "-p", "-m", "--format="] + revs + ["--"] + EXCLUDES, cwd)
         if code != 0:
-            code, diff = git(["log", "-p", "-m", "--format=", local_sha, "--not", "--remotes",
-                              "--"] + EXCLUDES, cwd)
+            revs = [local_sha, "--not", "--remotes"]
+            code, diff = git(["log", "-p", "-m", "--format="] + revs + ["--"] + EXCLUDES, cwd)
         _, names = git(["log", "--name-only", "--format="] + revs, cwd)
         findings = scan(diff, names.splitlines())
         if findings:
@@ -223,6 +250,8 @@ def split_segments(command, powershell):
             current.append(char)
         elif char in ";&|\n(){}":
             segments.append("".join(current))
+            if char in "()" and not powershell:
+                segments.append(char)
             current = []
         else:
             current.append(char)
@@ -278,7 +307,15 @@ def inline_script(tokens, flags):
 def find_git_ops(command, powershell, steps=None, ops=None):
     steps = [] if steps is None else steps
     ops = [] if ops is None else ops
+    subshells = []
     for segment in split_segments(command, powershell):
+        if segment == "(":
+            subshells.append(len(steps))
+            continue
+        if segment == ")":
+            if subshells:
+                del steps[subshells.pop():]
+            continue
         tokens = tokenize(segment, powershell)
         while tokens and (tokens[0][0].lower() in WRAPPERS
                           or (not powershell and ASSIGNMENT.match(tokens[0][0]))):
@@ -312,10 +349,28 @@ def find_git_ops(command, powershell, steps=None, ops=None):
                 rest = rest[2:]
             else:
                 rest = rest[1:]
-        if rest and rest[0][0] in ("commit", "push"):
-            ops.append({"op": rest[0][0], "steps": steps + local,
-                        "args": [t[0] for t in rest[1:]]})
+        if rest:
+            ops.append({"op": rest[0][0], "steps": steps + local, "tokens": rest[1:]})
     return ops
+
+
+def shell_quote(text):
+    return "'" + text.replace("'", "'\\''") + "'"
+
+
+def expand_alias(item, cwd, top):
+    code, alias = git(["config", "--get", "alias." + item["op"]], cwd)
+    alias = alias.strip()
+    if code != 0 or not alias:
+        return []
+    _, builtins = git(["--list-cmds=builtins"], cwd)
+    if item["op"] in builtins.split():
+        return []
+    if alias.startswith("!"):
+        script = alias[1:] + "".join(" " + shell_quote(text) for text, _ in item["tokens"])
+        return find_git_ops(script, False, [(top, True)])
+    tokens = tokenize(alias, False) + item["tokens"]
+    return [{"op": tokens[0][0], "steps": item["steps"], "tokens": tokens[1:]}]
 
 
 def resolve_cwd(steps, base, powershell):
@@ -327,53 +382,237 @@ def resolve_cwd(steps, base, powershell):
     return cwd
 
 
-def commit_reason(cwd, args):
-    _, names = git(["diff", "--cached", "--name-only"], cwd)
-    _, diff = git(["diff", "--cached", "--"] + EXCLUDES, cwd)
-    if any(a == "--all" or re.match(r"^-[a-zA-Z]*a[a-zA-Z]*$", a) for a in args):
-        _, unstaged = git(["diff", "--"] + EXCLUDES, cwd)
-        diff += "\n" + unstaged
+UNVERIFIABLE = ("Cannot verify what this git {op} includes: {what} uses a command substitution "
+                "or a variable, which this check cannot expand. Use a literal value and run it "
+                "again.")
+COMMIT_VALUE_FLAGS = "mFCct"
+COMMIT_ATTACHED_FLAGS = "Su"
+COMMIT_VALUE_OPTIONS = {"--message", "--file", "--reuse-message", "--reedit-message", "--template",
+                        "--author", "--date", "--cleanup", "--fixup", "--squash", "--trailer",
+                        "--pathspec-from-file"}
+ADD_INTERACTIVE = {"-p", "-i", "-e", "--patch", "--interactive", "--edit"}
+PUSH_VALUE_OPTIONS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
+MAX_ALIAS_EXPANSIONS = 10
+
+
+def expanded(token):
+    text, literal = token
+    return not literal and ("$" in text or "`" in text)
+
+
+def add_args(tokens):
+    paths, index = [], 0
+    while index < len(tokens):
+        text = tokens[index][0]
+        if text == "--":
+            paths += tokens[index + 1:]
+            break
+        if not text.startswith("-") or text == "-":
+            paths.append(tokens[index])
+        index += 1
+    if any(expanded(token) for token in paths):
+        return None
+    if any(token[0] in ADD_INTERACTIVE for token in tokens):
+        return ["-A"]
+    return [token[0] for token in tokens]
+
+
+def parse_commit(tokens):
+    stage, paths, index = [], [], 0
+    while index < len(tokens):
+        text = tokens[index][0]
+        if text == "--":
+            paths += tokens[index + 1:]
+            break
+        if text.startswith("--"):
+            name = text.split("=", 1)[0]
+            if name == "--all":
+                stage.append(["-u"])
+            elif name == "--pathspec-from-file":
+                stage.append(["-A"])
+            if name in COMMIT_VALUE_OPTIONS and "=" not in text:
+                index += 1
+        elif text.startswith("-") and len(text) > 1:
+            for position, flag in enumerate(text[1:], 1):
+                if flag == "a":
+                    stage.append(["-u"])
+                if flag in COMMIT_ATTACHED_FLAGS:
+                    break
+                if flag in COMMIT_VALUE_FLAGS:
+                    if position == len(text) - 1:
+                        index += 1
+                    break
+        else:
+            paths.append(tokens[index])
+        index += 1
+    if any(expanded(token) for token in paths):
+        return None
+    if paths:
+        stage.append(["--"] + [token[0] for token in paths])
+    return stage
+
+
+def index_env(cwd, adds):
+    _, index_path = git(["rev-parse", "--git-path", "index"], cwd)
+    real = os.path.abspath(os.path.join(cwd or os.getcwd(), index_path.strip()))
+    handle, copy = tempfile.mkstemp(prefix="secretscan-index-")
+    os.close(handle)
+    if os.path.exists(real):
+        shutil.copyfile(real, copy)
+    else:
+        os.remove(copy)
+    env = dict(os.environ, GIT_INDEX_FILE=copy)
+    for add_cwd, args in adds:
+        git(["add"] + args, add_cwd, env)
+    return env, copy
+
+
+def commit_reason(cwd, adds):
+    env, copy = index_env(cwd, adds) if adds else (None, None)
+    try:
+        _, names = git(["diff", "--cached", "--name-only"], cwd, env)
+        _, diff = git(["diff", "--cached", "--"] + EXCLUDES, cwd, env)
+    finally:
+        if copy:
+            for leftover in (copy, copy + ".lock"):
+                if os.path.exists(leftover):
+                    os.remove(leftover)
     findings = scan(diff, names.splitlines())
     if findings:
         return ("Secret scan blocked this commit. Findings:\n- " + "\n- ".join(findings)
-                + "\n\nRemove the secret from the staged changes and try again. "
-                  "For a false positive, unstage that file/line and commit the rest.")
+                + "\n\nRemove the secret from the changes this commit records (staged, staged "
+                  "by the same command, or named in it) and try again. For a false positive, "
+                  "leave that file/line out and commit the rest.")
     return None
 
 
-def push_reason(cwd, top, args):
-    if any(a == "--dry-run" or re.match(r"^-[a-zA-Z]*n[a-zA-Z]*$", a) for a in args):
+def parse_push(tokens):
+    flags, positional, index = set(), [], 0
+    while index < len(tokens):
+        text = tokens[index][0]
+        if text == "--":
+            positional += tokens[index + 1:]
+            break
+        if text.startswith("--"):
+            name = text.split("=", 1)[0]
+            flags.add(name)
+            if name in PUSH_VALUE_OPTIONS and "=" not in text:
+                index += 1
+        elif text.startswith("-") and len(text) > 1:
+            flags.update("-" + flag for flag in text[1:])
+            if text in PUSH_VALUE_OPTIONS:
+                index += 1
+        else:
+            positional.append(tokens[index])
+        index += 1
+    refspecs = positional if "--repo" in flags else positional[1:]
+    return flags, refspecs
+
+
+def commit_refs(cwd, patterns):
+    _, out = git(["for-each-ref", "--format=%(objecttype)\t%(objectname)\t%(*objecttype)\t"
+                  "%(*objectname)\t%(refname)"] + patterns, cwd)
+    refs = []
+    for line in out.splitlines():
+        fields = line.split("\t")
+        if len(fields) != 5:
+            continue
+        kind, sha, peeled_kind, peeled, name = fields
+        if kind == "commit":
+            refs.append((name, sha))
+        elif kind == "tag" and peeled_kind == "commit":
+            refs.append((name, peeled))
+    return refs
+
+
+def push_sources(cwd, flags, refspecs):
+    every_branch = flags & {"--all", "--branches", "--mirror"}
+    every_tag = flags & {"--tags", "--mirror"}
+    sources = []
+    if every_branch:
+        sources += commit_refs(cwd, ["refs/heads"])
+    if every_tag:
+        sources += commit_refs(cwd, ["refs/tags"])
+    texts, index = [], 0
+    while index < len(refspecs):
+        if expanded(refspecs[index]):
+            return None
+        text = refspecs[index][0]
+        if text == "tag" and index + 1 < len(refspecs):
+            if expanded(refspecs[index + 1]):
+                return None
+            text = "refs/tags/" + refspecs[index + 1][0]
+            index += 1
+        texts.append(text)
+        index += 1
+    for text in texts:
+        source = text.lstrip("+").split(":", 1)[0]
+        if not source:
+            continue
+        if "*" in source:
+            sources += commit_refs(cwd, [source, "refs/heads/" + source])
+            continue
+        code, sha = git(["rev-parse", "--verify", "--quiet", source + "^{commit}"], cwd)
+        if code == 0 and sha.strip():
+            sources.append((source, sha.strip()))
+    if not texts and not every_branch and not every_tag:
+        code, sha = git(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], cwd)
+        if code == 0 and sha.strip():
+            sources.append(("HEAD", sha.strip()))
+    return sources
+
+
+def approved_trees(cwd):
+    _, common = git(["rev-parse", "--git-common-dir"], cwd)
+    git_dir = os.path.abspath(os.path.join(cwd or os.getcwd(), common.strip()))
+    approved = set()
+    # manager-approved is the pre-rename file name; keep honoring approvals already recorded there
+    for name in ("gate-approved", "manager-approved"):
+        path = os.path.join(git_dir, name)
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as handle:
+                approved |= {line.split()[0] for line in handle if line.split()}
+    return approved, os.path.join(git_dir, "gate-approved")
+
+
+def push_reason(cwd, top, tokens):
+    flags, refspecs = parse_push(tokens)
+    if flags & {"--dry-run", "-n", "--delete", "-d"}:
         return None
-    _, unpushed = git(["rev-list", "HEAD", "--not", "--remotes"], cwd)
-    if unpushed.strip():
-        _, diff = git(["log", "-p", "-m", "--format=", "HEAD", "--not", "--remotes", "--"]
-                      + EXCLUDES, cwd)
-        _, names = git(["log", "--name-only", "--format=", "HEAD", "--not", "--remotes"], cwd)
-        findings = scan(diff, names.splitlines())
-        if findings:
-            return ("Secret scan blocked this push: the commits about to leave this machine "
-                    "contain:\n- " + "\n- ".join(findings)
-                    + "\n\nRemoving it in a later commit is not enough because it stays in "
-                      "the history being pushed. Rewrite the affected local commits first.")
+    sources = push_sources(cwd, flags, refspecs)
+    if sources is None:
+        return UNVERIFIABLE.format(op="push", what="a ref in the command")
+    outgoing = []
+    for name, sha in sources:
+        _, count = git(["rev-list", "--count", sha, "--not", "--remotes"], cwd)
+        if count.strip() not in ("", "0"):
+            outgoing.append((name, sha))
+    if not outgoing:
+        return None
+    shas = sorted({sha for _, sha in outgoing})
+    _, diff = git(["log", "-p", "-m", "--format="] + shas + ["--not", "--remotes", "--"]
+                  + EXCLUDES, cwd)
+    _, names = git(["log", "--name-only", "--format="] + shas + ["--not", "--remotes"], cwd)
+    findings = scan(diff, names.splitlines())
+    if findings:
+        return ("Secret scan blocked this push: the commits about to leave this machine "
+                "contain:\n- " + "\n- ".join(findings)
+                + "\n\nRemoving it in a later commit is not enough because it stays in "
+                  "the history being pushed. Rewrite the affected local commits first.")
     if os.path.isdir(os.path.join(top, "docs", "quality-reports")):
-        _, tree = git(["rev-parse", "HEAD^{tree}"], cwd)
-        _, common = git(["rev-parse", "--git-common-dir"], cwd)
-        git_dir = os.path.abspath(os.path.join(cwd or os.getcwd(), common.strip()))
-        approvals = os.path.join(git_dir, "gate-approved")
-        approved = set()
-        # manager-approved is the pre-rename file name; keep honoring approvals already recorded there
-        for name in ("gate-approved", "manager-approved"):
-            path = os.path.join(git_dir, name)
-            if os.path.exists(path):
-                with open(path, encoding="utf-8") as handle:
-                    approved |= {line.split()[0] for line in handle if line.split()}
-        if tree.strip() not in approved:
+        approved, approvals = approved_trees(cwd)
+        missing = []
+        for name, sha in outgoing:
+            _, tree = git(["rev-parse", sha + "^{tree}"], cwd)
+            if tree.strip() not in approved:
+                missing.append(f"{name} (tree {tree.strip()[:12]})")
+        if missing:
             return ("Push blocked: this project requires the gate agent's approval before "
-                    "anything leaves the machine, and the current tree (" + tree.strip()[:12]
-                    + ") has none recorded. Run the gate (manager skill, step 4); on "
-                      "APPROVED it records the tree in " + approvals + ". Commits made after "
-                      "the approval need a new one. To push without this flow, run git push "
-                      "yourself in a terminal.")
+                    "anything leaves the machine, and these refs have none recorded: "
+                    + ", ".join(missing) + ". Run the gate (manager skill, step 4); on "
+                    "APPROVED it records the tree in " + approvals + ". Commits made after "
+                    "the approval need a new one. To push without this flow, run git push "
+                    "yourself in a terminal.")
     return None
 
 
@@ -390,9 +629,19 @@ def main():
     command = (payload.get("tool_input") or {}).get("command", "") or ""
     powershell = payload.get("tool_name") == "PowerShell"
     base = payload.get("cwd") or None
-    for item in find_git_ops(command, powershell):
+    pending, unknown_add = {}, False
+    queue, expansions = find_git_ops(command, powershell), 0
+    while queue:
+        item = queue.pop(0)
+        if item["op"] == "stage":
+            item["op"] = "add"
+        guarded = item["op"] in ("commit", "push")
         cwd = resolve_cwd(item["steps"], base, powershell)
         if cwd is None:
+            if item["op"] == "add":
+                unknown_add = True
+            if not guarded:
+                continue
             deny("Cannot verify which repository this git " + item["op"] + " targets: the path "
                  "in the command uses a command substitution or a variable not set in the "
                  "environment. Use a literal path (or cd to it in a separate command) and run "
@@ -400,10 +649,28 @@ def main():
         code, top = git(["rev-parse", "--show-toplevel"], cwd)
         if code != 0:
             continue
+        top = top.strip()
+        if item["op"] == "add":
+            args = add_args(item["tokens"])
+            if args is None:
+                unknown_add = True
+            else:
+                pending.setdefault(top, []).append((cwd, args))
+            continue
+        if not guarded:
+            if expansions < MAX_ALIAS_EXPANSIONS:
+                expansions += 1
+                queue[:0] = expand_alias(item, cwd, top)
+            continue
         if item["op"] == "commit":
-            reason = commit_reason(cwd, item["args"])
+            stage = parse_commit(item["tokens"])
+            if unknown_add:
+                deny(UNVERIFIABLE.format(op="commit", what="a git add earlier in the command"))
+            if stage is None:
+                deny(UNVERIFIABLE.format(op="commit", what="a path in the command"))
+            reason = commit_reason(cwd, pending.get(top, []) + [(cwd, args) for args in stage])
         else:
-            reason = push_reason(cwd, top.strip(), item["args"])
+            reason = push_reason(cwd, top, item["tokens"])
         if reason:
             deny(reason)
     allow()

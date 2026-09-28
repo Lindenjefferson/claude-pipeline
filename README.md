@@ -31,7 +31,7 @@ discovery → brainstorming → plano → dev / db → docs + revisores → gate
 | `pipeline:design` | Consistência de UI e acessibilidade. |
 | `pipeline:qa` | Roda os testes e valida os critérios de aceite de ponta a ponta. |
 | `pipeline:gate` | Verificação final e relatório de qualidade. |
-| Hook de segredos | Bloqueia `git commit` e `git push` do Claude que contenham segredos e exige a aprovação do `gate` para o push em projetos com `docs/quality-reports/`. |
+| Hook de segredos | Bloqueia `git commit` e `git push` do Claude que contenham segredos e exige a aprovação do `gate` para o push em projetos com `docs/quality-reports/`. No commit, considera também o que o mesmo comando adiciona (`git add ... && git commit`), os arquivos passados ao commit e o `-a`; no push, os refs enviados (refspecs, tags, `--all`), não só o `HEAD`. Entende aliases do git. |
 
 ### Ledger
 
@@ -39,12 +39,12 @@ Cada entrega tem um ledger em `.superpowers/ledger.jsonl`, escrito só pelo `led
 
 ### Relatórios de qualidade
 
-Toda entrega aprovada gera `docs/quality-reports/<data>-<slug>.md` e uma linha em `docs/quality-reports/history.jsonl`, com notas por dimensão (segurança, auditoria, design, code review e testes) calculadas a partir do ledger. Isso permite acompanhar a evolução da qualidade do projeto ao longo do tempo.
+Toda entrega aprovada gera `docs/quality-reports/<data>-<slug>.md` e uma linha em `docs/quality-reports/history.jsonl`, com notas por dimensão (segurança, auditoria, design, code review, banco de dados e testes) calculadas a partir do ledger. Isso permite acompanhar a evolução da qualidade do projeto ao longo do tempo.
 
 ## Requisitos
 
 - Claude Code com suporte a plugins.
-- Python 3 e git no `PATH`.
+- Python 3 (como `python` ou `python3`) e git no `PATH`. Sem Python 3, o hook do Claude avisa no stderr e deixa passar, e o `pre-push` bloqueia.
 - Plugin [`superpowers`](https://github.com/obra/superpowers), instalado do marketplace oficial (`superpowers@claude-plugins-official`) e declarado como dependência.
 - Opcional: [graphify](https://github.com/Graphify-Labs/graphify) (`pip install graphifyy`) para o grafo de conhecimento do projeto.
 
@@ -116,6 +116,8 @@ for t in plugins/pipeline/hooks/tests/test_*.py plugins/pipeline/skills/manager/
 Observações:
 
 - O hook `pre-push` que o `kickoff` instala em cada projeto não guarda caminho: ele localiza o scanner pela variável `CLAUDE_PIPELINE_HOME` ou por `git config pipeline.home` (raiz do plugin, isto é, `<clone>/plugins/pipeline`). Configure uma vez por máquina com `git config --global pipeline.home "<clone>/plugins/pipeline"`. Se o clone mudar de lugar, só esse valor muda, sem reinstalar o hook nos projetos. Se o scanner não for encontrado, o push é bloqueado com uma mensagem, nunca liberado em silêncio.
+- Projetos com o `pre-push` instalado antes da 1.2.0 chamam `python` fixo: rode de novo `python "<clone>/plugins/pipeline/hooks/pre-commit-secret-scan.py" --install-pre-push` em cada um para trocar pelo shim novo (ele só sobrescreve o hook que ele mesmo instalou).
+- O registro de aprovação (`<git-common-dir>/gate-approved`) protege contra acidentes, não contra um agente mal-intencionado: qualquer processo com shell no repositório pode escrever nele. Quem garante a aprovação é o fluxo do `manager`, não o arquivo.
 - Instalações feitas a partir do GitHub ficam fixas na `version` de `plugin.json`: aumente a versão a cada release para que `claude plugin update` traga as mudanças.
 - Os arquivos são mantidos em LF (`.gitattributes`).
 
