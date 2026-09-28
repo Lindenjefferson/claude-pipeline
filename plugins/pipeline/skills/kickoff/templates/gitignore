@@ -1,0 +1,17 @@
+# secrets
+.env
+.env.*
+!.env.example
+*.pem
+
+# knowledge graph (rebuilt locally, never committed)
+graphify-out/
+
+# os / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+
+# superpowers workspace (ledgers, reviews)
+.superpowers/

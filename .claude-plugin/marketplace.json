@@ -1,0 +1,14 @@
+{
+  "name": "linde-local",
+  "owner": {
+    "name": "linde"
+  },
+  "plugins": [
+    {
+      "name": "pipeline",
+      "source": "./plugins/pipeline",
+      "description": "Personal multi-agent delivery pipeline (agents, manager, kickoff, secret-scan hook), enabled per repo."
+    }
+  ],
+  "description": "Personal plugins, enabled per repo."
+}
