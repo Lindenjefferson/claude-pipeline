@@ -2,15 +2,13 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
             "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-commit-secret-scan.py\"",
-            "if": "Bash(git *)",
             "shell": "bash",
-            "timeout": 20,
-            "statusMessage": "Scanning staged diff for secrets..."
+            "timeout": 20
           }
         ]
       }

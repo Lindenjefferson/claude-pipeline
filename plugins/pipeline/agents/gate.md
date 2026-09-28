@@ -29,6 +29,8 @@ If a required reviewer has no ledger entry covering the diff, that alone is a BL
 
 **Coverage rule.** For each required reviewer, every commit in `<base>..HEAD` that touches files in that reviewer's row must fall inside the `from..head` range of one of that reviewer's entries, and for that (task, agent) the latest entry must be PASS. A commit outside every passing range (for example, a fix committed after the review) is uncovered: list its SHA and the reviewer that has to re-run. The only commit allowed after the last review is the quality-report commit you stage yourself.
 
+**Invalid ledger lines block.** `ledger.py` validates every line it appends, so a non-empty `invalid` list in `status --json` means the ledger was written around the tool. Each such line is a BLOCKED item owned by the `manager`, naming the line number and reason, and the entries it would have held count as missing.
+
 **Trust but verify the ledger.** The controller appends ledger lines from the agents' reports. For every entry you rely on, open its `report` file and confirm the verdict and finding counts match. A mismatch or a missing report file is a BLOCKED: the ledger cannot be trusted for that entry.
 
 ## Checklist before approving

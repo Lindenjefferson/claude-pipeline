@@ -7,25 +7,109 @@ import sys
 import time
 
 SEVERITIES = ("critical", "important", "minor")
+IMPLEMENTER_VERDICTS = ("DONE", "DONE_WITH_CONCERNS", "NEEDS_CONTEXT", "BLOCKED", "NO_DOC_CHANGE_NEEDED")
+REVIEWER_VERDICTS = ("PASS", "FAIL")
+AGENT_VERDICTS = {
+    "discovery": IMPLEMENTER_VERDICTS,
+    "dev": IMPLEMENTER_VERDICTS,
+    "docs": IMPLEMENTER_VERDICTS,
+    "db": IMPLEMENTER_VERDICTS + REVIEWER_VERDICTS,
+    "security": REVIEWER_VERDICTS,
+    "audit": REVIEWER_VERDICTS,
+    "design": REVIEWER_VERDICTS,
+    "code-review": REVIEWER_VERDICTS,
+    "qa": REVIEWER_VERDICTS,
+}
+NOTE_KINDS = ("ruling", "deferred", "parked", "condition")
 
 
 def now():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def read_entries(path):
+def git(*args):
+    result = subprocess.run(["git", *args], capture_output=True, encoding="utf-8", errors="replace")
+    return result.returncode, (result.stdout or "").strip()
+
+
+def resolve_commit(rev):
+    code, sha = git("rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}")
+    return sha if code == 0 and sha else None
+
+
+def counts_problem(entry, field):
+    value = entry.get(field)
+    if not isinstance(value, dict):
+        return f"'{field}' must be an object with {', '.join(SEVERITIES)}"
+    for severity in SEVERITIES:
+        count = value.get(severity)
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            return f"'{field}.{severity}' must be a non-negative integer"
+    extra = set(value) - set(SEVERITIES)
+    if extra:
+        return f"'{field}' has unknown keys: {', '.join(sorted(extra))}"
+    return None
+
+
+def verdict_problem(entry):
+    agent, verdict = entry.get("agent"), entry.get("verdict")
+    if agent not in AGENT_VERDICTS:
+        return f"unknown agent '{agent}' (expected one of: {', '.join(AGENT_VERDICTS)})"
+    if verdict not in AGENT_VERDICTS[agent]:
+        return f"verdict '{verdict}' is not valid for {agent} (expected one of: {', '.join(AGENT_VERDICTS[agent])})"
+    if verdict in REVIEWER_VERDICTS:
+        for field in ("new", "open"):
+            problem = counts_problem(entry, field)
+            if problem:
+                return problem
+        blocking = entry["open"]["critical"] + entry["open"]["important"]
+        if verdict == "PASS" and blocking:
+            return "PASS with open critical/important findings; the verdict must be FAIL"
+        if verdict == "FAIL" and not blocking:
+            return "FAIL with no open critical/important finding; the verdict must be PASS"
+    return None
+
+
+def entry_problem(entry):
+    if not isinstance(entry, dict):
+        return "not a JSON object"
+    event = entry.get("event")
+    if event == "start":
+        return None if entry.get("slug") and entry.get("base") else "start entry lacks slug or base"
+    if event == "note":
+        if entry.get("kind") not in NOTE_KINDS or not entry.get("task") or not entry.get("text"):
+            return "note entry lacks a valid kind, task or text"
+        return None
+    for field in ("task", "from", "head", "round", "report"):
+        if not entry.get(field):
+            return f"agent entry lacks '{field}'"
+    return verdict_problem(entry)
+
+
+def read_ledger(path):
     if not os.path.exists(path):
         sys.exit(f"ledger not found: {path} (run 'start' first)")
-    entries = []
+    entries, invalid = [], []
     with open(path, encoding="utf-8") as handle:
         for number, line in enumerate(handle, 1):
             if not line.strip():
                 continue
             try:
-                entries.append(json.loads(line))
+                entry = json.loads(line)
             except ValueError:
-                sys.exit(f"{path}:{number}: invalid JSON")
-    return entries
+                invalid.append({"line": number, "reason": "invalid JSON"})
+                continue
+            problem = entry_problem(entry)
+            if problem:
+                invalid.append({"line": number, "reason": problem})
+            else:
+                entries.append(entry)
+    return entries, invalid
+
+
+def warn_invalid(path, invalid):
+    for item in invalid:
+        sys.stderr.write(f"warning: {path}:{item['line']} ignored: {item['reason']}\n")
 
 
 def write_line(path, entry):
@@ -37,7 +121,10 @@ def write_line(path, entry):
 def start(args):
     if os.path.exists(args.ledger):
         sys.exit(f"ledger already exists: {args.ledger}")
-    write_line(args.ledger, {"event": "start", "ts": now(), "slug": args.slug, "base": args.base})
+    base = resolve_commit(args.base)
+    if not base:
+        sys.exit(f"--base is not a commit: {args.base}")
+    write_line(args.ledger, {"event": "start", "ts": now(), "slug": args.slug, "base": base})
 
 
 def append(args):
@@ -48,22 +135,32 @@ def append(args):
         entry = json.loads(raw)
     except ValueError:
         sys.exit("agent line is not valid JSON")
-    for field in ("agent", "verdict"):
-        if not entry.get(field):
-            sys.exit(f"agent line lacks '{field}'")
-    earlier = [e for e in read_entries(args.ledger)
-               if e.get("agent") == entry["agent"] and e.get("task") == args.task]
-    entry.update({"ts": now(), "task": args.task, "from": args.from_sha, "head": args.head,
+    if not isinstance(entry, dict):
+        sys.exit("agent line is not a JSON object")
+    problem = verdict_problem(entry)
+    if problem:
+        sys.exit(f"agent line rejected: {problem}")
+    from_sha, head = resolve_commit(args.from_sha), resolve_commit(args.head)
+    if not from_sha:
+        sys.exit(f"--from is not a commit: {args.from_sha}")
+    if not head:
+        sys.exit(f"--head is not a commit: {args.head}")
+    if git("merge-base", "--is-ancestor", from_sha, head)[0] != 0:
+        sys.exit(f"--from {args.from_sha} is not an ancestor of --head {args.head}")
+    if not os.path.isfile(args.report):
+        sys.exit(f"--report does not exist: {args.report} (save the agent's report first)")
+    entries, invalid = read_ledger(args.ledger)
+    warn_invalid(args.ledger, invalid)
+    earlier = [e for e in entries if e.get("agent") == entry["agent"] and e.get("task") == args.task]
+    entry.update({"ts": now(), "task": args.task, "from": from_sha, "head": head,
                   "round": len(earlier) + 1, "report": args.report})
     write_line(args.ledger, entry)
     print(f"{entry['agent']} {entry['verdict']} task={args.task} round={entry['round']}")
 
 
-NOTE_KINDS = ("ruling", "deferred", "parked", "condition")
-
-
 def note(args):
-    read_entries(args.ledger)
+    _, invalid = read_ledger(args.ledger)
+    warn_invalid(args.ledger, invalid)
     write_line(args.ledger, {"event": "note", "ts": now(), "kind": args.kind,
                              "task": args.task, "text": args.text})
     print(f"note {args.kind} task={args.task}")
@@ -85,17 +182,14 @@ def summarize(entries):
 
 
 def commits_after(entry_head, head):
-    result = subprocess.run(["git", "rev-list", "--count", f"{entry_head}..{head}"],
-                            capture_output=True, encoding="utf-8", errors="replace")
-    if result.returncode != 0:
-        return None
-    return int(result.stdout.strip() or 0)
+    code, count = git("rev-list", "--count", f"{entry_head}..{head}")
+    return int(count or 0) if code == 0 else None
 
 
 def stale_entries(latest, head):
     stale = []
     for entry in latest:
-        if "new" not in entry:
+        if entry.get("verdict") not in REVIEWER_VERDICTS:
             continue
         behind = commits_after(entry.get("head"), head)
         if behind != 0:
@@ -105,18 +199,20 @@ def stale_entries(latest, head):
 
 
 def status(args):
-    entries = read_entries(args.ledger)
+    entries, invalid = read_ledger(args.ledger)
     latest, totals = summarize(entries)
     notes = [{k: e[k] for k in ("kind", "task", "text", "ts")} for e in entries
              if e.get("event") == "note"]
     stale = stale_entries(latest, args.head) if args.head else []
     behind = {(s["task"], s["agent"]): s["commits_after"] for s in stale}
     if args.json:
-        report = {"latest": latest, "totals": totals, "notes": notes}
+        report = {"latest": latest, "totals": totals, "notes": notes, "invalid": invalid}
         if args.head:
             report["stale"] = stale
         print(json.dumps(report, indent=2))
         return
+    for item in invalid:
+        print(f"INVALID line {item['line']}: {item['reason']} (ignored)")
     for entry in latest:
         key = (entry["task"], entry["agent"])
         flag = ""

@@ -3,6 +3,9 @@
   "owner": {
     "name": "linde"
   },
+  "allowCrossMarketplaceDependenciesOn": [
+    "claude-plugins-official"
+  ],
   "plugins": [
     {
       "name": "pipeline",

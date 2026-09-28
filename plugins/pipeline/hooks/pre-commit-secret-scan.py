@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse hook for Claude Code Bash calls that run `git commit` or `git push`.
+"""PreToolUse hook for Claude Code Bash and PowerShell calls that run `git commit` or `git push`.
 
 commit: blocks when the staged diff (plus tracked changes for `commit -a`) adds a
         secret-looking string or an .env-style file.
@@ -8,9 +8,11 @@ push:   blocks when the commits about to leave the machine add such content, and
         root), blocks unless the gate agent recorded approval of the current tree
         in <git-common-dir>/gate-approved (legacy name: manager-approved).
 
-Run as a Claude hook it guards Claude's own git calls against accidents; it reads
-only the command text, so a script that calls git inside is not seen, and it does
-not affect commands typed in a user terminal. `--install-pre-push` writes a real
+Run as a Claude hook it guards Claude's own git calls against accidents. It parses
+the command text (chained and nested commands, subshells, `bash -c` / `powershell
+-Command`, env prefixes, wrappers, full paths to git, git's global options), so a
+script file that calls git inside is not seen, and commands typed in a user terminal
+are not affected. `--install-pre-push` writes a real
 git pre-push hook that runs `--pre-push`: the same secret scan on the outgoing
 commits, enforced by git however push is invoked (approval gate not included).
 Fails open on any internal error or outside a git repo. As a Claude hook it is wired
@@ -72,13 +74,15 @@ def git(args, cwd):
         return 1, ""
 
 
-def resolve_path(path, base):
-    single_quoted = path.startswith("'")
-    path = path.strip("\"'")
-    if "`" in path or "$(" in path:
+def resolve_path(path, literal, base, powershell):
+    if "`" in path and not powershell or "$(" in path:
         return None
-    if not single_quoted:
-        path = os.path.expandvars(path)
+    if not literal:
+        if powershell:
+            path = re.sub(r"\$env:([A-Za-z_][A-Za-z0-9_]*)",
+                          lambda m: os.environ.get(m.group(1), m.group(0)), path)
+        else:
+            path = os.path.expandvars(path)
     if "$" in path:
         return None
     msys = re.match(r"^/([a-zA-Z])/(.*)", path)
@@ -162,59 +166,171 @@ def install_pre_push():
     sys.exit(0)
 
 
-def main():
-    if "--pre-push" in sys.argv:
-        pre_push()
-    if "--install-pre-push" in sys.argv:
-        install_pre_push()
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        allow()
+SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
+POWERSHELLS = {"powershell", "pwsh"}
+WRAPPERS = {"command", "builtin", "exec", "nohup", "time", "env", "sudo", "noglob", "&", "."}
+CD_BASH = {"cd", "pushd"}
+CD_POWERSHELL = {"cd", "chdir", "set-location", "sl", "pushd", "push-location"}
+GIT_VALUE_OPTIONS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path",
+                     "--super-prefix", "--config-env", "--list-cmds"}
+ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+BASH_ESCAPABLE_IN_QUOTES = '$`"\\\n'
+BASH_ESCAPABLE = BASH_ESCAPABLE_IN_QUOTES + " \t'&|;()<>{}*?[]#~!"
 
-    command = (payload.get("tool_input") or {}).get("command", "") or ""
-    match = re.search(
-        r"(^|[;&|]\s*)git\s+((?:-C\s+(?:\"[^\"]+\"|'[^']+'|\S+)\s+)*)(commit|push)\b",
-        command)
-    if not match:
-        allow()
-    op = match.group(3)
 
-    cwd = payload.get("cwd") or None
-    steps = re.findall(r"(?:^|[;&|]\s*)cd\s+(\"[^\"]+\"|'[^']+'|[^\s;&|]+)\s*(?:&&|;)",
-                       command[:match.start(3)])
-    dash_c = re.search(r"-C\s+(\"[^\"]+\"|'[^']+'|\S+)", match.group(2) or "")
-    if dash_c:
-        steps.append(dash_c.group(1))
-    for step in steps:
-        cwd = resolve_path(step, cwd)
+def is_escape(text, index, powershell, quoted):
+    if index + 1 >= len(text):
+        return False
+    if powershell:
+        return text[index] == "`"
+    if text[index] != "\\":
+        return False
+    return text[index + 1] in (BASH_ESCAPABLE_IN_QUOTES if quoted else BASH_ESCAPABLE)
+
+
+def split_segments(command, powershell):
+    segments, current, quote, index = [], [], None, 0
+    while index < len(command):
+        char = command[index]
+        if quote:
+            current.append(char)
+            if quote == '"' and is_escape(command, index, powershell, True):
+                current.append(command[index + 1])
+                index += 1
+            elif char == quote:
+                quote = None
+        elif is_escape(command, index, powershell, False):
+            if command[index + 1] != "\n":
+                current.extend(command[index:index + 2])
+            index += 1
+        elif char in "'\"":
+            quote = char
+            current.append(char)
+        elif char == "{" and current and current[-1] == "$":
+            current.append(char)
+        elif char in ";&|\n(){}":
+            segments.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+        index += 1
+    segments.append("".join(current))
+    return [s.strip() for s in segments if s.strip()]
+
+
+def tokenize(segment, powershell):
+    tokens, text, literal, started, quote, index = [], [], False, False, None, 0
+    while index < len(segment):
+        char = segment[index]
+        if quote:
+            if char == quote:
+                quote = None
+            elif quote == '"' and is_escape(segment, index, powershell, True):
+                text.append(segment[index + 1])
+                index += 1
+            else:
+                text.append(char)
+        elif char in "'\"":
+            quote, started = char, True
+            literal = literal or char == "'"
+        elif not powershell and is_escape(segment, index, powershell, False):
+            text.append(segment[index + 1])
+            started = True
+            index += 1
+        elif char.isspace():
+            if started:
+                tokens.append(("".join(text), literal))
+            text, literal, started = [], False, False
+        else:
+            text.append(char)
+            started = True
+        index += 1
+    if started:
+        tokens.append(("".join(text), literal))
+    return tokens
+
+
+def program(token):
+    name = re.split(r"[\\/]", token)[-1].lower()
+    return name[:-4] if name.endswith(".exe") else name
+
+
+def inline_script(tokens, flags):
+    for position, (text, _) in enumerate(tokens[:-1]):
+        if text.lower() in flags:
+            return tokens[position + 1][0]
+    return None
+
+
+def find_git_ops(command, powershell, steps=None, ops=None):
+    steps = [] if steps is None else steps
+    ops = [] if ops is None else ops
+    for segment in split_segments(command, powershell):
+        tokens = tokenize(segment, powershell)
+        while tokens and (tokens[0][0].lower() in WRAPPERS
+                          or (not powershell and ASSIGNMENT.match(tokens[0][0]))):
+            tokens = tokens[1:]
+        if not tokens:
+            continue
+        name = program(tokens[0][0])
+        if name in SHELLS:
+            script = inline_script(tokens[1:], {"-c"})
+            if script:
+                find_git_ops(script, False, list(steps), ops)
+            continue
+        if name in POWERSHELLS:
+            script = inline_script(tokens[1:], {"-c", "-command"})
+            if script:
+                find_git_ops(script, True, list(steps), ops)
+            continue
+        if name in (CD_POWERSHELL if powershell else CD_BASH):
+            paths = [t for t in tokens[1:] if not t[0].startswith("-")]
+            if paths:
+                steps.append(paths[0])
+            continue
+        if name != "git":
+            continue
+        local, rest = [], tokens[1:]
+        while rest and rest[0][0].startswith("-"):
+            option = rest[0][0]
+            if option in GIT_VALUE_OPTIONS and len(rest) > 1:
+                if option == "-C":
+                    local.append(rest[1])
+                rest = rest[2:]
+            else:
+                rest = rest[1:]
+        if rest and rest[0][0] in ("commit", "push"):
+            ops.append({"op": rest[0][0], "steps": steps + local,
+                        "args": [t[0] for t in rest[1:]]})
+    return ops
+
+
+def resolve_cwd(steps, base, powershell):
+    cwd = base
+    for text, literal in steps:
+        cwd = resolve_path(text, literal, cwd, powershell)
         if cwd is None:
-            deny("Cannot verify which repository this git " + op + " targets: the path in "
-                 "the command uses a command substitution or a variable not set in the "
-                 "environment. Use a literal path "
-                 "(or cd to it in a separate command) and run it again.")
+            return None
+    return cwd
 
-    code, top = git(["rev-parse", "--show-toplevel"], cwd)
-    if code != 0:
-        allow()
-    top = top.strip()
 
-    if op == "commit":
-        _, names = git(["diff", "--cached", "--name-only"], cwd)
-        _, diff = git(["diff", "--cached", "--"] + EXCLUDES, cwd)
-        if re.search(r"(\s-[a-zA-Z]*a[a-zA-Z]*(\s|$))|\s--all\b", command):
-            _, unstaged = git(["diff", "--"] + EXCLUDES, cwd)
-            diff += "\n" + unstaged
-        findings = scan(diff, names.splitlines())
-        if findings:
-            deny("Secret scan blocked this commit. Findings:\n- " + "\n- ".join(findings)
-                 + "\n\nRemove the secret from the staged changes and try again. "
-                   "For a false positive, unstage that file/line and commit the rest.")
-        allow()
+def commit_reason(cwd, args):
+    _, names = git(["diff", "--cached", "--name-only"], cwd)
+    _, diff = git(["diff", "--cached", "--"] + EXCLUDES, cwd)
+    if any(a == "--all" or re.match(r"^-[a-zA-Z]*a[a-zA-Z]*$", a) for a in args):
+        _, unstaged = git(["diff", "--"] + EXCLUDES, cwd)
+        diff += "\n" + unstaged
+    findings = scan(diff, names.splitlines())
+    if findings:
+        return ("Secret scan blocked this commit. Findings:\n- " + "\n- ".join(findings)
+                + "\n\nRemove the secret from the staged changes and try again. "
+                  "For a false positive, unstage that file/line and commit the rest.")
+    return None
 
-    if re.search(r"--dry-run|\s-n(\s|$)", command):
-        allow()
 
+def push_reason(cwd, top, args):
+    if any(a == "--dry-run" or re.match(r"^-[a-zA-Z]*n[a-zA-Z]*$", a) for a in args):
+        return None
     _, unpushed = git(["rev-list", "HEAD", "--not", "--remotes"], cwd)
     if unpushed.strip():
         _, diff = git(["log", "-p", "-m", "--format=", "HEAD", "--not", "--remotes", "--"]
@@ -222,11 +338,10 @@ def main():
         _, names = git(["log", "--name-only", "--format=", "HEAD", "--not", "--remotes"], cwd)
         findings = scan(diff, names.splitlines())
         if findings:
-            deny("Secret scan blocked this push: the commits about to leave this machine "
-                 "contain:\n- " + "\n- ".join(findings)
-                 + "\n\nRemoving it in a later commit is not enough because it stays in "
-                   "the history being pushed. Rewrite the affected local commits first.")
-
+            return ("Secret scan blocked this push: the commits about to leave this machine "
+                    "contain:\n- " + "\n- ".join(findings)
+                    + "\n\nRemoving it in a later commit is not enough because it stays in "
+                      "the history being pushed. Rewrite the affected local commits first.")
     if os.path.isdir(os.path.join(top, "docs", "quality-reports")):
         _, tree = git(["rev-parse", "HEAD^{tree}"], cwd)
         _, common = git(["rev-parse", "--git-common-dir"], cwd)
@@ -240,12 +355,44 @@ def main():
                 with open(path, encoding="utf-8") as handle:
                     approved |= {line.split()[0] for line in handle if line.split()}
         if tree.strip() not in approved:
-            deny("Push blocked: this project requires the gate agent's approval before "
-                 "anything leaves the machine, and the current tree (" + tree.strip()[:12]
-                 + ") has none recorded. Run the gate (manager skill, step 4); on "
-                   "APPROVED it records the tree in " + approvals + ". Commits made after "
-                   "the approval need a new one. To push without this flow, run git push "
-                   "yourself in a terminal.")
+            return ("Push blocked: this project requires the gate agent's approval before "
+                    "anything leaves the machine, and the current tree (" + tree.strip()[:12]
+                    + ") has none recorded. Run the gate (manager skill, step 4); on "
+                      "APPROVED it records the tree in " + approvals + ". Commits made after "
+                      "the approval need a new one. To push without this flow, run git push "
+                      "yourself in a terminal.")
+    return None
+
+
+def main():
+    if "--pre-push" in sys.argv:
+        pre_push()
+    if "--install-pre-push" in sys.argv:
+        install_pre_push()
+    try:
+        payload = json.load(sys.stdin)
+    except Exception:
+        allow()
+
+    command = (payload.get("tool_input") or {}).get("command", "") or ""
+    powershell = payload.get("tool_name") == "PowerShell"
+    base = payload.get("cwd") or None
+    for item in find_git_ops(command, powershell):
+        cwd = resolve_cwd(item["steps"], base, powershell)
+        if cwd is None:
+            deny("Cannot verify which repository this git " + item["op"] + " targets: the path "
+                 "in the command uses a command substitution or a variable not set in the "
+                 "environment. Use a literal path (or cd to it in a separate command) and run "
+                 "it again.")
+        code, top = git(["rev-parse", "--show-toplevel"], cwd)
+        if code != 0:
+            continue
+        if item["op"] == "commit":
+            reason = commit_reason(cwd, item["args"])
+        else:
+            reason = push_reason(cwd, top.strip(), item["args"])
+        if reason:
+            deny(reason)
     allow()
 
 
