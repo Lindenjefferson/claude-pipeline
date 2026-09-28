@@ -1,7 +1,7 @@
 {
   "name": "linden-plugins",
   "owner": {
-    "name": "linde"
+    "name": "Lindenjefferson"
   },
   "allowCrossMarketplaceDependenciesOn": [
     "claude-plugins-official"
