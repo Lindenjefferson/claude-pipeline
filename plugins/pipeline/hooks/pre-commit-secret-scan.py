@@ -609,7 +609,7 @@ def push_reason(cwd, top, tokens):
         if missing:
             return ("Push blocked: this project requires the gate agent's approval before "
                     "anything leaves the machine, and these refs have none recorded: "
-                    + ", ".join(missing) + ". Run the gate (manager skill, step 4); on "
+                    + ", ".join(missing) + ". Run the gate (manager skill, step 5); on "
                     "APPROVED it records the tree in " + approvals + ". Commits made after "
                     "the approval need a new one. To push without this flow, run git push "
                     "yourself in a terminal.")
