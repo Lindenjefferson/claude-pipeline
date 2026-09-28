@@ -1,6 +1,6 @@
 # pipeline-marketplace
 
-Marketplace local com um plugin, `pipeline`: o fluxo multiagente pessoal. Ele é habilitado **por repo**, nunca globalmente, então projetos que não o habilitam (trabalho, eDevize) não carregam agentes, skills nem hook dele.
+Marketplace local com um plugin, `pipeline`: o fluxo multiagente pessoal. Ele é habilitado **por repo**, nunca globalmente, então projetos que não o habilitam não carregam agentes, skills nem hook dele.
 
 ## O que o plugin `pipeline` traz
 
@@ -13,7 +13,7 @@ Marketplace local com um plugin, `pipeline`: o fluxo multiagente pessoal. Ele é
 
 ## Isolamento
 
-A única chave é o plugin habilitado no repo. Sem isso, nada do plugin existe na sessão: nem agentes, nem skills, nem o hook. Os repos da eDevize não o habilitam.
+A única chave é o plugin habilitado no repo. Sem isso, nada do plugin existe na sessão: nem agentes, nem skills, nem o hook.
 
 ## O que é garantido e o que não é
 

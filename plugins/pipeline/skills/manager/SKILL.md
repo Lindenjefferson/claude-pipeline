@@ -1,6 +1,6 @@
 ---
 name: manager
-description: Use when asked to develop, implement, or deliver a module, feature, or bug fix in a personal project where the `pipeline` plugin is enabled (`claude plugin install pipeline@linde-local --scope local`). Never elsewhere: eDevize / Propunere Tehnica repos use the edevize-* skills. Orchestrates the agents, keeps the delivery ledger that syncs them, and ends at the `gate` agent. Triggers on "manager", "desenvolver módulo", "implementar módulo", "nova feature", "corrigir bug", "deliver".
+description: Use when asked to develop, implement, or deliver a module, feature, or bug fix in a personal project where the `pipeline` plugin is enabled (`claude plugin install pipeline@linde-local --scope local`). Orchestrates the agents, keeps the delivery ledger that syncs them, and ends at the `gate` agent. Triggers on "manager", "desenvolver módulo", "implementar módulo", "nova feature", "corrigir bug", "deliver".
 ---
 
 # Manager
@@ -23,7 +23,7 @@ Every agent ends its report with one line `LEDGER {...}`; append it verbatim. `a
 Give every agent the ledger path in its brief. Agents read it (never write it) to see what already ran and which findings are open, so parallel reviewers do not repeat each other and a fixer sees what is still pending.
 
 ## Where this applies
-Only in repos where the `pipeline` plugin is enabled: enabling it is what loads this skill, the agents and the secret-scan hook, so it is the only switch. If the project lacks the structure (`CLAUDE.md`, `docs/`), run `pipeline:kickoff` first. eDevize / Propunere Tehnica work uses `edevize-analisar` / `edevize-implementar` / `edevize-finalizar` instead.
+Only in repos where the `pipeline` plugin is enabled: enabling it is what loads this skill, the agents and the secret-scan hook, so it is the only switch. If the project lacks the structure (`CLAUDE.md`, `docs/`), run `pipeline:kickoff` first.
 
 ## Steps
 
