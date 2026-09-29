@@ -141,4 +141,43 @@ check("sync to a folder without the lesson changes nothing",
       r.returncode != 0 and open(seed_file, encoding="utf-8").read() == before and rows(overrides)[1]["counters"]["held"] == 1,
       r.stderr)
 
+check("a finished sync leaves no journal and records its id on the global row",
+      "sync_pending" not in rows(overrides)[0] and len(rows(seed_file)[0].get("sync_ids", [])) == 1,
+      json.dumps(rows(overrides)) + json.dumps(rows(seed_file)))
+
+crash_dir = os.path.join(repo, "crash")
+os.makedirs(crash_dir)
+crash_seed = os.path.join(crash_dir, "postgres-supabase.jsonl")
+with open(crash_seed, "w", encoding="utf-8", newline="\n") as handle:
+    handle.write(json.dumps({"id": "g-done", "stack": "postgres-supabase", "paths": [], "text": "Done.",
+                             "counters": {"injected": 0, "held": 5, "recurred": 0}, "status": "active",
+                             "sync_ids": ["s-applied"]}) + "\n")
+    handle.write(json.dumps({"id": "g-todo", "stack": "postgres-supabase", "paths": [], "text": "Todo.",
+                             "counters": {"injected": 0, "held": 1, "recurred": 0}, "status": "active"}) + "\n")
+crashed = os.path.join(repo, "crashed.jsonl")
+with open(crashed, "w", encoding="utf-8", newline="\n") as handle:
+    handle.write(json.dumps({"id": "g-done", "stack": "postgres-supabase", "override": True,
+                             "counters": {"injected": 0, "held": 3, "recurred": 0},
+                             "sync_pending": {"id": "s-applied", "counters": {"injected": 0, "held": 2, "recurred": 0}}})
+                 + "\n")
+    handle.write(json.dumps({"id": "g-todo", "stack": "postgres-supabase", "override": True,
+                             "counters": {"injected": 0, "held": 2, "recurred": 0},
+                             "sync_pending": {"id": "s-lost", "counters": {"injected": 0, "held": 2, "recurred": 0}}})
+                 + "\n")
+r = lesson("--lessons", crashed, "sync", "--to-dir", crash_dir)
+globals_after = {item["id"]: item for item in rows(crash_seed)}
+delivery_after = {item["id"]: item for item in rows(crashed)}
+check("after a crash past the global write, a rerun does not add the journaled counters again",
+      r.returncode == 0 and globals_after["g-done"]["counters"]["held"] == 5, r.stderr + json.dumps(globals_after))
+check("counters marked after the crash stay in the delivery row",
+      delivery_after["g-done"]["counters"]["held"] == 1 and "sync_pending" not in delivery_after["g-done"],
+      json.dumps(delivery_after))
+check("after a crash before the global write, a rerun adds the journaled counters once",
+      globals_after["g-todo"]["counters"]["held"] == 3 and globals_after["g-todo"]["sync_ids"] == ["s-lost"]
+      and delivery_after["g-todo"]["counters"]["held"] == 0, json.dumps(globals_after) + json.dumps(delivery_after))
+r = lesson("--lessons", crashed, "sync", "--to-dir", crash_dir)
+check("the delivery row keeps its leftover counters for the next sync",
+      r.returncode == 0 and {item["id"]: item for item in rows(crash_seed)}["g-done"]["counters"]["held"] == 6
+      and rows(crashed)[0]["counters"]["held"] == 0, r.stderr + json.dumps(rows(crash_seed)))
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

@@ -188,9 +188,19 @@ for item, expected in (("- `app/page.tsx`: now calls `lib/format.ts`", {"app/pag
                        ("- src/b.ts: added x", {"src/b.ts"}),
                        ("- Modify: src/c.ts", {"src/c.ts"}),
                        ("- Modify: `src/d.ts:3-9`", {"src/d.ts"}),
-                       ("- src/e.ts", {"src/e.ts"})):
+                       ("- src/e.ts", {"src/e.ts"}),
+                       ("- Makefile: added target", {"Makefile"}),
+                       ("- modified: Makefile", {"Makefile"}),
+                       ("- **Created**: docs/x.md", {"docs/x.md"}),
+                       ("- `src/a.ts`, `README.md`", {"src/a.ts", "README.md"}),
+                       ("- Modify: `src/f.ts`, `src/g.ts:4` and `lib/h.ts`", {"src/f.ts", "src/g.ts", "lib/h.ts"}),
+                       ("- `src/i.ts` (new), `src/j.ts`: both export `k.ts`", {"src/i.ts", "src/j.ts"}),
+                       ("- `src/l.ts` now uses `lib/m.ts`", {"src/l.ts"}),
+                       ("- `src/n.ts`, `true`", {"src/n.ts"})):
     found = cited_paths(f"Files:\n{item}\n", files_section_only=True)
-    check(f"a Files item yields one path: {item}", found == expected, str(found))
+    check(f"a Files item yields its leading paths: {item}", found == expected, str(found))
+r = append(DEV, report("multi.md", f"Committed {c1[:8]}.\n\nFiles changed:\n- `src/a.py`, `README.md`\n\n{PAD}\n{DEV}\n"))
+check("every path of a comma-separated Files item is checked", r.returncode != 0 and "README.md" in r.stderr, r.stderr)
 
 short = "Nothing in this task changes documented behavior."
 r = append('LEDGER {"agent":"docs","verdict":"NO_DOC_CHANGE_NEEDED"}',

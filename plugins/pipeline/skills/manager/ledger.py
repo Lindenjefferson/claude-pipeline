@@ -35,6 +35,7 @@ LESSONS_DEFAULT = ".superpowers/lessons.jsonl"
 PLUGIN_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 LESSONS_DIR_DEFAULT = os.path.join(PLUGIN_ROOT, "lessons")
 COUNTERS = ("injected", "held", "recurred")
+SYNC_IDS_KEPT = 20
 ROLES = {"implementer": "implement", "reviewer": "review"}
 NAME_PATTERN = re.compile(r"^[\w.-]+$")
 LEDGER_LINE = re.compile(r"^[\s`>*-]*LEDGER\s*\{", re.MULTILINE)
@@ -48,6 +49,9 @@ FILES_HEADING = re.compile(r"^\s*#+\s*(?:changed\s+)?files(?:\s+changed)?" + PAR
                            re.IGNORECASE)
 LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*)$")
 LINE_SUFFIX = re.compile(r":\d+(?:-\d+)?$")
+LIST_GAP = re.compile(r"^\s*(?:\([^()]*\)\s*)?(?:,\s*(?:and\s+)?|and\s+|&\s*)$", re.IGNORECASE)
+ITEM_LABELS = {"add", "added", "change", "changed", "create", "created", "delete", "deleted", "modify",
+               "modified", "new", "remove", "removed", "rename", "renamed", "update", "updated", "test", "tests"}
 
 
 def role(entry):
@@ -165,15 +169,21 @@ def write_line(path, entry):
         handle.write(json.dumps(entry, separators=(",", ":")) + "\n")
 
 
-def item_path(body):
-    ticked = BACKTICKED.search(body)
+def item_paths(body):
+    ticked = list(BACKTICKED.finditer(body))
     if ticked:
-        return ticked.group(1)
+        paths = [ticked[0].group(1)]
+        for previous, current in zip(ticked, ticked[1:]):
+            if not LIST_GAP.match(body[previous.end():current.start()]):
+                break
+            if "/" in current.group(1) or "." in current.group(1):
+                paths.append(current.group(1))
+        return paths
     before, colon, after = body.partition(":")
-    if colon and "/" not in before and "." not in before and after.split():
-        return after.split()[0]
+    if colon and before.strip(" *").lower() in ITEM_LABELS and after.split():
+        return [after.split()[0]]
     words = body.split()
-    return words[0].rstrip(":") if words else None
+    return [words[0].rstrip(":")] if words else []
 
 
 def files_section_paths(text):
@@ -190,9 +200,7 @@ def files_section_paths(text):
             continue
         item = LIST_ITEM.match(line)
         if item:
-            path = item_path(item.group(1))
-            if path:
-                found.add(path)
+            found.update(item_paths(item.group(1)))
         elif line.strip():
             inside = False
     return found
@@ -507,9 +515,11 @@ def lesson_promote(args):
 
 def lesson_sync(args):
     lessons = read_lessons(args.lessons)
-    pending = [lesson for lesson in lessons if is_override(lesson)
-               and (not args.id or lesson.get("id") in args.id)
-               and any(int(lesson.get("counters", {}).get(counter, 0)) for counter in COUNTERS)]
+    journaled = [lesson for lesson in lessons if is_override(lesson) and lesson.get("sync_pending")]
+    fresh = [lesson for lesson in lessons if is_override(lesson) and not lesson.get("sync_pending")
+             and (not args.id or lesson.get("id") in args.id)
+             and any(int(lesson.get("counters", {}).get(counter, 0)) for counter in COUNTERS)]
+    pending = journaled + fresh
     missing = sorted(set(args.id or ()) - {lesson.get("id") for lesson in pending})
     if missing:
         sys.exit(f"no global-lesson counters to sync for: {', '.join(missing)}")
@@ -524,16 +534,32 @@ def lesson_sync(args):
             files[path] = (rows, {row[1].get("id"): row for row in rows})
         if lesson["id"] not in files[path][1]:
             sys.exit(f"lesson '{lesson['id']}' not found in {path}; nothing synced")
+    if fresh:
+        sync_id = f"{time.strftime('%Y%m%dT%H%M%S')}-{os.urandom(4).hex()}"
+        for lesson in fresh:
+            lesson["sync_pending"] = {"id": sync_id, "counters": {counter: int(lesson["counters"].get(counter, 0))
+                                                                  for counter in COUNTERS}}
+        write_lessons(args.lessons, lessons)
+    changed = set()
     for lesson in pending:
-        row = files[os.path.join(args.to_dir, f"{lesson.get('stack')}.jsonl")][1][lesson["id"]]
+        journal = lesson["sync_pending"]
+        path = os.path.join(args.to_dir, f"{lesson.get('stack')}.jsonl")
+        row = files[path][1][lesson["id"]]
+        applied = row[1].get("sync_ids") or []
+        if journal["id"] in applied:
+            continue
         counters = row[1].setdefault("counters", {})
         for counter in COUNTERS:
-            counters[counter] = int(counters.get(counter, 0)) + int(lesson["counters"].get(counter, 0))
+            counters[counter] = int(counters.get(counter, 0)) + int(journal["counters"].get(counter, 0))
+        row[1]["sync_ids"] = (applied + [journal["id"]])[-SYNC_IDS_KEPT:]
         row[0] = global_line(row[1])
-    for path, (rows, _) in files.items():
-        write_rows(path, rows)
+        changed.add(path)
+    for path in sorted(changed):
+        write_rows(path, files[path][0])
     for lesson in pending:
-        lesson["counters"] = {counter: 0 for counter in COUNTERS}
+        journal = lesson.pop("sync_pending")
+        lesson["counters"] = {counter: max(0, int(lesson["counters"].get(counter, 0))
+                                           - int(journal["counters"].get(counter, 0))) for counter in COUNTERS}
         lesson["synced"] = time.strftime("%Y-%m-%d")
         print(f"lesson {lesson['id']} counters added to {args.to_dir}")
     write_lessons(args.lessons, lessons)
