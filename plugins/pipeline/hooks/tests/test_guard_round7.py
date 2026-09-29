@@ -84,18 +84,26 @@ for command in ("Set-Location (Split-Path (git rev-parse --git-dir)); Remove-Ite
                 "$root = Split-Path -Path (git rev-parse --git-common-dir) -Parent; Remove-Item $root -Recurse"):
     expect(command, "DENY", tool="PowerShell")
 
-for command in ('cd "$(git rev-parse --git-dir)/.."', 'cd "$(git rev-parse --git-dir)/.." && ls',
-                'cd "$(git rev-parse --git-common-dir)/.." && npm run build > out.log',
+GIT_DERIVED = "git worktree list"
+for command in ('cd "$(git rev-parse --git-common-dir)/.." && npm run build > out.log',
+                'cd "$(git rev-parse --git-common-dir)/.." && npm run build',
                 'root=$(dirname "$(git rev-parse --git-common-dir)"); cd "$root" && rm -rf dist',
                 'cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && rm -rf dist',
                 'root=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)"); cd "$root" && rm -rf dist',
                 'cd "$(git -C . rev-parse --git-common-dir)/.." && rm -rf dist',
                 'root=$(dirname "$(git rev-parse --git-common-dir)"); for f in "$root"/*.log; do rm -f "$f"; done',
                 'root=$(dirname "$(git rev-parse --git-common-dir)"); out="$root/dist"; rm -rf "$out"',
-                "test -f .git/hooks/pre-push && echo yes",
-                "if [ -f .git/hooks/pre-push ]; then echo installed; fi",
-                "[[ -f .git/hooks/pre-push ]] && echo yes"):
-    expect(command, "ALLOW")
+                'cd "$(git rev-parse --git-common-dir)/.." && rm -rf sub/hooks',
+                'cd "$(git rev-parse --git-common-dir)/.." && rm -f sub/.git',
+                'root=$(dirname "$(git rev-parse --git-common-dir)"); rm -rf "$root/sub/hooks"',
+                'pushd "$(git rev-parse --git-common-dir)/.." && rm -rf dist',
+                'd=$(git rev-parse --git-dir); cd "$(dirname "$d")" && rm -f ../hooks/pre-push',
+                'd=$(git rev-parse --git-dir); p=$(dirname "$d"); cd "$p" && rm -f ../hooks/pre-push',
+                'd=$(git rev-parse --git-dir); rm -f "$(dirname "$d/hooks/x")/pre-push"',
+                'd=.git; rm -f "$(echo $d/hooks)/pre-push"',
+                'd=$(git rev-parse --git-dir); rm -f "`dirname $d/hooks/x`/pre-push"',
+                'cd "$(dirname "$GIT_DIR")" && rm -rf dist', 'cd "$GIT_COMMON_DIR/.." && rm -rf dist'):
+    expect(command, "DENY", reason_has=GIT_DERIVED)
 for command in ("$root = Split-Path (git rev-parse --git-common-dir); Set-Location $root; Remove-Item dist -Recurse",
                 "$root = Split-Path -Path (git rev-parse --git-common-dir) -Parent; Set-Location $root; "
                 "Remove-Item dist -Recurse",
@@ -104,10 +112,38 @@ for command in ("$root = Split-Path (git rev-parse --git-common-dir); Set-Locati
                 "$root = Split-Path (git rev-parse --git-common-dir); $out = Join-Path $root dist; "
                 "Remove-Item $out -Recurse",
                 "$root = Split-Path (git rev-parse --git-common-dir); $out = \"$root\\dist\"; Remove-Item $out -Recurse",
-                "${f} = 'dist'; Remove-Item -Recurse ${f}"):
+                "$d = git rev-parse --git-dir; Set-Location (Split-Path $d); Remove-Item ../hooks/pre-push",
+                "$d = git rev-parse --git-dir; Remove-Item (Join-Path (Split-Path $d) hooks/pre-push)"):
+    expect(command, "DENY", reason_has=GIT_DERIVED, tool="PowerShell")
+
+got, reason, _ = hook_run('cd "$(git rev-parse --git-common-dir)/.." && rm -rf dist', "Bash", worktree)
+check("the git-derived deny points to --show-toplevel and git worktree list, not the --no-verify text",
+      got == "DENY" and "--show-toplevel" in reason and "git worktree list" in reason
+      and "--no-verify" not in reason and "rewire" not in reason, reason)
+
+for command in ('cd "$(git rev-parse --git-dir)/.."', 'cd "$(git rev-parse --git-dir)/.." && ls',
+                'cd "$(git rev-parse --git-common-dir)/.." && git status',
+                "git worktree list", "git worktree list --porcelain",
+                'cd "$(git rev-parse --show-toplevel)" && rm -rf dist',
+                'root=$(git rev-parse --show-toplevel); rm -rf "$root/dist"',
+                "cd ../repo && rm -rf dist", "cd ../repo && npm run build > out.log",
+                'cd "$(dirname src/hooks/useX.ts)" && rm -f useOld.ts',
+                'tmp=$(mktemp); echo x > "$tmp"; rm -f "$tmp"', 'for f in *.bak; do rm -f "$f"; done',
+                "test -f .git/hooks/pre-push && echo yes",
+                "if [ -f .git/hooks/pre-push ]; then echo installed; fi",
+                "[[ -f .git/hooks/pre-push ]] && echo yes"):
+    expect(command, "ALLOW")
+for command in ("${f} = 'dist'; Remove-Item -Recurse ${f}",
+                "Set-Location (git rev-parse --show-toplevel); Remove-Item dist -Recurse",
+                "$root = git rev-parse --show-toplevel; Remove-Item (Join-Path $root dist) -Recurse"):
     expect(command, "ALLOW", tool="PowerShell")
 
-expect('cd "$(git rev-parse --git-common-dir)/.." && rm -rf dist', "ALLOW", cwd=repo)
+for command in ('cd "$(git rev-parse --show-toplevel)" && rm -rf dist',
+                'root=$(git rev-parse --show-toplevel); rm -rf "$root/dist"', "cd ../wt && rm -rf dist"):
+    expect(command, "ALLOW", cwd=repo)
+for command in ('cd "$(git rev-parse --git-common-dir)/.." && rm -rf dist',
+                'cd "$(git rev-parse --git-common-dir)/.." && rm -rf sub/hooks'):
+    expect(command, "DENY", reason_has=GIT_DERIVED, cwd=repo)
 expect("coproc git push origin HEAD", "DENY", reason_has="gate agent", cwd=repo)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

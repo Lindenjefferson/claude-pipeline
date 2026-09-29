@@ -108,14 +108,15 @@ for command in ("Set-Location (Split-Path (git rev-parse --git-path hooks/pre-pu
 
 for command in ('cd "$(dirname "$(git rev-parse --git-common-dir)")" && rm -rf dist',
                 'root=$(dirname "$(git rev-parse --git-common-dir)"); cd "$root" && rm -rf dist',
-                'd=$(git rev-parse --git-common-dir); cd "$d/.." && rm -rf dist',
-                'for f in *.bak; do rm -f "$f"; done', 'for f in a b; do echo "$f" > out.log; done'):
-    expect(command, "ALLOW")
+                'd=$(git rev-parse --git-common-dir); cd "$d/.." && rm -rf dist'):
+    expect(command, "DENY", reason_has="git worktree list")
 for command in ("Set-Location (Split-Path (git rev-parse --git-common-dir)); Remove-Item dist -Recurse",
                 "$root = Split-Path (git rev-parse --git-common-dir); Set-Location $root; Remove-Item dist -Recurse",
                 "$root = (Split-Path (git rev-parse --git-common-dir)); Set-Location $root; "
-                "Remove-Item dist -Recurse",
-                "$global:f = 'dist'; Remove-Item -Recurse $global:f"):
-    expect(command, "ALLOW", tool="PowerShell")
+                "Remove-Item dist -Recurse"):
+    expect(command, "DENY", reason_has="git worktree list", tool="PowerShell")
+for command in ('for f in *.bak; do rm -f "$f"; done', 'for f in a b; do echo "$f" > out.log; done'):
+    expect(command, "ALLOW")
+expect("$global:f = 'dist'; Remove-Item -Recurse $global:f", "ALLOW", tool="PowerShell")
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
