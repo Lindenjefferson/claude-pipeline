@@ -1517,10 +1517,14 @@ REDIRECT_TOKEN = re.compile(r"^\d*>>?\|?")
 HARMLESS_TARGET = re.compile(r"(?i)^(?:&\d|/dev/null|\$null|nul)$")
 VARIABLE_MARK = re.compile(r"\$|`")
 UNRESOLVED_REACH = "unresolved"
-GIT_SOURCE_HINT = re.compile(r"(?i)rev-parse|--git-(?:dir|path|common-dir)|\.git|hooks")
+GIT_SOURCE_HINT = re.compile(r"(?i)--(?:absolute-)?git-(?:dir|path|common-dir)|(?<![\w.-])\.git(?![\w-])"
+                             r"|(?<![\w.-])hooks(?![\w.-])|hookspath")
 GIT_LOCATION_VARS = {"GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE"}
 VARIABLE_SOURCE = re.compile(r"(?i)\$(\{)?(?:env:)?([A-Za-z_]\w*|\d)?([^}]*\})?")
-POWERSHELL_ASSIGNMENT = re.compile(r"(?is)^\$(?:env:)?([A-Za-z_]\w*)\s*=\s*(.*)$")
+POWERSHELL_ASSIGNMENT = re.compile(r"(?is)^\$(?:env:)?([A-Za-z_]\w*)\s*=\s*(?:\$?\(|@\(|&)?(.*)$")
+BASH_DECLARERS = ("export", "declare", "typeset", "local", "readonly")
+POWERSHELL_BLOCK_KEYWORDS = {"if", "elseif", "while", "foreach", "for", "switch", "until", "catch", "function",
+                             "filter", "param", "trap", "do"}
 GENERIC_PROTECTED = (([".git", "hooks"], "hooks"), ([".git", "config"], "config"),
                      ([".git", "config.worktree"], "config"))
 HOOK_CANDIDATES = ("pre-commit", "pre-push", "pre-commit.pipeline-chained")
@@ -1723,8 +1727,16 @@ def resolved_parts(token, state, powershell):
     return None if resolved is None else lexical_parts(resolved)
 
 
-def points_at_git_value(value):
-    return GIT_SUBSTITUTION_MARK in value or bool(GIT_SOURCE_HINT.search(value))
+def points_at_git_value(value, state):
+    if GIT_SUBSTITUTION_MARK in value or GIT_SOURCE_HINT.search(value):
+        return True
+    names = (match.group(2) or "" for match in VARIABLE_SOURCE.finditer(value))
+    return any(name.upper() in GIT_LOCATION_VARS or name.lower() in state["git_vars"] for name in names)
+
+
+def reference_points_at_git(token, state):
+    text, literal = token
+    return not literal and any(points_at_git(text[mark.start():], state) for mark in VARIABLE_MARK.finditer(text))
 
 
 def points_at_git(reference, state):
@@ -1812,9 +1824,13 @@ def find_write_action(expression):
     return actions[0][0] if actions else None
 
 
+def execdir_names_match_only(arg):
+    return "{}" in arg and not re.search(r"[\\/]", arg) and ".." not in arg
+
+
 def find_escapes_match(actions):
     return any((action in ("-execdir", "-okdir")
-                and any(arg != "{}" and not arg.startswith("-") for arg in args[1:]))
+                and any(not arg.startswith("-") and not execdir_names_match_only(arg) for arg in args[1:]))
                or any("{}" in arg and ".." in re.split(r"[\\/]", arg) for arg in args)
                for _, action, args, _ in actions)
 
@@ -1903,6 +1919,28 @@ def substitution_mark(script):
     return GIT_SUBSTITUTION_MARK if GIT_SOURCE_HINT.search(script) else SUBSTITUTION_MARK
 
 
+def closing_paren(command, start):
+    depth, end, quote = 1, start, None
+    while end < len(command) and depth:
+        if quote:
+            quote = None if command[end] == quote else quote
+        elif command[end] in "'\"":
+            quote = command[end]
+        elif command[end] == "(":
+            depth += 1
+        elif command[end] == ")":
+            depth -= 1
+        end += 1
+    return end, depth == 0
+
+
+def powershell_expression_paren(command, index):
+    if index and (command[index - 1].isalnum() or command[index - 1] in "_)]}.'\"`"):
+        return False
+    word = re.search(r"([\w-]+)\s*$", command[:index])
+    return not (word and word.group(1).lower() in POWERSHELL_BLOCK_KEYWORDS)
+
+
 def command_substitutions(command, powershell):
     collapsed, inner, quote, index = [], [], None, 0
     while index < len(command):
@@ -1924,24 +1962,66 @@ def command_substitutions(command, powershell):
             index = end + 1
             continue
         elif command.startswith("$(", index) and not command.startswith("$((", index):
-            depth, end, inner_quote = 1, index + 2, None
-            while end < len(command) and depth:
-                if inner_quote:
-                    inner_quote = None if command[end] == inner_quote else inner_quote
-                elif command[end] in "'\"":
-                    inner_quote = command[end]
-                elif command[end] == "(":
-                    depth += 1
-                elif command[end] == ")":
-                    depth -= 1
-                end += 1
-            inner.append(command[index + 2:end - 1 if depth == 0 else end])
+            end, closed = closing_paren(command, index + 2)
+            inner.append(command[index + 2:end - 1 if closed else end])
             collapsed.append(substitution_mark(inner[-1]))
             index = end
             continue
+        elif powershell and char == "(" and quote is None and powershell_expression_paren(command, index):
+            end, closed = closing_paren(command, index + 1)
+            script = command[index + 1:end - 1 if closed else end]
+            if GIT_SOURCE_HINT.search(script):
+                inner.append(script)
+                collapsed.append(GIT_SUBSTITUTION_MARK)
+                index = end
+                continue
         collapsed.append(char)
         index += 1
     return "".join(collapsed), inner
+
+
+def split_statements(command, powershell):
+    statements, start, quote, index = [], 0, None, 0
+    while index < len(command):
+        char = command[index]
+        if quote:
+            if quote == '"' and is_escape(command, index, powershell, True):
+                index += 1
+            elif char == quote:
+                quote = None
+        elif is_escape(command, index, powershell, False):
+            index += 1
+        elif char in "'\"":
+            quote = char
+        elif char in ";\n" or command[index:index + 2] in ("&&", "||"):
+            statements.append(command[start:index])
+            index += 1 if char in ";\n" else 2
+            start = index
+            continue
+        index += 1
+    statements.append(command[start:])
+    return [statement.strip() for statement in statements if statement.strip()]
+
+
+def statement_assignments(statement, powershell):
+    if powershell:
+        match = POWERSHELL_ASSIGNMENT.match(statement)
+        return [match.groups()] if match else []
+    tokens = tokenize(statement.lstrip("({ \t"), powershell)
+    if tokens and tokens[0][0] in BASH_DECLARERS:
+        tokens = [token for token in tokens[1:] if not token[0].startswith("-")]
+    assignments = []
+    for text, _ in tokens:
+        if not ASSIGNMENT.match(text):
+            break
+        assignments.append(tuple(text.split("=", 1)))
+    return assignments
+
+
+def track_git_vars(statement, powershell, state):
+    for name, value in statement_assignments(statement, powershell):
+        if points_at_git_value(value, state):
+            state["git_vars"].add(name.lower())
 
 
 def tampers_with_hooks(command, powershell, state):
@@ -1950,12 +2030,18 @@ def tampers_with_hooks(command, powershell, state):
         reason = tampers_with_hooks(script, powershell, dict(state, variables=dict(state["variables"])))
         if reason:
             return reason
+    for statement in split_statements(command, powershell):
+        track_git_vars(statement, powershell, state)
+        reason = segments_tamper(statement, powershell, state)
+        if reason:
+            return reason
+    return None
+
+
+def segments_tamper(command, powershell, state):
     for segment in split_segments(command, powershell):
         if segment in ("(", ")"):
             continue
-        assignment = POWERSHELL_ASSIGNMENT.match(segment) if powershell else None
-        if assignment and points_at_git_value(assignment.group(2)):
-            state["git_vars"].add(assignment.group(1).lower())
         tokens = [substitute(token, state["variables"], powershell)
                   for token in strip_prefix(tokenize(segment, powershell), powershell, state["variables"])]
         if not tokens:
@@ -1973,7 +2059,8 @@ def tampers_with_hooks(command, powershell, state):
         if name in (CD_POWERSHELL if powershell else CD_BASH):
             paths = [token for token in targets if not token[0].startswith("-")]
             if paths:
-                state["in_git"] = state["in_git"] or enters_git_dir(paths[0], state, powershell)
+                state["in_git"] = (state["in_git"] or enters_git_dir(paths[0], state, powershell)
+                                   or reference_points_at_git(paths[0], state))
                 state["cwd"] = (resolve_path(paths[0][0], paths[0][1], state["cwd"], powershell)
                                 if state["cwd"] is not None else None)
             continue
