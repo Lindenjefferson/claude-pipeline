@@ -1,40 +1,35 @@
 #!/usr/bin/env python3
-"""PreToolUse hook for Claude Code Bash and PowerShell calls that run `git commit` or `git push`.
+"""Secret scan and push gate for git, run as a Claude Code PreToolUse hook and as native git hooks.
 
-commit: blocks when what the commit would record adds a secret-looking string or an
-        .env-style file. That is the staged diff plus whatever the same command stages
-        first (`git add ... && git commit`), the paths given to the commit and, for
-        `commit -a`, the tracked changes; they are staged into a throwaway copy of
-        the index, never into the real one.
-push:   blocks when the commits about to leave the machine add such content. Those
-        are the commits of the refs the command pushes (refspecs, tags, --all,
-        --mirror; HEAD when none is given) that no remote-tracking ref has yet. In
-        repos that opted in (a docs/quality-reports/ directory exists at the repo
-        root), it also blocks unless the gate agent recorded approval of the tree
-        of every such ref in <git-common-dir>/gate-approved (legacy name:
-        manager-approved).
+Native git hooks (the enforcement; kickoff installs both):
+  --install-pre-commit  writes a pre-commit hook that runs --pre-commit: it scans the index git is
+                        about to commit (git sets GIT_INDEX_FILE for it), with the allowlist read
+                        from that index. An existing pre-commit hook is kept as
+                        pre-commit.pipeline-chained and runs first.
+  --install-pre-push    writes a pre-push hook that runs --pre-push: it scans the commits leaving
+                        the machine. What the remote already has comes from `git ls-remote` of the
+                        push URL, never from remote-tracking refs alone.
+  --enable-gate         sets `git config pipeline.gate true`, which turns the push gate on.
 
-Run as a Claude hook it guards Claude's own git calls against accidents. It parses
-the command text (chained and nested commands, subshells, `bash -c` / `powershell
--Command`, env prefixes, wrappers, full paths to git, git's global options), so a
-script file that calls git inside is not seen, and commands typed in a user terminal
-are not affected. `--install-pre-push` writes a real
-git pre-push hook that runs `--pre-push`: the same secret scan on the outgoing
-commits, enforced by git however push is invoked (approval gate not included).
-A flagged line whose fingerprint (sha256 of its file path and the line with whitespace
-collapsed) is listed in .pipeline-secrets-allow at the repo root is not reported. The list
-is read from the index for a commit and from each pushed ref's tree for a push, never from
-the working tree, and the hook denies Claude's own edits of that file. `--fingerprint`
-prints the fingerprints of flagged lines read from stdin (a diff, or plain text with
-`--path <file>`).
-On an internal error it denies ("hook error") any command that may run a git add, commit
-or push (aliases included) or that names the allowlist, and lets every other command
-through. A git add, commit or push whose repository it cannot resolve (no repository in
-the folder it runs in, or one reached through --git-dir, --work-tree, --namespace or
-GIT_DIR-style variables) is denied; a push from a bare repository is scanned like any
-other. Commands that repoint remote-tracking refs (update-ref/symbolic-ref on
-refs/remotes/*, git remote set-head) are denied, because the push checks trust them. As a Claude hook it is wired
-by the `pipeline` plugin, so it runs only in sessions of repos that enable the plugin."""
+PreToolUse (first line, parses the command text of Claude's Bash/PowerShell calls):
+commit: blocks when what the commit would record adds a secret-looking string or an .env-style
+        file (staged diff plus what the same command stages first, paths given to the commit,
+        `commit -a`), staged into a throwaway copy of the index.
+push:   blocks when the commits about to leave the machine add such content, and, when the gate
+        is on (pipeline.gate config, or docs/quality-reports/ in the working tree or the pushed
+        tree), unless the gate agent recorded approval of the tree of every pushed ref in
+        <git-common-dir>/gate-approved (legacy name: manager-approved).
+It also denies what would switch the native hooks off or fool the push check: --no-verify,
+core.hooksPath, git config writes of pipeline.*, url.*.insteadOf and remote.*.url/pushurl/fetch,
+edits of .git/hooks and .git/config, repointing refs/remotes/*, fetching into refs/remotes/* with an
+explicit refspec, and remotes that point at a local path. It warns on stderr when the native hooks
+are missing in a repo with the gate on.
+A flagged line whose fingerprint (sha256 of its file path and the line with whitespace collapsed)
+is listed in .pipeline-secrets-allow at the repo root is not reported; the list is read from the
+index for a commit and from each pushed ref's tree for a push, and agents may not edit it.
+`--fingerprint` prints the fingerprints of flagged lines read from stdin.
+On an internal error the PreToolUse hook denies any command that may run a git add, commit, push,
+config, fetch or ref change (aliases included) or that names the allowlist; the native hooks block."""
 import base64
 import collections
 import fnmatch
@@ -110,18 +105,18 @@ class HookError(Exception):
     pass
 
 
-def git(args, cwd, env=None):
+def git(args, cwd, env=None, data=None, timeout=30):
+    feed = {"input": data} if data is not None else {"stdin": subprocess.DEVNULL}
     try:
-        result = subprocess.run(["git"] + args, cwd=cwd, capture_output=True,
-                                stdin=subprocess.DEVNULL, env=env,
-                                encoding="utf-8", errors="replace", timeout=30)
+        result = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, env=env,
+                                encoding="utf-8", errors="replace", timeout=timeout, **feed)
         return result.returncode, result.stdout or ""
     except Exception:
         return 1, ""
 
 
-def git_checked(args, cwd, env=None):
-    code, out = git(args, cwd, env)
+def git_checked(args, cwd, env=None, data=None):
+    code, out = git(args, cwd, env, data=data) if data is not None else git(args, cwd, env)
     if code != 0:
         raise HookError("git " + " ".join(args[:2]) + " failed")
     return out
@@ -315,45 +310,116 @@ def print_fingerprints():
 
 HOOK_MARKER = "secretscan-managed"
 HOME_VAR = "CLAUDE_PIPELINE_HOME"
-PRE_PUSH_SHIM = f"""#!/bin/sh
-# {HOOK_MARKER}
-root="${{{HOME_VAR}:-$(git config --get pipeline.home)}}"
+CHAINED_SUFFIX = ".pipeline-chained"
+SHIM_CHAIN = """chained="$(dirname "$0")/{stage}""" + CHAINED_SUFFIX + """"
+if [ -x "$chained" ]; then
+  "$chained" "$@" || exit $?
+fi
+"""
+SHIM_BODY = """root="${{""" + HOME_VAR + """:-$(git config --get pipeline.home)}}"
 script="$root/hooks/pre-commit-secret-scan.py"
 if [ -z "$root" ] || [ ! -f "$script" ]; then
-  echo "Push blocked: secret scanner not found (looked in '$root')." >&2
-  echo "Set {HOME_VAR} or run: git config --global pipeline.home <pipeline plugin root>" >&2
+  echo "{what} blocked: secret scanner not found (looked in '$root')." >&2
+  echo "Set """ + HOME_VAR + """ or run: git config --global pipeline.home <pipeline plugin root>" >&2
   exit 1
 fi
 for py in python python3; do
   if "$py" -c 'import sys; sys.exit(sys.version_info[0] < 3)' </dev/null >/dev/null 2>&1; then
-    exec "$py" "$script" --pre-push "$@"
+    exec "$py" "$script" --{stage} "$@"
   fi
 done
-echo "Push blocked: no Python 3 interpreter found on PATH (tried python, python3)." >&2
+echo "{what} blocked: no Python 3 interpreter found on PATH (tried python, python3)." >&2
 exit 1
 """
+NATIVE_HOOKS = {"pre-commit": ("Commit", True), "pre-push": ("Push", False)}
 ZERO_SHA = "0" * 40
+LS_REMOTE_TIMEOUT = 15
+FALLBACK_CAP = 1000
+UNKNOWN_REMOTE = ("Cannot tell which commits {remote} already has: git ls-remote failed (offline, no "
+                  "access, or a transport this check does not run), and {count} commits of {ref} are not "
+                  "on its remote-tracking refs, more than the {cap} this check scans without knowing the "
+                  "remote's state. Check the connection and push again, or ask the user to push.")
+
+
+def shim(stage):
+    what, chains = NATIVE_HOOKS[stage]
+    body = SHIM_BODY.format(what=what, stage=stage)
+    return "#!/bin/sh\n# " + HOOK_MARKER + "\n" + (SHIM_CHAIN.format(stage=stage) if chains else "") + body
+
+
+def ls_remote(cwd, url):
+    if not url or url.startswith("-"):
+        return None
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="never")
+    code, out = git(["-c", "protocol.ext.allow=never", "ls-remote", url], cwd, env,
+                    timeout=LS_REMOTE_TIMEOUT)
+    if code != 0:
+        return None
+    return {line.split()[0] for line in out.splitlines() if re.match(r"^[0-9a-f]{40,64}\s", line)}
+
+
+def local_commits(cwd, shas):
+    if not shas:
+        return []
+    out = git_checked(["cat-file", "--batch-check=%(objectname) %(objecttype)"], cwd,
+                      data="".join(sha + "^{commit}\n" for sha in sorted(shas)))
+    return sorted({line.split()[0] for line in out.splitlines() if line.endswith(" commit")})
+
+
+def tracking_commits(cwd, name):
+    if not name or git(["check-ref-format", f"refs/remotes/{name}/x"], cwd)[0] != 0:
+        return set()
+    return set(git_checked(["for-each-ref", "--format=%(objectname)", f"refs/remotes/{name}/"], cwd).split())
+
+
+def remote_bases(cwd, urls, name, known=()):
+    seen = None
+    for url in urls:
+        shas = ls_remote(cwd, url)
+        if shas is None:
+            seen = None
+            break
+        seen = shas if seen is None else seen & shas
+    if seen is not None:
+        return local_commits(cwd, seen | set(known)), False
+    return local_commits(cwd, tracking_commits(cwd, name) | set(known)), True
+
+
+def revs_input(sha, bases):
+    return sha + "\n" + "".join("^" + base + "\n" for base in bases)
+
+
+def outgoing_count(cwd, sha, bases):
+    return int(git_checked(["rev-list", "--count", "--stdin"], cwd, data=revs_input(sha, bases)).strip() or 0)
+
+
+def outgoing_changes(cwd, sha, bases):
+    data = revs_input(sha, bases)
+    diff = git_checked(["log", "-p", "-m", "--no-ext-diff", "--no-textconv", "--text", "--format=", "--stdin", "--"]
+                       + EXCLUDES, cwd, data=data)
+    names = git_checked(["log", "--name-only", "-m", "--format=", "--stdin"], cwd, data=data)
+    return diff, names.splitlines()
 
 
 def pre_push():
     cwd = os.getcwd()
-    position = sys.argv.index("--pre-push") + 1
-    remote = sys.argv[position] if position < len(sys.argv) else None
-    for line in sys.stdin:
-        parts = line.split()
-        if len(parts) < 4 or parts[1] == ZERO_SHA:
-            continue
-        local_sha, remote_sha = parts[1], parts[3]
-        if remote_sha == ZERO_SHA:
-            revs = [local_sha, "--not", "--remotes"]
-        else:
-            revs = [f"{remote_sha}..{local_sha}"]
-        code, diff = git(["log", "-p", "-m", "--format="] + revs + ["--"] + EXCLUDES, cwd)
-        if code != 0:
-            revs = [local_sha, "--not", "--remotes"]
-            diff = git_checked(["log", "-p", "-m", "--format="] + revs + ["--"] + EXCLUDES, cwd)
-        names = git_checked(["log", "--name-only", "--format="] + revs, cwd)
-        findings = scan(diff, names.splitlines(), load_allowlist(cwd, local_sha))
+    args = sys.argv[sys.argv.index("--pre-push") + 1:]
+    remote = args[0] if args else None
+    url = args[1] if len(args) > 1 else remote
+    updates = [(parts[1], parts[3]) for parts in (line.split() for line in sys.stdin)
+               if len(parts) >= 4 and parts[1] != ZERO_SHA]
+    if not updates:
+        sys.exit(0)
+    known = {remote_sha for _, remote_sha in updates if remote_sha != ZERO_SHA}
+    bases, fallback = remote_bases(cwd, [url] if url else [], remote, known)
+    for local_sha, remote_sha in updates:
+        count = outgoing_count(cwd, local_sha, bases)
+        if fallback and count > FALLBACK_CAP:
+            sys.stderr.write("Push blocked. " + UNKNOWN_REMOTE.format(
+                remote=printable(url or "the remote"), count=count, ref=local_sha[:12], cap=FALLBACK_CAP) + "\n")
+            sys.exit(1)
+        diff, names = outgoing_changes(cwd, local_sha, bases) if count else ("", [])
+        findings = scan(diff, names, load_allowlist(cwd, local_sha))
         if findings:
             sys.stderr.write("Secret scan blocked this push. The commits leaving this machine "
                              "contain:\n- " + "\n- ".join(findings)
@@ -361,6 +427,22 @@ def pre_push():
                              + ALLOW_HINT + "\n")
             sys.exit(1)
         warn_new_allowlist_entries(cwd, local_sha, remote_sha, remote)
+    sys.exit(0)
+
+
+def staged_findings(cwd, env=None, allowed=None):
+    names = git_checked(["diff", "--cached", "--name-only"], cwd, env)
+    diff = git_checked(["diff", "--cached", "--no-ext-diff", "--no-textconv", "--text", "--"] + EXCLUDES, cwd, env)
+    return scan(diff, names.splitlines(), load_allowlist(cwd) if allowed is None else allowed)
+
+
+def pre_commit():
+    findings = staged_findings(os.getcwd())
+    if findings:
+        sys.stderr.write("Secret scan blocked this commit. The changes being committed contain:\n- "
+                         + "\n- ".join(findings) + "\nRemove the secret from the staged changes and "
+                         "commit again." + ALLOW_HINT + "\n")
+        sys.exit(1)
     sys.exit(0)
 
 
@@ -407,25 +489,51 @@ def warn_new_allowlist_entries(cwd, local_sha, remote_sha, remote):
                          + "\n  ".join(printable(line) for line in new) + "\n")
 
 
-def install_pre_push():
+def install_native(stage, hooks_dir):
+    target = os.path.join(hooks_dir, stage)
+    chained = target + CHAINED_SUFFIX
+    if os.path.exists(target):
+        with open(target, encoding="utf-8", errors="replace") as handle:
+            foreign = HOOK_MARKER not in handle.read()
+        if foreign and not NATIVE_HOOKS[stage][1]:
+            sys.stderr.write(f"A {stage} hook already exists at {target}; not overwriting it.\n")
+            return False
+        if foreign and os.path.exists(chained):
+            sys.stderr.write(f"{target} is not this scanner's hook and {chained} already exists; "
+                             "not overwriting either. Merge them by hand and run the install again.\n")
+            return False
+        if foreign:
+            os.replace(target, chained)
+            print(f"kept the existing {stage} hook as {chained}; the new hook runs it first")
+    with open(target, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(shim(stage))
+    os.chmod(target, 0o755)
+    print(f"installed {target}")
+    return True
+
+
+def install():
     code, hooks_dir = git(["rev-parse", "--git-path", "hooks"], None)
     if code != 0:
         sys.stderr.write("Not inside a git repository.\n")
         sys.exit(2)
     hooks_dir = os.path.abspath(hooks_dir.strip())
-    target = os.path.join(hooks_dir, "pre-push")
-    if os.path.exists(target) and HOOK_MARKER not in open(target, encoding="utf-8").read():
-        sys.stderr.write(f"A pre-push hook already exists at {target}; not overwriting it.\n")
-        sys.exit(2)
-    os.makedirs(hooks_dir, exist_ok=True)
-    with open(target, "w", encoding="utf-8", newline="\n") as handle:
-        handle.write(PRE_PUSH_SHIM)
-    os.chmod(target, 0o755)
-    print(f"installed {target}")
-    plugin_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__))).replace("\\", "/")
-    print(f"the hook finds the scanner through ${HOME_VAR} or `git config pipeline.home`; "
-          f"set it once per machine: git config --global pipeline.home \"{plugin_root}\"")
-    sys.exit(0)
+    ok, stages = True, [stage for stage in NATIVE_HOOKS if f"--install-{stage}" in sys.argv]
+    if stages:
+        os.makedirs(hooks_dir, exist_ok=True)
+    for stage in stages:
+        ok = install_native(stage, hooks_dir) and ok
+    if "--enable-gate" in sys.argv:
+        if git(["config", "--local", "pipeline.gate", "true"], None)[0] == 0:
+            print("push gate on: git config pipeline.gate true")
+        else:
+            sys.stderr.write("Could not set git config pipeline.gate true.\n")
+            ok = False
+    if stages:
+        plugin_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__))).replace("\\", "/")
+        print(f"the hooks find the scanner through ${HOME_VAR} or `git config pipeline.home`; "
+              f"set it once per machine: git config --global pipeline.home \"{plugin_root}\"")
+    sys.exit(0 if ok else 2)
 
 
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
@@ -437,16 +545,19 @@ GIT_VALUE_OPTIONS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--e
                      "--super-prefix", "--config-env", "--list-cmds"}
 RELOCATING_OPTIONS = {"--git-dir", "--work-tree", "--namespace"}
 RELOCATING_ENV = {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_NAMESPACE"}
+CONFIG_ENV = {"GIT_CONFIG", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"}
+WATCHED_ENV = RELOCATING_ENV | CONFIG_ENV
 RELOCATING_NAMES = "(?:" + "|".join(sorted(RELOCATING_ENV)) + ")"
-RELOCATING_WORD = re.compile(r"\b" + RELOCATING_NAMES + r"\b")
-RELOCATING_WORD_PS = re.compile(r"(?i)\b" + RELOCATING_NAMES + r"\b")
 RELOCATING_DEFAULT = re.compile(r"\$\{" + RELOCATING_NAMES + r":?=")
-TEXT_ONLY = {"echo", "printf", "grep", "egrep", "fgrep", "rg", "cat", "write-output", "write-host", "write",
-             "findstr", "unset", "remove-item", "ri", "rm", "del", "rmdir", "rd"}
+BASH_SETTERS = {"export", "declare", "typeset", "local", "readonly", "read"}
+PS_ENV_WRITERS = {"set-item", "si", "new-item", "ni", "set-content", "sc", "add-content", "ac", "copy-item",
+                  "copy", "cpi", "move-item", "mi", "rename-item", "rni"}
+PS_ENV_ASSIGN = re.compile(r"(?i)\$\{?env:([^\s=}]+)\}?\s*[+]?=(?!=)")
+PS_SET_ENV = re.compile(r"(?i)environment\]::setenvironmentvariable\(\s*(?:(['\"])([^'\"]*)\1\s*,)?")
+SOURCING = {"source", ".", "eval", "invoke-expression", "iex"}
 REMOTE_REF_TOOLS = {"update-ref", "symbolic-ref"}
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 BASH_ESCAPABLE_IN_QUOTES = '$`"\\\n'
-BASH_ESCAPABLE = BASH_ESCAPABLE_IN_QUOTES + " \t'&|;()<>{}*?[]#~!"
 
 
 def is_escape(text, index, powershell, quoted):
@@ -456,7 +567,7 @@ def is_escape(text, index, powershell, quoted):
         return text[index] == "`"
     if text[index] != "\\":
         return False
-    return text[index + 1] in (BASH_ESCAPABLE_IN_QUOTES if quoted else BASH_ESCAPABLE)
+    return not quoted or text[index + 1] in BASH_ESCAPABLE_IN_QUOTES
 
 
 def split_segments(command, powershell):
@@ -506,7 +617,7 @@ def tokenize(segment, powershell):
         elif char in "'\"":
             quote, started = char, True
             literal = literal or char == "'"
-        elif not powershell and is_escape(segment, index, powershell, False):
+        elif is_escape(segment, index, powershell, False):
             text.append(segment[index + 1])
             started = True
             index += 1
@@ -569,29 +680,70 @@ def git_options(tokens, assigns):
     return local, configs, pairs, relocated, rest
 
 
+def dynamic_or_watched(name):
+    return name.upper() in WATCHED_ENV or bool(re.search(r"[$`(*?\[]", name))
+
+
+def bash_sets_env(name, texts):
+    if name == "printf":
+        texts = texts + [""]
+        targets = [text[2:] or texts[index + 1] for index, text in enumerate(texts[:-1]) if text.startswith("-v")]
+        return any(dynamic_or_watched(target) for target in targets)
+    if name in BASH_SETTERS:
+        return any(dynamic_or_watched(text.split("=", 1)[0]) for text in texts if not text.startswith(("-", "+")))
+    return False
+
+
+def powershell_sets_env(name, texts):
+    if name not in PS_ENV_WRITERS:
+        return False
+    lowered = [text.lower() for text in texts]
+    for text in texts:
+        path = re.match(r"(?i)^env:[\\/]?(.*)$", text)
+        if path:
+            target = path.group(1)
+            if not target and "-name" in lowered[:-1]:
+                target = texts[lowered.index("-name") + 1]
+            if not target or dynamic_or_watched(target):
+                return True
+    return False
+
+
 def sets_relocating_var(segment, tokens, assigns, powershell):
     if any(assign.split("=", 1)[0].upper() in RELOCATING_ENV for assign in assigns):
         return True
-    if RELOCATING_DEFAULT.search(segment):
+    unquoted = " ".join(text for text, _ in tokens)
+    if RELOCATING_DEFAULT.search(segment) or RELOCATING_DEFAULT.search(unquoted):
+        return True
+    if not tokens:
+        return False
+    name, texts = program(tokens[0][0]), [text for text, _ in tokens[1:]]
+    if powershell:
+        return powershell_sets_env(name, texts)
+    return bash_sets_env(name, texts)
+
+
+def runs_sourced_code(tokens, stripped, powershell):
+    if any(text.lower() in SOURCING for text in stripped):
         return True
     if not tokens:
         return False
     name = program(tokens[0][0])
-    if name == "git" or name in SHELLS or name in POWERSHELLS:
-        return False
-    if name == "printf":
-        texts = [text for text, _ in tokens[1:]] + [""]
-        targets = [text[2:] or texts[index + 1] for index, text in enumerate(texts[:-1]) if text.startswith("-v")]
-        return any(target.upper() in RELOCATING_ENV or "$" in target for target in targets)
-    if name in TEXT_ONLY or name in FILE_READERS:
-        return False
-    return bool((RELOCATING_WORD_PS if powershell else RELOCATING_WORD).search(segment))
+    if name in SOURCING:
+        return True
+    texts = [text for text, _ in tokens[1:]]
+    return (not powershell and name == "set"
+            and (any(re.fullmatch(r"-[A-Za-z]*a[A-Za-z]*", text) for text in texts) or "allexport" in texts))
 
 
 def find_git_ops(command, powershell, steps=None, ops=None, env=None):
     steps = [] if steps is None else steps
     ops = [] if ops is None else ops
     env = {"relocated": False} if env is None else env
+    if powershell and (any(dynamic_or_watched(match.group(1)) for match in PS_ENV_ASSIGN.finditer(command))
+                       or any(match.group(2) is None or dynamic_or_watched(match.group(2))
+                              for match in PS_SET_ENV.finditer(command))):
+        env["relocated"] = True
     subshells = []
     for segment in split_segments(command, powershell):
         if segment == "(":
@@ -606,7 +758,8 @@ def find_git_ops(command, powershell, steps=None, ops=None, env=None):
                           or (not powershell and ASSIGNMENT.match(tokens[0][0]))):
             assigns.append(tokens[0][0])
             tokens = tokens[1:]
-        if sets_relocating_var(segment, tokens, assigns, powershell):
+        if (sets_relocating_var(segment, tokens, assigns, powershell)
+                or runs_sourced_code(tokens, assigns, powershell)):
             env["relocated"] = True
         if not tokens:
             continue
@@ -736,9 +889,11 @@ UNVERIFIABLE = ("Cannot verify what this git {op} includes: {what} uses a comman
 SCANNED_OPS = {"add", "commit", "push"}
 RELOCATED = ("Cannot verify what this git {op} touches: it points git at a repository through "
              "--git-dir, --work-tree, --namespace or GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/"
-             "GIT_COMMON_DIR/GIT_NAMESPACE, which this check does not follow. Run git from inside the "
-             "repository without --git-dir/--work-tree (cd into it, or use git -C <repo>) and without "
-             "those variables.")
+             "GIT_COMMON_DIR/GIT_NAMESPACE (or sets GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM/GIT_CONFIG_COUNT, "
+             "or runs code with source, ., eval or set -a that may set them), which this check does "
+             "not follow. Run git from inside the repository without --git-dir/--work-tree (cd into it, "
+             "or use git -C <repo>) and without those variables; run a sourced script in a separate "
+             "command.")
 UNRESOLVED = ("Cannot verify what this git {op} touches: git finds no working tree at {cwd}, the "
               "folder this check resolved for it (the folder does not exist yet, holds no "
               "repository, or holds a bare repository, which has no files to add or commit). Run "
@@ -842,14 +997,12 @@ def index_env(cwd, adds):
 def commit_reason(cwd, top, adds):
     env, copy = index_env(cwd, adds) if adds else (None, None)
     try:
-        names = git_checked(["diff", "--cached", "--name-only"], cwd, env)
-        diff = git_checked(["diff", "--cached", "--"] + EXCLUDES, cwd, env)
+        findings = staged_findings(cwd, env, load_allowlist(top))
     finally:
         if copy:
             for leftover in (copy, copy + ".lock"):
                 if os.path.exists(leftover):
                     os.remove(leftover)
-    findings = scan(diff, names.splitlines(), load_allowlist(top))
     if findings:
         return ("Secret scan blocked this commit. Findings:\n- " + "\n- ".join(findings)
                 + "\n\nRemove the secret from the changes this commit records (staged, staged "
@@ -858,17 +1011,20 @@ def commit_reason(cwd, top, adds):
 
 
 def parse_push(tokens):
-    flags, positional, index = set(), [], 0
+    flags, positional, repo, index = set(), [], None, 0
     while index < len(tokens):
         text = tokens[index][0]
         if text == "--":
             positional += tokens[index + 1:]
             break
         if text.startswith("--"):
-            name = text.split("=", 1)[0]
+            name, attached, value = text.partition("=")
             flags.add(name)
-            if name in PUSH_VALUE_OPTIONS and "=" not in text:
+            if name in PUSH_VALUE_OPTIONS and not attached:
                 index += 1
+                value = tokens[index][0] if index < len(tokens) else ""
+            if name == "--repo":
+                repo = (value, tokens[index][1] if index < len(tokens) else True)
         elif text.startswith("-") and len(text) > 1:
             flags.update("-" + flag for flag in text[1:])
             if text in PUSH_VALUE_OPTIONS:
@@ -876,8 +1032,10 @@ def parse_push(tokens):
         else:
             positional.append(tokens[index])
         index += 1
-    refspecs = positional if "--repo" in flags else positional[1:]
-    return flags, refspecs
+    if repo is None and positional:
+        repo = positional[0]
+        positional = positional[1:]
+    return flags, positional, repo
 
 
 def commit_refs(cwd, patterns):
@@ -946,26 +1104,55 @@ def approved_trees(cwd):
     return approved, os.path.join(git_dir, "gate-approved")
 
 
+def default_remote(cwd):
+    code, branch = git(["symbolic-ref", "--short", "-q", "HEAD"], cwd)
+    branch = branch.strip() if code == 0 else ""
+    keys = ([f"branch.{branch}.pushRemote"] if branch else []) + ["remote.pushDefault"]
+    keys += [f"branch.{branch}.remote"] if branch else []
+    for key in keys:
+        code, value = git(["config", "--get", key], cwd)
+        if code == 0 and value.strip():
+            return value.strip()
+    return "origin"
+
+
+def push_urls(cwd, remote):
+    code, out = git(["remote", "get-url", "--push", "--all", remote], cwd)
+    urls = [line.strip() for line in out.splitlines() if line.strip()] if code == 0 else []
+    return urls or [remote]
+
+
+def gate_enabled(cwd, top, shas):
+    code, value = git(["config", "--bool", "--get", "pipeline.gate"], cwd)
+    if code == 0 and value.strip() == "true":
+        return True
+    if top and os.path.isdir(os.path.join(top, "docs", "quality-reports")):
+        return True
+    return any(git(["cat-file", "-e", sha + ":docs/quality-reports"], cwd)[0] == 0 for sha in shas)
+
+
 def push_reason(cwd, top, tokens):
-    flags, refspecs = parse_push(tokens)
+    flags, refspecs, repo = parse_push(tokens)
     if flags & {"--dry-run", "-n", "--delete", "-d"}:
         return None
     sources = push_sources(cwd, flags, refspecs)
-    if sources is None:
-        return UNVERIFIABLE.format(op="push", what="a ref in the command")
+    if sources is None or (repo is not None and expanded(repo)):
+        return UNVERIFIABLE.format(op="push", what="a ref or the remote in the command")
+    remote = repo[0] if repo is not None else default_remote(cwd)
+    bases, fallback = remote_bases(cwd, push_urls(cwd, remote), remote)
     outgoing = []
     for name, sha in sources:
-        count = git_checked(["rev-list", "--count", sha, "--not", "--remotes"], cwd)
-        if count.strip() != "0":
+        count = outgoing_count(cwd, sha, bases)
+        if fallback and count > FALLBACK_CAP:
+            return "Push blocked. " + UNKNOWN_REMOTE.format(remote=remote, count=count, ref=name, cap=FALLBACK_CAP)
+        if count:
             outgoing.append((name, sha))
     if not outgoing:
         return None
     findings = []
     for sha in sorted({sha for _, sha in outgoing}):
-        diff = git_checked(["log", "-p", "-m", "--format=", sha, "--not", "--remotes", "--"]
-                           + EXCLUDES, cwd)
-        names = git_checked(["log", "--name-only", "--format=", sha, "--not", "--remotes"], cwd)
-        findings += [finding for finding in scan(diff, names.splitlines(), load_allowlist(cwd, sha))
+        diff, names = outgoing_changes(cwd, sha, bases)
+        findings += [finding for finding in scan(diff, names, load_allowlist(cwd, sha))
                      if finding not in findings]
     if findings:
         return ("Secret scan blocked this push: the commits about to leave this machine "
@@ -973,12 +1160,7 @@ def push_reason(cwd, top, tokens):
                 + "\n\nRemoving it in a later commit is not enough because it stays in "
                   "the history being pushed. Rewrite the affected local commits first."
                 + ALLOW_HINT)
-    if top is None:
-        opted_in = any(git(["cat-file", "-e", sha + ":docs/quality-reports"], cwd)[0] == 0
-                       for _, sha in outgoing)
-    else:
-        opted_in = os.path.isdir(os.path.join(top, "docs", "quality-reports"))
-    if opted_in:
+    if gate_enabled(cwd, top, [sha for _, sha in outgoing]):
         approved, approvals = approved_trees(cwd)
         missing = []
         for name, sha in outgoing:
@@ -1175,6 +1357,11 @@ def is_allowlist_path(target):
     return name.split(":", 1)[0].rstrip(" .").lower() == ALLOWLIST_FILE
 
 
+def is_git_internal_path(target):
+    path = str(target).replace("\\", "/").lower()
+    return bool(re.search(r"(?:^|/)\.git/+(?:hooks(?:/|$)|config$)", path))
+
+
 def is_remote_ref_path(target):
     path = str(target).replace("\\", "/").lower()
     return ".git/" in path and ("/refs/remotes/" in path or path.rstrip("/").endswith("/packed-refs"))
@@ -1183,19 +1370,194 @@ def is_remote_ref_path(target):
 REMOTE_REF_REDIRECT = re.compile(r"(?i)>\s*[\"']?[^\s;|&]*(?:refs[\\/]+remotes[\\/]|packed-refs)")
 
 
-def repoints_remote_refs(command, ops):
-    if REMOTE_REF_REDIRECT.search(command):
+REF_VALUE_OPTIONS = {"-m"}
+FETCH_OPS = {"fetch", "pull"}
+PROTECTED_KEY = re.compile(r"(?i)^(?:pipeline\..+|core\.hookspath|include\..+|includeif\..+|"
+                           r"url\..+\.(?:push)?insteadof|remote\..+\.(?:url|pushurl|fetch|mirror))$")
+PROTECTED_SECTION = re.compile(r"(?i)^(?:pipeline|core|include|includeif(?:\..+)?|url\..+|remote\..+)$")
+PROTECTED_CONFIG_VALUE = re.compile(r"(?i)pipeline\.|hookspath|insteadof|pushurl|include|remote\.[^\s=]*\.(?:url|fetch)")
+CONFIG_READS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--get-color", "--get-colorbool", "-l",
+                "--list"}
+CONFIG_SECTION_EDITS = {"--remove-section", "--rename-section", "remove-section", "rename-section"}
+REMOTE_REF_FILES = re.compile(r"(?i)\.git[\\/]+(?:refs[\\/]+remotes(?![\w.-])|packed-refs(?![\w.-]))")
+GIT_INTERNALS = re.compile(r"(?i)\.git[\\/]+(?:hooks(?![\w.-])|config(?![\w.-]))")
+HOOKS_DENY = ("This command would skip or rewire git's own hooks (--no-verify, -n on git commit, "
+              "core.hooksPath, include.path, GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM, or a change under "
+              ".git/hooks or to .git/config). Those hooks run the pipeline's secret scan on every commit "
+              "and push, so an agent may not bypass them. Commit or push without that option, or ask "
+              "the user to run it.")
+CONFIG_DENY = ("This command changes git settings the secret scan and the push gate rely on "
+               "(pipeline.*, core.hooksPath, include.*, url.*.insteadOf, remote.*.url/pushurl/fetch). "
+               "Ask the user to run it in a terminal.")
+
+
+def ref_write_args(tokens):
+    texts, args, index = [text for text, _ in tokens], [], 0
+    while index < len(texts):
+        text = texts[index]
+        if text in REF_VALUE_OPTIONS:
+            index += 1
+        elif not text.startswith("-"):
+            args.append(text)
+        index += 1
+    writes = len(args) >= 2 or any(text in ("-d", "--delete", "--stdin") for text in texts)
+    return writes, texts
+
+
+def is_local_url(url):
+    if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", url):
+        return url.lower().startswith("file://")
+    if re.match(r"^[A-Za-z]:[\\/]", url) or url.startswith(("/", "\\", ".", "~")):
+        return True
+    return not re.match(r"^[^/\\]+:", url)
+
+
+def remote_points_local(tokens):
+    words, index = [], 0
+    while index < len(tokens):
+        text = tokens[index][0]
+        if text in ("-t", "-m"):
+            index += 1
+        elif not text.startswith("-"):
+            words.append(tokens[index])
+        index += 1
+    if len(words) < 3 or words[0][0] not in ("add", "set-url"):
+        return False
+    return expanded(words[2]) or is_local_url(words[2][0])
+
+
+def fetches_into_remote_refs(tokens):
+    for text, _ in tokens:
+        value = text.split("=", 1)[1] if text.startswith("--refmap=") else text
+        if value.startswith("-") or ":" not in value:
+            continue
+        if value.rsplit(":", 1)[1].lstrip("+").lower().replace("\\", "/").startswith("refs/remotes/"):
+            return True
+    return False
+
+
+def repoints_remote_refs(command, ops, powershell=False):
+    if REMOTE_REF_REDIRECT.search(command) or writes_path(command, powershell, REMOTE_REF_FILES):
         return True
     for item in ops:
-        texts = [text for text, _ in item["tokens"]]
         if item["op"] in REMOTE_REF_TOOLS:
-            if "--stdin" in texts or any("refs/remotes/" in text.lower().replace("\\", "/") for text in texts):
+            writes, texts = ref_write_args(item["tokens"])
+            if writes and ("--stdin" in texts
+                           or any("refs/remotes/" in text.lower().replace("\\", "/") for text in texts)):
                 return True
+        if item["op"] in FETCH_OPS and fetches_into_remote_refs(item["tokens"]):
+            return True
         if item["op"] == "remote":
-            words = [text for text in texts if not text.startswith("-")]
-            if words[:1] == ["set-head"]:
+            words = [text for text, _ in item["tokens"] if not text.startswith("-")]
+            if words[:1] == ["set-head"] or remote_points_local(item["tokens"]):
                 return True
     return False
+
+
+def skips_hooks(op, tokens):
+    index = 0
+    while index < len(tokens):
+        text = tokens[index][0]
+        if text == "--":
+            break
+        if text.startswith("--"):
+            name = text.split("=", 1)[0]
+            if len(name) > len("--no-ver") and "--no-verify".startswith(name):
+                return True
+            if name in (COMMIT_VALUE_OPTIONS if op == "commit" else PUSH_VALUE_OPTIONS) and "=" not in text:
+                index += 1
+        elif op == "commit" and text.startswith("-") and len(text) > 1:
+            for position, flag in enumerate(text[1:], 1):
+                if flag == "n":
+                    return True
+                if flag in COMMIT_ATTACHED_FLAGS:
+                    break
+                if flag in COMMIT_VALUE_FLAGS:
+                    index += position == len(text) - 1
+                    break
+        elif text in PUSH_VALUE_OPTIONS:
+            index += 1
+        index += 1
+    return False
+
+
+def config_writes_protected(tokens):
+    texts = [text for text, _ in tokens]
+    words = [text for text in texts if not text.startswith("-")]
+    if set(texts) & CONFIG_READS or words[:1] in (["get"], ["list"]):
+        return False
+    if set(texts) & {"-e", "--edit"} or words[:1] == ["edit"]:
+        return True
+    if set(texts) & CONFIG_SECTION_EDITS and any(PROTECTED_SECTION.match(word) for word in words):
+        return True
+    return any(PROTECTED_KEY.match(text.split("=", 1)[0]) for text in texts)
+
+
+def writes_path(command, powershell, pattern):
+    for segment in split_segments(command, powershell):
+        tokens = tokenize(segment, powershell)
+        unquoted = " ".join(text for text, _ in tokens)
+        if not (pattern.search(segment) or pattern.search(unquoted)):
+            continue
+        while tokens and tokens[0][0].lower() in WRAPPERS:
+            tokens = tokens[1:]
+        name = program(tokens[0][0]) if tokens else ""
+        if name == "git":
+            continue
+        if name not in FILE_READERS or ">" in HARMLESS_REDIRECT.sub("", segment):
+            return True
+    return False
+
+
+def guard_reason(command, powershell, ops):
+    for item in ops:
+        if any(PROTECTED_KEY.match(key) for key, _ in item["pairs"]):
+            return CONFIG_DENY
+        for assign in item["assigns"]:
+            key, _, value = assign.partition("=")
+            key = key.upper()
+            if key in ("GIT_CONFIG", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM") and item["op"] in SCANNED_OPS:
+                return HOOKS_DENY
+            if key.startswith("GIT_CONFIG") and PROTECTED_CONFIG_VALUE.search(value):
+                return CONFIG_DENY
+        if item["op"] in ("commit", "push") and skips_hooks(item["op"], item["tokens"]):
+            return HOOKS_DENY
+        if item["op"] == "config" and config_writes_protected(item["tokens"]):
+            return CONFIG_DENY
+    if writes_path(command, powershell, GIT_INTERNALS):
+        return HOOKS_DENY
+    return None
+
+
+def native_hooks_missing(cwd):
+    code, hooks_dir = git(["rev-parse", "--git-path", "hooks"], cwd)
+    if code != 0:
+        return []
+    hooks_dir = os.path.join(cwd or os.getcwd(), hooks_dir.strip())
+    missing = []
+    for stage in NATIVE_HOOKS:
+        try:
+            with open(os.path.join(hooks_dir, stage), encoding="utf-8", errors="replace") as handle:
+                installed = HOOK_MARKER in handle.read()
+        except OSError:
+            installed = False
+        if not installed:
+            missing.append(stage)
+    return missing
+
+
+def warn_missing_hooks(targets, tops):
+    for item, cwd in targets:
+        if item["op"] not in ("commit", "push") or cwd is None or not tops.get(cwd):
+            continue
+        missing = native_hooks_missing(cwd)
+        if missing and gate_enabled(cwd, tops[cwd], []):
+            script = os.path.abspath(__file__).replace("\\", "/")
+            sys.stderr.write(f"Warning: the pipeline's git {' and '.join(missing)} hook(s) are not installed in "
+                             f"{tops[cwd]}, so commits and pushes made outside this check are not scanned. "
+                             f"Ask the user to run there: python \"{script}\" --install-pre-commit "
+                             "--install-pre-push\n")
+            return
 
 
 def is_bare(cwd):
@@ -1203,36 +1565,54 @@ def is_bare(cwd):
     return code == 0 and out.strip() == "true"
 
 
+ERROR_RISKY_OPS = SCANNED_OPS | REMOTE_REF_TOOLS | FETCH_OPS | {"stage", "remote", "config"}
+
+
+def error_word_lists(text, powershell):
+    lists = [[word for word in (part.strip("\"'`") for part in re.split(r"[\s;&|(){}]+", text)) if word]]
+    for mode in {powershell, False}:
+        try:
+            lists.append([token.lower() for segment in split_segments(text, mode)
+                          for token, _ in tokenize(segment, mode)])
+        except Exception:
+            lists.append(re.sub(r"[\\'\"`]", "", text).split())
+    return lists
+
+
 def blocks_on_error(raw):
     text = raw.lower()
     if ALLOWLIST_FILE in text:
         return True
+    powershell = False
     try:
         payload = json.loads(raw)
         tool_input = payload.get("tool_input") or {}
         if payload.get("tool_name") in FILE_TOOLS:
             target = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
-            return is_allowlist_path(target) or is_remote_ref_path(target)
+            return is_allowlist_path(target) or is_remote_ref_path(target) or is_git_internal_path(target)
         text = str(tool_input.get("command") or "").lower()
+        powershell = payload.get("tool_name") == "PowerShell"
     except Exception:
         pass
-    words = [word for word in (part.strip("\"'`") for part in re.split(r"[\s;&|(){}]+", text)) if word]
+    if GIT_INTERNALS.search(text):
+        return True
     value_options = {option.lower() for option in GIT_VALUE_OPTIONS}
     builtins = None
-    for index, word in enumerate(words):
-        if program(word) != "git":
-            continue
-        rest = words[index + 1:]
-        while rest and rest[0].startswith("-"):
-            rest = rest[2:] if rest[0] in value_options else rest[1:]
-        if not rest:
-            continue
-        if rest[0] in SCANNED_OPS or rest[0] in REMOTE_REF_TOOLS or rest[0] in ("stage", "remote"):
-            return True
-        if builtins is None:
-            builtins = set(git(["--list-cmds=builtins"], None)[1].split())
-        if rest[0] not in builtins:
-            return True
+    for words in error_word_lists(text, powershell):
+        for index, word in enumerate(words):
+            if program(word) != "git":
+                continue
+            rest = words[index + 1:]
+            while rest and rest[0].startswith("-"):
+                rest = rest[2:] if rest[0] in value_options else rest[1:]
+            if not rest:
+                continue
+            if rest[0] in ERROR_RISKY_OPS:
+                return True
+            if builtins is None:
+                builtins = set(git(["--list-cmds=builtins"], None)[1].split())
+            if rest[0] not in builtins:
+                return True
     return False
 
 
@@ -1245,13 +1625,18 @@ def main(raw):
             deny(ALLOWLIST_DENY)
         if is_remote_ref_path(target):
             deny(REMOTE_REFS_DENY)
+        if is_git_internal_path(target):
+            deny(HOOKS_DENY)
         allow()
     command = tool_input.get("command", "") or ""
     powershell = payload.get("tool_name") == "PowerShell"
     base = payload.get("cwd") or None
     ops = expand_ops(find_git_ops(command, powershell), base, powershell)
-    if repoints_remote_refs(command, ops):
+    if repoints_remote_refs(command, ops, powershell):
         deny(REMOTE_REFS_DENY)
+    guarded_reason = guard_reason(command, powershell, ops)
+    if guarded_reason:
+        deny(guarded_reason)
     tops, bare, targets = {}, set(), []
     for item in ops:
         cwd = resolve_cwd(item["steps"], base, powershell)
@@ -1304,14 +1689,17 @@ def main(raw):
             reason = push_reason(cwd, top, item["tokens"])
         if reason:
             deny(reason)
+    warn_missing_hooks(targets, tops)
     allow()
 
 
 def run():
     if "--pre-push" in sys.argv:
         pre_push()
-    if "--install-pre-push" in sys.argv:
-        install_pre_push()
+    if "--pre-commit" in sys.argv:
+        pre_commit()
+    if {"--install-pre-push", "--install-pre-commit", "--enable-gate"} & set(sys.argv):
+        install()
     if "--fingerprint" in sys.argv:
         print_fingerprints()
     raw = ""
@@ -1332,8 +1720,9 @@ if __name__ == "__main__":
     try:
         run()
     except Exception as error:
-        if "--pre-push" in sys.argv:
-            sys.stderr.write(f"Secret scan failed ({error!r}); blocking the push. "
-                             "Fix the scanner or push with --no-verify after checking by hand.\n")
-            sys.exit(1)
+        for flag, what in (("--pre-push", "push"), ("--pre-commit", "commit")):
+            if flag in sys.argv:
+                sys.stderr.write(f"Secret scan failed ({error!r}); blocking the {what}. "
+                                 f"Fix the scanner or {what} with --no-verify after checking by hand.\n")
+                sys.exit(1)
         allow()

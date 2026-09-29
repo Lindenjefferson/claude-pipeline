@@ -118,7 +118,7 @@ scanner.git = real_git
 
 sh(repo, "git", "add", ALLOW)
 sh(repo, "git", "commit", "-q", "-m", "user entry")
-write("cfg.txt", "AWS_" + "KEY=AK" + "IAABCDEFGHIJKLMNOP\n")
+write("cfg.txt", "placeholder\n")
 sh(repo, "git", "add", "cfg.txt")
 sh(repo, "git", "commit", "-q", "-m", "tracked")
 write("cfg.txt", "AWS_" + "KEY=AK" + "IAQRSTUVWXYZABCDEF\n")

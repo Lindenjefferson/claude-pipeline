@@ -121,10 +121,10 @@ real_git = scanner.git
 
 
 def failing(verb):
-    def fake(args, cwd, env=None):
+    def fake(args, cwd, env=None, **options):
         if args[0] == verb:
             return 1, ""
-        return real_git(args, cwd, env)
+        return real_git(args, cwd, env, **options)
     return fake
 
 
