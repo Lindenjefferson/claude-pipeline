@@ -1,4 +1,7 @@
+import atexit
 import os
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -404,6 +407,17 @@ summary = pg.summarize([{"status": "killed"}, {"status": "survived"}, {"status":
 check("score ignores invalid mutants and counts timeouts as killed", summary["score"] == 66.7, summary)
 
 root = os.path.join(tempfile.gettempdir(), f"pgmutate_test_{int(time.time() * 1000)}")
+
+
+def remove_tree(path):
+    def writable(func, target, _):
+        os.chmod(target, stat.S_IWRITE)
+        func(target)
+    if os.path.isdir(path):
+        shutil.rmtree(path, onerror=writable)
+
+
+atexit.register(lambda: remove_tree(root))
 os.makedirs(os.path.join(root, "supabase", "migrations"))
 os.makedirs(os.path.join(root, "supabase", "tests"))
 

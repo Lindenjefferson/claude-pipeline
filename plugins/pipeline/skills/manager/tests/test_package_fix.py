@@ -99,11 +99,27 @@ text = header("1-security-fix-r2")
 check("security always gets the full task range",
       "Scope: full (security always" in text and text.startswith(f"# Review package: {spec1}..{c2}"), text[:300])
 r = package("--fix-of", "1", "--agent", "audit")
-check("a previous report without a findings section gives the full range",
-      "Scope: full (the previous report's findings cite no file)" in header("1-audit-fix-r2"), header("1-audit-fix-r2")[:300])
+check("an own report citing no file is still fix-only when another reviewer's open findings cite the fixed files",
+      "Scope: fix-only" in header("1-audit-fix-r2"), header("1-audit-fix-r2")[:300])
 r = package("--fix-of", "1", "--agent", "design")
-check("a previous report whose findings cite no file gives the full range",
-      "Scope: full" in header("1-design-fix-r2"), header("1-design-fix-r2")[:300])
+check("a PASS reviewer re-run on a fix of the combined brief is fix-only",
+      "Scope: fix-only" in header("1-design-fix-r2"), header("1-design-fix-r2")[:300])
+
+sh("git", "reset", "-q", "--hard", c1)
+n0 = sh("git", "rev-parse", "HEAD")
+commit(["src/n.ts"], "task N")
+review("audit", "Looked at everything; FAIL for the missing trail.\n", task="N", frm=n0)
+review("design", "**Findings**\n- the flow is wrong\n", task="N", frm=n0)
+commit(["src/n.ts", "docs/modulo.md"], "fix n")
+r = package("--fix-of", "N", "--agent", "audit")
+check("when no reviewer's open findings cite a file the fix gets the full range",
+      "Scope: full (the open findings of the task's reviewers cite no file)" in header("N-audit-fix-r2"),
+      header("N-audit-fix-r2")[:300])
+sh("git", "reset", "-q", "--hard", "HEAD~1")
+commit(["docs/modulo.md"], "docs only")
+r = package("--fix-of", "N", "--agent", "design")
+check("a fix touching only docs/** is fix-only even with no cited file",
+      "Scope: fix-only" in header("N-design-fix-r2"), header("N-design-fix-r2")[:300])
 
 sh("git", "reset", "-q", "--hard", c1)
 commit(["src/a.ts", "src/c.ts"], "fix a, touch c")

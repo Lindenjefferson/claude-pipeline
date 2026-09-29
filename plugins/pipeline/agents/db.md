@@ -27,9 +27,9 @@ Detect what this project actually uses — don't assume Postgres/Prisma/Supabase
 Findings from `security` (e.g., a policy that doesn't actually restrict cross-tenant reads) or `manager` about schema/migration files come back to you, not to `dev`. Fix, re-verify (re-run migrations locally if the project supports it, re-check the policy logic, repeat the mutation self-check for what changed), and report. When a round carries several findings, check how the fixes interact and test each path and their combination. The fix brief cites each report as a section `reports/<task>.md#<anchor>` (print it with `python "${CLAUDE_PLUGIN_ROOT}/skills/manager/ledger.py" show-report <ref>`). Keep a fix inside the files its findings cite when you can: a fix commit that touches another file sends the reviewers back over the whole task instead of just the fix. When you must touch another file, name it and say why in your report.
 
 ## Report contract
-Same as `dev`: **DONE** / **DONE_WITH_CONCERNS** / **NEEDS_CONTEXT** / **BLOCKED**, with what you changed and how you verified it (migration applied cleanly, policy tested against a non-owner read, etc.). The same minimum applies: DONE / DONE_WITH_CONCERNS at least 200 non-space characters besides the `LEDGER` line, NEEDS_CONTEXT / BLOCKED a concrete reason of at least 40. On DONE / DONE_WITH_CONCERNS include, filled from git and never from memory:
+Same as `dev`: **DONE** / **DONE_WITH_CONCERNS** / **NEEDS_CONTEXT** / **BLOCKED**, with what you changed and how you verified it (migration applied cleanly, policy tested against a non-owner read, etc.). The same minimum applies: DONE / DONE_WITH_CONCERNS at least 200 non-space characters besides the `LEDGER` line, NEEDS_CONTEXT / BLOCKED a concrete reason of at least 40. On DONE / DONE_WITH_CONCERNS include, filled from git and never from memory (paste the real short SHA from `git rev-parse --short HEAD`: the ledger rejects a placeholder `Commit:` line such as `<sha>`, "see git rev-parse" or `HEAD`):
 ```
-Commit: <full SHA from `git rev-parse HEAD`>
+Commit: <the short SHA that `git rev-parse --short HEAD` prints, pasted as is>
 List under Files changed every path from `git show --stat HEAD` (or `git diff --stat <task start>..HEAD` for several commits), one per line:
 Files changed:
 - <path>

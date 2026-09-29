@@ -151,8 +151,30 @@ for name, report, expected in (
     found = finding_paths(report)
     check(f"finding_paths: {name}", found == expected, str(found))
 
-check("fix_scope_reason: an unreadable report", "cannot be read" in fix_scope_reason(None, "r.md", ["a"], ["a"]))
+for name, report, expected in (
+        ("a contrast ratio is not a file", "## Important\n1. text at 4.5:1 and `3:1` fails; see `src/a.ts:2`\n",
+         {"src/a.ts"}),
+        ("an aspect ratio is not a shorthand", "## Minor\n- the 16:9 frame in src/v.ts:4\n", {"src/v.ts"}),
+        ("e.g. and i.e. are not files", "## Minor\n- e.g. a guard, i.e. the check in `lib/g.ts`\n", {"lib/g.ts"}),
+        ("URLs are not files", "## Minor\n- see `https://nextjs.org/docs/app.html` and //cdn.x.com/a.js; fix x/y.ts\n",
+         {"x/y.ts"}),
+        ("tokens without a letter are not files", "## Minor\n- version `1.2.3` of `lib/z.ts`\n", {"lib/z.ts"}),
+        ("a zero-padded migration shorthand still counts", "## Minor\n- 0002:226 and 02:64\n", {"0002", "02"})):
+    found = finding_paths(report)
+    check(f"finding_paths prose: {name}", found == expected, str(found))
+
+IMPORTANT = "## Important\n1. `src/a.ts:3` misses a check.\n"
+check("fix_scope_reason: an unreadable report",
+      "cannot be read" in fix_scope_reason([("r.md", IMPORTANT), ("o.md", None)], ["src/a.ts"], ["src/a.ts"]))
 check("fix_scope_reason: findings that cite no file",
-      "cite no file" in fix_scope_reason("## Important\n1. the flow is wrong\n", "r.md", ["a.ts"], ["a.ts"]))
+      "cite no file" in fix_scope_reason([("r.md", "## Important\n1. the flow is wrong\n")], ["a.ts"], ["a.ts"]))
+check("fix_scope_reason: the union of the reviewers' open findings covers the combined fix",
+      fix_scope_reason([("r.md", IMPORTANT), ("o.md", "## Minor\n- `src/b.ts:1`\n")], ["src/a.ts", "src/b.ts"],
+                       ["src/a.ts", "src/b.ts"]) is None)
+check("fix_scope_reason: docs/** is exempt",
+      fix_scope_reason([("r.md", IMPORTANT)], ["src/a.ts", "docs/modulos/01.md"], ["src/a.ts", "docs/modulos/01.md"])
+      is None)
+check("fix_scope_reason: a file no reviewer cites still widens the scope",
+      "src/c.ts" in fix_scope_reason([("r.md", IMPORTANT)], ["src/a.ts", "src/c.ts"], ["src/a.ts", "src/c.ts"]))
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

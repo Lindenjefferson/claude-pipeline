@@ -1,5 +1,8 @@
+import atexit
 import hashlib
 import os
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -99,6 +102,25 @@ check("killing_hint strips ANSI and finds the failing line",
 
 root = os.path.join(tempfile.gettempdir(), f"tsmutate_test_{int(time.time() * 1000)}")
 os.makedirs(root)
+backups_before = {d for d in os.listdir(tempfile.gettempdir()) if d.startswith("tsmutate-")}
+
+
+def remove_tree(path):
+    def writable(func, target, _):
+        os.chmod(target, stat.S_IWRITE)
+        func(target)
+    shutil.rmtree(path, onerror=writable)
+
+
+def cleanup():
+    temp = tempfile.gettempdir()
+    for name in {d for d in os.listdir(temp) if d.startswith("tsmutate-")} - backups_before:
+        remove_tree(os.path.join(temp, name))
+    if os.path.isdir(root):
+        remove_tree(root)
+
+
+atexit.register(cleanup)
 
 
 def sh(*args):
@@ -257,6 +279,12 @@ kill_process_tree(proc)
 check("--in-place hard kill leaves the mutant in the file (why the worktree is the default)", sha(calc) != original_hash)
 sh("git", "checkout", "--", "calc.js")
 os.remove(flag)
+
+temp_dirs = lambda: {d for d in os.listdir(tempfile.gettempdir()) if d.startswith("tsmutate-") and "-wt-" not in d}
+seen = temp_dirs()
+r = tool(calc, "--test-cmd", cmd(), "--operators", "and-or-swap")
+check("worktree mode writes no backup copy in the temp directory", r.returncode == 0 and temp_dirs() == seen,
+      str(temp_dirs() - seen))
 
 r = tool(calc, "--list")
 check("--list prints mutants without running anything", r.returncode == 0 and "comparison" in r.stdout and sha(calc) == original_hash,
