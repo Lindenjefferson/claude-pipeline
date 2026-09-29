@@ -1,4 +1,4 @@
-import json, os, subprocess, sys, tempfile, time
+import re, json, os, subprocess, sys, tempfile, time
 
 LEDGER_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ledger.py")
 repo = os.path.join(tempfile.gettempdir(), f"ledgerreports_{int(time.time() * 1000)}")
@@ -168,10 +168,17 @@ def template(agent, path):
     text = open(os.path.join(AGENTS, agent), encoding="utf-8").read()
     start = text.index("```\nCommit:") + 4
     block = text[start:text.index("```", start)]
-    return block.replace("<full SHA from `git rev-parse HEAD`>", c1).replace("<path>", path)
+    return re.sub(r"^Commit: <[^\n]*>$", f"Commit: {c1[:7]}", block, count=1, flags=re.MULTILINE) \
+        .replace("<path>", path)
 
 
 for agent, line in (("dev.md", DEV), ("db.md", 'LEDGER {"agent":"db","verdict":"DONE"}')):
+    text = open(os.path.join(AGENTS, agent), encoding="utf-8").read()
+    start = text.index("```\nCommit:") + 4
+    raw = text[start:text.index("```", start)].replace("<path>", "src/a.py")
+    r = append(line, report(f"tpl-raw-{agent}", f"{raw}\nCommitted {c1[:8]}.\n{PAD}\n{line}\n"))
+    check(f"the {agent} template's unfilled Commit line is rejected as a placeholder",
+          r.returncode != 0 and "placeholder" in r.stderr and "git rev-parse --short HEAD" in r.stderr, r.stderr)
     r = append(line, report(f"tpl-bad-{agent}", f"{template(agent, 'README.md')}\n{PAD}\n{line}\n"))
     check(f"the literal {agent} template: an unchanged file is rejected",
           r.returncode != 0 and "README.md" in r.stderr, r.stderr)

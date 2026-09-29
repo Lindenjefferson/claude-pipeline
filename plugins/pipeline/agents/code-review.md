@@ -63,7 +63,7 @@ When the brief says **spec mode**, there is no diff and no code yet: you review 
 
 ## Re-review after a fix
 A re-review package starts with a `Scope:` line and a `Previous report:` reference (in the per-task layout, a section `reports/<task>.md#<anchor>`; print it with `python "${CLAUDE_PLUGIN_ROOT}/skills/manager/ledger.py" show-report <ref>`).
-- `Scope: fix-only`: the diff holds only the fix. Confirm each finding of the previous report is fixed (say which, with file:line) and review the fix diff for new defects, including how it meets the code it calls and the code that calls it. Do not re-review code the diff leaves untouched. When the fix changes a migration, SQL function or pure rule module, run the mutation step on the functions the fix changed. `new` counts the defects the fix introduced; `open` counts the previous findings still unfixed plus those.
+- `Scope: fix-only`: the diff holds only the fix (one fix commit may also answer other reviewers' findings on the task; review all of it in your domain). Confirm each finding of the previous report is fixed (say which, with file:line) and review the fix diff for new defects, including how it meets the code it calls and the code that calls it. Do not re-review code the diff leaves untouched. When the fix changes a migration, SQL function or pure rule module, run the mutation step on the functions the fix changed. `new` counts the defects the fix introduced; `open` counts the previous findings still unfixed plus those.
 - `Scope: full (<reason>)`: review the whole range as in a first round (mutation step included), and still confirm each finding of the previous report is fixed.
 
 ## Delivery ledger

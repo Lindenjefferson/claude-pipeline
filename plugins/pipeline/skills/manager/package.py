@@ -9,7 +9,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from findings import fix_scope_reason
-from ledger import FULL_SCOPE_AGENTS, SPEC_TASK, cited_paths, coverage_start, read_ledger, read_report, role
+from ledger import FULL_SCOPE_AGENTS, SPEC_TASK, cited_paths, coverage_start, open_findings_reports, read_ledger, role
 
 PLUGIN_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 LOCKFILES = ("package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "Cargo.lock", "poetry.lock")
@@ -154,12 +154,12 @@ def dependency_section(span, locks):
     return "\n".join(parts)
 
 
-def scope_reason(args, last, fixed, universe, spec):
+def scope_reason(args, entries, last, fixed, universe, spec):
     if args.agent in FULL_SCOPE_AGENTS:
         return f"{args.agent} always re-reviews the task's full range"
     if spec:
         return None
-    return fix_scope_reason(read_report(last["report"]), last["report"], fixed, universe)
+    return fix_scope_reason(open_findings_reports(entries, args.fix_of, args.agent, last["head"]), fixed, universe)
 
 
 def fix_package(args):
@@ -184,7 +184,7 @@ def fix_package(args):
         sys.exit(f"nothing changed{f' in {spec}' if spec else ''} since {last['head'][:8]}, "
                  f"the head of the last {args.agent} review of task {args.fix_of}")
     universe = git("diff", "--name-only", f"{start}..{head}")[1].splitlines()
-    reason = scope_reason(args, last, fixed, universe, spec)
+    reason = scope_reason(args, entries, last, fixed, universe, spec)
     return {"base": last["head"] if reason is None else start, "head": head,
             "scope": "fix-only" if reason is None else f"full ({reason})",
             "flag": "fix" if reason is None else "full", "previous": last["report"], "spec": spec,

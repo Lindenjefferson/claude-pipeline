@@ -48,7 +48,8 @@ How it runs (default: temporary git worktree, FILE itself is never written):
      caches into node_modules (vite, vitest) write them through the link, into the real
      node_modules.
   4. Runs --test-cmd once on the unmutated copy; it must pass. Then for each mutant writes
-     the mutated copy, runs --test-cmd and restores the copy (sha256 checked).
+     the mutated copy, runs --test-cmd and restores the copy (sha256 checked). No backup
+     copy is written: FILE itself is never touched.
   5. Removes the worktree (links first, never following them) and prunes it. If the process
      is hard-killed (e.g. `taskkill /F /T` from a tool timeout), the project tree is
      untouched and step 1 of the next run removes the leftover worktree.
@@ -597,7 +598,7 @@ def run_in_worktree(path, rows, test_cmd, cwd, timeout, progress=None, warn=None
     wt = create_worktree(root, path, rel_file, rel_cwd)
     try:
         return run_all(os.path.join(wt, rel_file), rows, test_cmd, os.path.normpath(os.path.join(wt, rel_cwd)),
-                       timeout, progress=progress)
+                       timeout, progress=progress, keep_backup=False)
     finally:
         try:
             remove_worktree(root, wt)
@@ -619,15 +620,15 @@ def collect_rows(text, mutants, rel):
             for i, m in enumerate(mutants)]
 
 
-def run_all(path, rows, test_cmd, cwd, timeout, runner=None, writer=None, progress=None):
+def run_all(path, rows, test_cmd, cwd, timeout, runner=None, writer=None, progress=None, keep_backup=True):
     runner = runner or run_command
     with open(path, "rb") as fh:
         original = fh.read()
     original_hash = sha256(original)
     text = original.decode("utf-8")
-    backup_dir = tempfile.mkdtemp(prefix="tsmutate-")
-    backup = os.path.join(backup_dir, os.path.basename(path) + ".orig")
-    shutil.copyfile(path, backup)
+    backup_dir = tempfile.mkdtemp(prefix="tsmutate-") if keep_backup else None
+    if backup_dir:
+        shutil.copyfile(path, os.path.join(backup_dir, os.path.basename(path) + ".orig"))
     ok = False
     try:
         code, out = runner(test_cmd, cwd, timeout)
@@ -651,7 +652,7 @@ def run_all(path, rows, test_cmd, cwd, timeout, runner=None, writer=None, progre
         ok = True
     finally:
         restore(path, original, original_hash, writer)
-        if ok:
+        if ok and backup_dir:
             shutil.rmtree(backup_dir, ignore_errors=True)
     return rows
 

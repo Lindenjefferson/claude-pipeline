@@ -330,4 +330,18 @@ check("--include-lockfiles keeps them in the diff",
       r.returncode == 0 and "LOCKMARKER" in full[full.find("## Diff"):] and "Lockfiles left out" not in full, r.stderr)
 check("no matching checklist says so", "none matched" in full, full[:400])
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import package as pkg
+
+CHECKLISTS = os.path.join(pkg.PLUGIN_ROOT, "checklists")
+for changed in (["app/convite/[token]/aceite.tsx"],
+                ["app/(auth)/cadastro/formulario-cadastro.tsx"], ["app/(auth)/definir-senha/actions.ts"],
+                ["lib/auth/reset-token.ts"], ["app/invites/accept.ts"]):
+    check(f"the auth checklist matches {changed[0]}", "auth.md" in pkg.checklists_section(CHECKLISTS, changed))
+with open(os.path.join(pkg.PLUGIN_ROOT, "lessons", "auth.jsonl"), encoding="utf-8") as handle:
+    auth_lessons = [json.loads(row) for row in handle if row.strip()]
+check("every auth lesson matches the Portuguese invite and password paths",
+      all(pkg.matches_any(lesson["paths"], ["app/convite/[token]/aceite.tsx"])
+          and pkg.matches_any(lesson["paths"], ["app/(auth)/definir-senha/page.tsx"]) for lesson in auth_lessons))
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

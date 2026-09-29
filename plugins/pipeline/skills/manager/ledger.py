@@ -44,6 +44,9 @@ ROLES = {"implementer": "implement", "reviewer": "review"}
 NAME_PATTERN = re.compile(r"^[\w.-]+$")
 LEDGER_LINE = re.compile(r"^[\s`>*-]*LEDGER\s*\{", re.MULTILINE)
 SHA_TOKEN = re.compile(r"\b[0-9a-f]{7,40}\b")
+SHA_LINE = re.compile(r"^[\s>*_`-]*(?:commit(?:\s+sha)?|sha|head)[\s*_`]*[:=][\s*_`]*(.*)$", re.IGNORECASE)
+PLACEHOLDER_SHA = re.compile(r"<[^<>]*\b(?:sha|commit|hash)\b[^<>]*>|\bsee\s+`?git\b|`git rev-parse[^`]*`",
+                             re.IGNORECASE)
 BACKTICKED = re.compile(r"`([^`\s]+)`")
 PARENTHETICAL = r"(?:\s*\((?:[^()]|\([^()]*\))*\))?"
 FILES_LABEL = re.compile(r"^\s*(?:#+\s*)?\**\s*(?:changed\s+|modified\s+)?files"
@@ -218,11 +221,29 @@ def read_sums(path):
     return sections
 
 
-def write_sums(path, sections):
+def write_sums(path, sections, pending=None):
     temporary = sums_path(path) + ".tmp"
+    data = {"version": 1, "sections": sections}
+    if pending:
+        data["pending"] = pending
     with open(temporary, "w", encoding="utf-8", newline="\n") as handle:
-        json.dump({"version": 1, "sections": sections}, handle, indent=1)
+        json.dump(data, handle, indent=1)
     os.replace(temporary, sums_path(path))
+
+
+def read_pending(path):
+    try:
+        with open(sums_path(path), encoding="utf-8") as handle:
+            pending = json.load(handle).get("pending")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return pending if isinstance(pending, dict) else None
+
+
+def repair_hint(path):
+    task = os.path.splitext(os.path.basename(path))[0]
+    return (f"; if a save-report was interrupted, run `ledger.py repair-reports --task {task}` to see them and "
+            "drop them")
 
 
 def report_file_problems(path):
@@ -240,7 +261,8 @@ def report_file_problems(path):
                     "(prefix hash mismatch)"]
     recorded = sections[-1]["end"] if sections else 0
     if len(raw) != recorded:
-        return [f"{path}: {len(raw) - recorded} bytes after the last saved section were not written by save-report"]
+        return [f"{path}: {len(raw) - recorded} bytes after the last saved section were not recorded by save-report"
+                + repair_hint(path)]
     return []
 
 
@@ -375,6 +397,17 @@ def cited_paths(text, files_section_only=False):
     return paths
 
 
+def sha_placeholder(body):
+    for line in body.splitlines():
+        labelled = SHA_LINE.match(line)
+        value = labelled.group(1).strip() if labelled else ""
+        if labelled and value and not SHA_TOKEN.search(value.lower()):
+            return line.strip()[:80]
+        if PLACEHOLDER_SHA.search(line) and not SHA_TOKEN.search(line.lower()):
+            return line.strip()[:80]
+    return None
+
+
 def implementer_problems(entry, text, from_sha, head, allow_unlisted):
     problems = []
     if not LEDGER_LINE.search(text):
@@ -386,6 +419,10 @@ def implementer_problems(entry, text, from_sha, head, allow_unlisted):
         problems.append(f"the report looks like a placeholder (a {entry['verdict']} report needs at least "
                         f"{minimum} non-space characters besides the LEDGER line, not just 'placeholder'/'TODO')")
     if entry["agent"] in COMMITTING_IMPLEMENTERS and entry["verdict"] in COMMITTED_VERDICTS:
+        placeholder = sha_placeholder(body)
+        if placeholder:
+            problems.append(f"the report's SHA line is a placeholder ('{placeholder}'): paste the real short SHA "
+                            "from `git rev-parse --short HEAD`")
         commits = git("rev-list", f"{from_sha}..{head}")[1].split()
         tokens = set(SHA_TOKEN.findall(text.lower()))
         if not any(sha.startswith(token) for token in tokens for sha in commits):
@@ -424,14 +461,27 @@ def fix_coverage(earlier, from_sha, task):
     return covers
 
 
-def fix_scope_problem(earlier, covers, head, task):
+def open_findings_reports(entries, task, agent, fix_base):
+    latest, ancestry = {}, {}
+    for entry in entries:
+        if not entry.get("agent") or entry.get("task") != task or role(entry) != "review":
+            continue
+        if entry["head"] not in ancestry:
+            ancestry[entry["head"]] = git("merge-base", "--is-ancestor", entry["head"], fix_base)[0] == 0
+        if ancestry[entry["head"]]:
+            latest[entry["agent"]] = entry
+    order = [agent] + sorted(name for name in latest if name != agent)
+    return [(latest[name]["report"], read_report(latest[name]["report"])) for name in order if name in latest]
+
+
+def fix_scope_problem(entries, earlier, covers, head, task):
     if task == SPEC_TASK:
         return None
     previous = earlier[-1]
     plain = ("-c", "core.quotepath=off")
     fixed = git(*plain, "diff", "--name-only", f"{previous['head']}..{head}")[1].splitlines()
     universe = git(*plain, "diff", "--name-only", f"{covers}..{head}")[1].splitlines()
-    reason = fix_scope_reason(read_report(previous["report"]), previous["report"], fixed, universe)
+    reason = fix_scope_reason(open_findings_reports(entries, task, previous["agent"], previous["head"]), fixed, universe)
     return f"--scope fix does not fit: {reason}; record it with --scope full" if reason else None
 
 
@@ -495,7 +545,8 @@ def append(args):
         scope = args.scope or "full"
         entry["scope"] = scope
         entry["covers_from"] = fix_coverage(earlier, from_sha, args.task) if scope == "fix" else from_sha
-        problem = fix_scope_problem(earlier, entry["covers_from"], head, args.task) if scope == "fix" else None
+        problem = (fix_scope_problem(entries, earlier, entry["covers_from"], head, args.task)
+                   if scope == "fix" else None)
         if problem:
             sys.exit(problem)
     if unlisted:
@@ -619,6 +670,29 @@ def remove_quietly(path, attempts=50):
             time.sleep(0.02)
 
 
+def take_over(lock, holder):
+    grave = f"{lock}.{os.getpid()}-{os.urandom(4).hex()}.stale"
+    try:
+        os.rename(lock, grave)
+    except OSError:
+        return False
+    moved = read_lock(grave)
+    if moved == holder:
+        remove_quietly(grave)
+        return True
+    try:
+        descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except OSError:
+        remove_quietly(grave)
+        return False
+    try:
+        os.write(descriptor, (moved or "").encode("ascii", errors="replace"))
+    finally:
+        os.close(descriptor)
+    remove_quietly(grave)
+    return False
+
+
 @contextlib.contextmanager
 def exclusive(path):
     lock = path + ".lock"
@@ -629,8 +703,7 @@ def exclusive(path):
             break
         except FileExistsError:
             holder = read_lock(lock)
-            if holder is not None and lock_is_stale(lock, holder) and read_lock(lock) == holder:
-                remove_quietly(lock, attempts=1)
+            if holder and lock_is_stale(lock, holder) and take_over(lock, holder):
                 continue
         except PermissionError:
             pass
@@ -639,12 +712,14 @@ def exclusive(path):
                      "save-report is running")
         time.sleep(delay * (1 + int.from_bytes(os.urandom(1), "big") / 255))
         delay = min(delay * 2, 0.25)
+    token = f"{os.getpid()} {time.time():.3f} {os.urandom(8).hex()}\n"
     try:
-        os.write(descriptor, f"{os.getpid()} {time.time():.3f}\n".encode("ascii"))
+        os.write(descriptor, token.encode("ascii"))
         os.close(descriptor)
         yield
     finally:
-        remove_quietly(lock)
+        if read_lock(lock) == token:
+            remove_quietly(lock)
 
 
 def ledger_layout(entries):
@@ -700,6 +775,8 @@ def append_section(args, text, path, suffix, first, from_sha, head):
     title = f"{args.agent}{' review' if suffix else ''} r{number} — {from_sha[:7]}..{head[:7]}"
     start = os.path.getsize(path) if os.path.exists(path) else 0
     block = (("\n" if start else "") + ANCHOR_MARK.format(anchor) + f"\n## {title}\n\n{text}").encode("utf-8")
+    write_sums(path, sections, pending={"anchor": anchor, "start": start, "end": start + len(block),
+                                        "block_sha256": hashlib.sha256(block).hexdigest()})
     with open(path, "ab") as handle:
         handle.write(block)
         handle.flush()
@@ -710,6 +787,48 @@ def append_section(args, text, path, suffix, first, from_sha, head):
                      "sha256": hashlib.sha256(prefix).hexdigest()})
     write_sums(path, sections)
     return anchor
+
+
+def repair_reports(args):
+    if not NAME_PATTERN.match(args.task):
+        sys.exit(f"--task must match {NAME_PATTERN.pattern}: {args.task}")
+    directory = args.reports_dir or os.path.join(os.path.dirname(args.ledger) or ".", "reports")
+    path = os.path.join(directory, f"{args.task}.md")
+    if not os.path.isfile(path):
+        sys.exit(f"{path} does not exist")
+    with exclusive(path):
+        sections = read_sums(path)
+        if sections is None:
+            sys.exit(f"{sums_path(path)} is missing or unreadable; repair-reports only drops unrecorded trailing bytes")
+        with open(path, "rb") as handle:
+            raw = handle.read()
+        recorded = sections[-1]["end"] if sections else 0
+        if recorded > len(raw) or any(hashlib.sha256(raw[:s["end"]]).hexdigest() != s.get("sha256")
+                                      for s in sections):
+            sys.exit(f"{path}: a saved section changed (prefix hash mismatch); that is not an interrupted save, "
+                     "repair-reports will not touch it")
+        trailing = raw[recorded:]
+        if not trailing:
+            write_sums(path, sections)
+            print(f"{path}: nothing to repair")
+            return
+        pending = read_pending(path)
+        interrupted = bool(pending and pending.get("start") == recorded and pending.get("end") == len(raw)
+                           and hashlib.sha256(trailing).hexdigest() == pending.get("block_sha256"))
+        origin = (f"the interrupted save of section #{pending['anchor']}" if interrupted
+                  else "no interrupted save-report (written by something else)")
+        preview = trailing[:400].decode("utf-8", errors="replace")
+        sys.stdout.flush()
+        sys.stdout.buffer.write((f"{path}: {len(trailing)} unrecorded bytes after byte {recorded}, from {origin}:"
+                                 f"\n---\n{preview}" + ("\n[...]" if len(trailing) > 400 else "")
+                                 + "\n---\n").encode("utf-8"))
+        sys.stdout.flush()
+        if not args.yes:
+            sys.exit("nothing changed; re-run with --yes to truncate them, then save the report again")
+        with open(path, "r+b") as handle:
+            handle.truncate(recorded)
+        write_sums(path, sections)
+        print(f"truncated {path} to {recorded} bytes; save the report again with save-report")
 
 
 def read_lessons(path):
@@ -1220,6 +1339,13 @@ def main():
     source.add_argument("--stdin", action="store_true")
     source.add_argument("--file")
     save_cmd.set_defaults(run=save_report)
+
+    repair_cmd = commands.add_parser("repair-reports", help="show, and with --yes drop, the unrecorded bytes an "
+                                                            "interrupted save-report left at the end of reports/<task>.md")
+    repair_cmd.add_argument("--task", required=True)
+    repair_cmd.add_argument("--reports-dir", help="default: 'reports' next to the ledger")
+    repair_cmd.add_argument("--yes", action="store_true", help="confirm the truncation")
+    repair_cmd.set_defaults(run=repair_reports)
 
     lesson_cmd = commands.add_parser("lesson", help="manage this delivery's lessons")
     lesson_cmd.add_argument("--lessons", default=LESSONS_DEFAULT)

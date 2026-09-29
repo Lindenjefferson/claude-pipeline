@@ -25,6 +25,9 @@ BACKTICKED = re.compile(r"`([^`\s]+)`")
 SEGMENT = r"[\w.()\[\]@+-]+/"
 FILE_NAME = re.compile(rf"(?<![\w/.-])((?:{SEGMENT})*[\w-][\w.-]*\.[A-Za-z]\w{{0,7}})(?::\d+(?:-\d+)?)?(?![\w/(-])")
 SHORTHAND = re.compile(r"(?<![\w/.:-])([A-Za-z0-9_][\w-]*):\d+(?:-\d+)?(?![\w.])")
+RATIO = re.compile(r"^(?:[1-9]\d*|0)(?:\.\d+)?:\d+(?:\.\d+)?$")
+ABBREVIATIONS = ("e.g", "i.e")
+EXEMPT_PREFIXES = ("docs/",)
 
 
 def label_of(line):
@@ -91,6 +94,15 @@ def normalized(candidate):
     return path.rstrip(".")
 
 
+def is_prose(candidate):
+    token = candidate.strip(" `*,;()")
+    return "//" in token or bool(RATIO.match(token)) or token.lower().rstrip(".") in ABBREVIATIONS
+
+
+def shorthand_names(text):
+    return {match.group(1) for match in SHORTHAND.finditer(text) if not RATIO.match(match.group(0))}
+
+
 def finding_paths(text):
     sections = findings_sections(text)
     if not sections:
@@ -98,12 +110,15 @@ def finding_paths(text):
     body = "\n".join(sections)
     paths = set()
     for candidate in BACKTICKED.findall(body) + FILE_NAME.findall(body):
+        if is_prose(candidate):
+            continue
         path = normalized(candidate)
-        if path and ("/" in path or "." in path):
+        if path and ("/" in path or "." in path) and re.search(r"[A-Za-z]", path):
             paths.add(path)
     for token in BACKTICKED.findall(body):
-        paths.update(SHORTHAND.findall(token))
-    paths.update(SHORTHAND.findall(BACKTICKED.sub(" ", body)))
+        if "//" not in token:
+            paths.update(shorthand_names(token))
+    paths.update(shorthand_names(BACKTICKED.sub(" ", body)))
     return paths
 
 
@@ -127,13 +142,22 @@ def uncited(fixed, cited, universe):
     return [path for path in fixed if not is_cited(path, cited, universe)]
 
 
-def fix_scope_reason(report_text, report_ref, fixed, universe):
-    if report_text is None:
-        return f"the previous report {report_ref} cannot be read"
-    cited = finding_paths(report_text)
+def exempt(path):
+    return path.replace("\\", "/").startswith(EXEMPT_PREFIXES)
+
+
+def fix_scope_reason(reports, fixed, universe):
+    cited = set()
+    for ref, text in reports:
+        if text is None:
+            return f"the report {ref} cannot be read"
+        cited |= finding_paths(text) or set()
+    checked = [path for path in fixed if not exempt(path)]
+    if not checked:
+        return None
     if not cited:
-        return "the previous report's findings cite no file"
-    outside = uncited(fixed, cited, universe)
+        return "the open findings of the task's reviewers cite no file"
+    outside = uncited(checked, cited, universe)
     if outside:
         more = f" +{len(outside) - 5} more" if len(outside) > 5 else ""
         return f"the fix touches files outside the open findings: {', '.join(outside[:5])}{more}"
