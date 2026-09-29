@@ -10,7 +10,7 @@
     {
       "name": "pipeline",
       "source": "./plugins/pipeline",
-      "description": "Personal delivery pipeline (dev, reviewer, qa, gate; manager and kickoff skills; pre-commit secret scan), enabled per repo."
+      "description": "Personal delivery pipeline in short cycles (dev, reviewer, qa; local gate script; pre-commit secret scan), enabled per repo."
     }
   ],
   "description": "Personal plugins, enabled per repo."

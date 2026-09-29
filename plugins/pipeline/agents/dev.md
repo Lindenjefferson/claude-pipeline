@@ -39,7 +39,7 @@ If the task changes a module's behavior, interface, setup or a design decision, 
 - Never dispatch other agents. If a command is denied by permissions, do not work around it: report it.
 
 ## Receiving findings
-The brief lists the reviewer's or qa's findings. Fix each, re-run the tests, and check how the fixes interact (same route, screen or state). If you think a finding is wrong, say so with your reasoning; do not silently skip it.
+At the end of a cycle the brief lists every finding of the reviewer and qa at once. Fix them all in this one round, commit, re-run the full test suite, and check how the fixes interact (same route, screen or state). Keep the fix to what the findings ask: the reviewer checks only the fix commits. If you think a finding is wrong, say so with your reasoning; do not silently skip it.
 
 ## Report
 End with one of DONE, DONE_WITH_CONCERNS (state the concern), NEEDS_CONTEXT (what is missing) or BLOCKED (why), and on DONE:

@@ -12,25 +12,26 @@
 
 ## Comandos
 
-Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto. Preencher assim que a stack existir:
+Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o `gate.py` roda as linhas Build, Typecheck, Lint e Testes antes de qualquer merge. Preencher assim que a stack existir, com o comando entre crases (ex.: `- Testes:` seguido de `npm test` entre crases):
 
 - Instalar dependências: _(comando)_
 - Rodar em desenvolvimento: _(comando)_
-- Testes: _(comando)_
+- Build: _(comando)_
 - Typecheck: _(comando)_
 - Lint: _(comando)_
+- Testes: _(comando)_
 - Migrations (aplicar/criar): _(comando)_
 
 ## Fluxo de entrega
 
-A skill `manager` classifica o pedido (pequeno, padrão, grande) e conduz: spec (só nos grandes) → plano (aprovado pelo usuário) → por tarefa `dev` → `reviewer` → `qa` → `gate` (build, tipos, lint, testes e scan de segredos, tudo local) → merge e push só quando o usuário aprovar.
+A skill `manager` classifica o pedido (pequeno, padrão, grande) e conduz em ciclos curtos: spec (só nos grandes) → plano (aprovado pelo usuário) → ciclos de até ~6 tarefas (`dev` em cada tarefa, depois um `reviewer` e um `qa` sobre o ciclo inteiro e uma rodada de correção) → `gate.py` (build, tipos, lint, testes e scan de segredos, tudo local) → merge e push só quando o usuário aprovar.
 
 - O trabalho acontece numa branch `feat/...` ou `fix/...`; nada vai para a branch principal sem aprovação.
 - O ledger (`.superpowers/ledger.jsonl`) registra o que cada agente concluiu e o que falta.
-- Achados do `reviewer` e do `qa` voltam para o `dev`; depois de 3 rodadas sem resolver, o `manager` pergunta.
+- Achados do `reviewer` e do `qa` voltam para o `dev` numa rodada só; se ainda sobrar algo, o `manager` pergunta.
 - Erros que uma regra escrita teria evitado viram uma linha em `docs/lessons.md`, que o `dev` e o `reviewer` leem.
 - O hook `pre-commit` do git (instalado pelo `kickoff`) bloqueia commits com arquivos `.env` ou linhas com cara de segredo. Nunca usar `--no-verify` nem mexer em `.git/hooks`: um segredo commitado fica no histórico.
-- Cada entrega aprovada pelo `gate` gera um relatório em `docs/quality-reports/`.
+- Cada entrega aprovada pelo `gate.py` gera um relatório em `docs/quality-reports/`.
 
 ## Regras que valem sempre
 
