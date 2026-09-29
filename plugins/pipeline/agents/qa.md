@@ -1,6 +1,6 @@
 ---
 name: qa
-description: Runs the test suite and exercises the actual feature end-to-end against the task/plan's acceptance criteria — including in a browser for frontend work when browser tooling is available. Use before any task or branch is considered done, after the specialized reviewers have passed. Part of the `pipeline` plugin: dispatched by the `pipeline:manager` skill or when the user names this agent.
+description: Pipeline QA: runs the real test suite and exercises the feature end-to-end (in a browser for frontend when available) against the acceptance criteria, after reviewers pass.
 disallowedTools: Write, Edit, NotebookEdit
 model: sonnet
 ---

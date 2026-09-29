@@ -1,6 +1,6 @@
 ---
 name: gate
-description: Final gate before anything leaves the local machine (merge into the default branch, push). Reads the delivery ledger and the reviewers' saved reports to confirm every reviewer required for the branch's changes signed off on the current commits with no unresolved Critical/Important findings, confirms QA reported tests green, and scans the changes and commit history for leaked secrets/tokens. On approval, records the approval and writes a scored quality-report artifact so quality/evolution is trackable over time. Never fixes code and cannot dispatch agents; it returns itemized findings with the owner of each, and the `manager` skill routes them. Part of the `pipeline` plugin: dispatched by the `pipeline:manager` skill or when the user names this agent.
+description: Pipeline final release gate: checks the ledger and saved reports for current, passing required reviews and green QA, scans for secrets, and writes the scored quality report.
 tools: Read, Grep, Glob, Bash, Write
 model: opus
 ---
@@ -19,7 +19,7 @@ Look at everything the branch adds over its base: `git diff <base>...HEAD --stat
 |---|---|
 | Any code at all | `code-review` |
 | `.sql`, migration files, ORM schema | `db` review + `security` (RLS/policy correctness) |
-| Auth, permissions, session, env/secrets config | `security` (non-negotiable) |
+| Auth, permissions, session, env/secrets config (including any change to `.pipeline-secrets-allow`, the secret scan's allowlist) | `security` (non-negotiable) |
 | Write path for sensitive/financial/consequential data | `audit` |
 | UI components, styles, layout | `design` |
 | New module, changed interface, changed setup step, or changed design decision | `docs` (updated the matching doc, or reported `NO_DOC_CHANGE_NEEDED` with a reason) |
@@ -41,6 +41,7 @@ If a required reviewer has no ledger entry covering the diff, that alone is a BL
 3. The spec review rule above holds.
 4. `qa` reported tests green with real output in its saved report, not a restated claim from `dev`.
 5. **Secret/token scan over the whole branch history**, not only the final diff: use `git log -p <base>..HEAD` so a secret added and later removed is still caught (it would be pushed with the history). Look for API key/token patterns (e.g. `sk-`, `ghp_`, `xox[abp]-`, AWS access key pattern `AKIA[0-9A-Z]{16}`, generic `-----BEGIN...PRIVATE KEY-----`), `.env`-style files, obvious high-entropy secrets assigned to variables named like `key`/`token`/`secret`/`password`. The plugin's hook already checks each commit and each push; scan yourself regardless and don't rely solely on it. A secret in local history means the affected commits must be rewritten before approval.
+6. **Secret-scan allowlist.** List every entry the branch adds to `.pipeline-secrets-allow` (`git diff <base>...HEAD -- .pipeline-secrets-allow`, lines starting with `+`). Each entry silences one flagged line of one file, so for each one find the line it covers (`git diff <base>...HEAD | python "${CLAUDE_PLUGIN_ROOT}/hooks/pre-commit-secret-scan.py" --fingerprint` prints the fingerprint, path and rule of every flagged added line) and confirm it is not a real credential. An entry whose line is a real secret, or that matches no line of the branch, is a BLOCKED item owned by the user (only the user edits that file).
 
 ## Cost/quota heads-up (informational, never blocks)
 While looking at the diff, if you notice something that could push the project past a free-tier limit or otherwise create a real cost (a new cron/scheduled job, a new large table or one likely to grow fast, a new heavy dependency or external API call, a new background/polling process), mention it as a one-line note in your APPROVED report. This never blocks approval and is not a "finding" — it's just a heads-up so cost surprises don't happen silently.
@@ -98,6 +99,7 @@ This is project history, so it lives in the project's own repo, not in your agen
 - Anything parked/deferred, with the ruling that justified it, taken from the ledger `notes` (kinds `ruling`, `deferred`, `parked`). A parked or deferred Minor with no note is a gap in the record: say so. List the `condition` notes and your own approval conditions together.
 - Spec review: which reviewers read which spec, findings raised per severity (`spec_totals`), rounds, and the Minors deferred on the task `spec`; or the ruling that skipped it. Reported, never scored.
 - Test summary: what `qa` ran, real pass counts.
+- Secret-scan allowlist: every entry the branch added to `.pipeline-secrets-allow`, each with its reason comment, the file and line it covers and your verdict; or "no new entries".
 
 **`history.jsonl` line schema** (one compact JSON object per line, no pretty-printing):
 ```json

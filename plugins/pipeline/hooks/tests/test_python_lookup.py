@@ -72,6 +72,16 @@ r = claude_hook(no_python)
 check("Claude hook without Python says so on stderr", "Python 3" in r.stderr and r.returncode != 2,
       r.stdout + r.stderr)
 
+file_entry = next(entry for entry in json.load(open(os.path.join(HOOKS, "hooks.json")))["hooks"]["PreToolUse"]
+                  if "Write" in entry["matcher"].split("|"))
+check("hooks.json guards Write, Edit, MultiEdit and NotebookEdit",
+      set(file_entry["matcher"].split("|")) >= {"Write", "Edit", "MultiEdit", "NotebookEdit"}, file_entry["matcher"])
+r = subprocess.run([BASH, "-c", file_entry["hooks"][0]["command"]], capture_output=True, text=True,
+                   env=env_with(only_python3),
+                   input=json.dumps({"tool_name": "Write", "cwd": repo, "tool_input": {
+                       "file_path": os.path.join(repo, ".pipeline-secrets-allow"), "content": "x"}}))
+check("file-edit hook denies writing the secrets allowlist", '"deny"' in r.stdout, r.stdout + r.stderr)
+
 subprocess.run(["git", "commit", "-q", "-m", "secret"], cwd=repo, check=True)
 subprocess.run([sys.executable, HOOK, "--install-pre-push"], cwd=repo, check=True, capture_output=True)
 r = subprocess.run(["git", "push", "origin", "main"], cwd=repo, capture_output=True, text=True,

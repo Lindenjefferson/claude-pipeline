@@ -42,6 +42,9 @@ sh("git", "commit", "-q", "--allow-empty", "-m", "base")
 base = sh("git", "rev-parse", "HEAD")
 sh("git", "commit", "-q", "--allow-empty", "-m", "task 1")
 head1 = sh("git", "rev-parse", "HEAD")
+IMPL_REPORT = os.path.join(repo, "impl-report.md")
+open(IMPL_REPORT, "w").write(f"Implemented task 1 in commit {head1[:8]}. " + "Details of the change. " * 12
+                             + '\nLEDGER {"agent":"dev","verdict":"DONE"}\n')
 
 r = ledger("start", "--slug", "x", "--base", "not-a-commit")
 check("start rejects a base that is not a commit", r.returncode != 0 and not os.path.exists(LEDGER), r.stderr)
@@ -50,7 +53,7 @@ check("start accepts a revision and stores its full sha",
       r.returncode == 0 and json.loads(open(LEDGER).readline())["base"] == base, r.stderr)
 check("start refuses an existing ledger", ledger("start", "--slug", "x", "--base", base).returncode != 0)
 
-r = append('LEDGER {"agent":"dev","verdict":"DONE"}')
+r = append('LEDGER {"agent":"dev","verdict":"DONE"}', report=IMPL_REPORT)
 check("implementer line accepted", r.returncode == 0 and "round=1" in r.stdout, r.stderr)
 r = append(reviewer("code-review", "PASS", new=(0, 0, 1), opened=(0, 0, 1)))
 check("reviewer PASS with only a minor open accepted", r.returncode == 0, r.stderr)
@@ -97,7 +100,7 @@ check("status names each invalid line", r.stdout.count("INVALID line") == 2, r.s
 data = json.loads(ledger("status", "--json").stdout)
 check("status --json lists invalid lines", len(data["invalid"]) == 2, json.dumps(data["invalid"]))
 check("invalid lines are left out of the totals", "qa" not in data["totals"], json.dumps(data["totals"]))
-r = append('LEDGER {"agent":"docs","verdict":"NO_DOC_CHANGE_NEEDED"}')
+r = append('LEDGER {"agent":"docs","verdict":"NO_DOC_CHANGE_NEEDED"}', report=IMPL_REPORT)
 check("append still works after an invalid line, with a warning",
       r.returncode == 0 and "ignored" in r.stderr, r.stdout + r.stderr)
 

@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 import argparse
+import glob
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -23,6 +26,32 @@ AGENT_VERDICTS = {
 NOTE_KINDS = ("ruling", "deferred", "parked", "condition")
 SPEC_TASK = "spec"
 SPEC_REVIEWERS = ("security", "db", "audit", "design", "code-review")
+VALIDATED_IMPLEMENTERS = ("dev", "db", "docs")
+COMMITTING_IMPLEMENTERS = ("dev", "db")
+COMMITTED_VERDICTS = ("DONE", "DONE_WITH_CONCERNS")
+MIN_REPORT_CHARS = 200
+MIN_REASON_CHARS = 40
+LESSON_TEXT_MAX = 280
+LESSONS_DEFAULT = ".superpowers/lessons.jsonl"
+PLUGIN_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+LESSONS_DIR_DEFAULT = os.path.join(PLUGIN_ROOT, "lessons")
+COUNTERS = ("injected", "held", "recurred")
+ROLES = {"implementer": "implement", "reviewer": "review"}
+NAME_PATTERN = re.compile(r"^[\w.-]+$")
+LEDGER_LINE = re.compile(r"^[\s`>*-]*LEDGER\s*\{", re.MULTILINE)
+SHA_TOKEN = re.compile(r"\b[0-9a-f]{7,40}\b")
+BACKTICKED = re.compile(r"`([^`\s]+)`")
+PARENTHETICAL = r"(?:\s*\((?:[^()]|\([^()]*\))*\))?"
+FILES_LABEL = re.compile(r"^\s*(?:#+\s*)?\**\s*(?:changed\s+|modified\s+)?files"
+                         r"(?:\s+(?:changed|touched|modified))?\s*\**" + PARENTHETICAL +
+                         r"\s*\**\s*:\s*\**\s*(.*)$", re.IGNORECASE)
+FILES_HEADING = re.compile(r"^\s*#+\s*(?:changed\s+)?files(?:\s+changed)?" + PARENTHETICAL + r"\s*$",
+                           re.IGNORECASE)
+LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*)$")
+LINE_SUFFIX = re.compile(r":\d+(?:-\d+)?$")
+LIST_GAP = re.compile(r"^\s*(?:\([^()]*\)\s*)?(?:,\s*(?:and\s+)?|and\s+|&\s*)$", re.IGNORECASE)
+ITEM_LABELS = {"add", "added", "change", "changed", "create", "created", "delete", "deleted", "modify",
+               "modified", "new", "remove", "removed", "rename", "renamed", "update", "updated", "test", "tests"}
 
 
 def role(entry):
@@ -140,6 +169,101 @@ def write_line(path, entry):
         handle.write(json.dumps(entry, separators=(",", ":")) + "\n")
 
 
+def item_paths(body):
+    ticked = list(BACKTICKED.finditer(body))
+    if ticked:
+        paths = [ticked[0].group(1)]
+        for previous, current in zip(ticked, ticked[1:]):
+            if not LIST_GAP.match(body[previous.end():current.start()]):
+                break
+            if "/" in current.group(1) or "." in current.group(1):
+                paths.append(current.group(1))
+        return paths
+    before, colon, after = body.partition(":")
+    if colon and before.strip(" *").lower() in ITEM_LABELS and after.split():
+        body = after
+    return unticked_paths(re.sub(r",(?=\S)", ", ", body).split())
+
+
+def unticked_paths(words):
+    paths, index = [], 0
+    while index < len(words):
+        word = words[index]
+        path = word.rstrip(",;:")
+        if paths and ("/" not in path and "." not in path or path.endswith(".")):
+            break
+        if path:
+            paths.append(path)
+        joined = word.endswith(",") or (not word.endswith((":", ";")) and index + 1 < len(words)
+                                         and words[index + 1].lower() in ("and", "&"))
+        if not joined:
+            break
+        index += 1
+        if index < len(words) and words[index].lower() in ("and", "&"):
+            index += 1
+    return paths
+
+
+def files_section_paths(text):
+    found, inside = set(), False
+    for line in text.splitlines():
+        heading = FILES_HEADING.match(line)
+        label = None if heading else FILES_LABEL.match(line)
+        if heading or label:
+            inside = True
+            if label and label.group(1).strip():
+                found.update(part.strip(" `*") for part in label.group(1).split(","))
+            continue
+        if not inside:
+            continue
+        item = LIST_ITEM.match(line)
+        if item:
+            found.update(item_paths(item.group(1)))
+        elif line.strip():
+            inside = False
+    return found
+
+
+def cited_paths(text, files_section_only=False):
+    candidates = files_section_paths(text)
+    if not files_section_only:
+        candidates |= set(BACKTICKED.findall(text))
+    paths = set()
+    for candidate in candidates:
+        path = LINE_SUFFIX.sub("", candidate.strip(" `*,;")).replace("\\", "/")
+        while path.startswith("./"):
+            path = path[2:]
+        if path:
+            paths.add(path)
+    return paths
+
+
+def implementer_problems(entry, text, from_sha, head, allow_unlisted):
+    problems = []
+    if not LEDGER_LINE.search(text):
+        problems.append("the report has no 'LEDGER {...}' line")
+    body = "\n".join(line for line in text.splitlines() if not LEDGER_LINE.match(line))
+    words = set(re.findall(r"[a-z]+", body.lower()))
+    minimum = MIN_REPORT_CHARS if entry["verdict"] in COMMITTED_VERDICTS else MIN_REASON_CHARS
+    if len(re.sub(r"\s", "", body)) < minimum or not words or words <= {"placeholder", "todo"}:
+        problems.append(f"the report looks like a placeholder (a {entry['verdict']} report needs at least "
+                        f"{minimum} non-space characters besides the LEDGER line, not just 'placeholder'/'TODO')")
+    if entry["agent"] in COMMITTING_IMPLEMENTERS and entry["verdict"] in COMMITTED_VERDICTS:
+        commits = git("rev-list", f"{from_sha}..{head}")[1].split()
+        tokens = set(SHA_TOKEN.findall(text.lower()))
+        if not any(sha.startswith(token) for token in tokens for sha in commits):
+            problems.append(f"the report names no commit of {from_sha[:8]}..{head[:8]} "
+                            "(it must cite the SHA it committed)")
+    plain = ("-c", "core.quotepath=off")
+    changed = set(git(*plain, "diff", "--name-only", f"{from_sha}..{head}")[1].splitlines())
+    tracked = set(git(*plain, "ls-tree", "-r", "--full-tree", "--name-only", head)[1].splitlines())
+    unlisted = sorted(p for p in cited_paths(text, files_section_only=True) if p in tracked and p not in changed)
+    if unlisted and allow_unlisted is None:
+        problems.append(f"the report cites files not changed in {from_sha[:8]}..{head[:8]}: "
+                        f"{', '.join(unlisted)} (fix the report, or pass --allow-unlisted with a reason)")
+    return problems, unlisted
+
+
 def start(args):
     if os.path.exists(args.ledger):
         sys.exit(f"ledger already exists: {args.ledger}")
@@ -181,14 +305,340 @@ def append(args):
     problem = spec_problem(entry)
     if problem:
         sys.exit(f"agent line rejected: {problem}")
+    if args.allow_unlisted is not None and not args.allow_unlisted.strip():
+        sys.exit("--allow-unlisted needs a non-empty reason (it goes into the ruling note)")
+    unlisted = []
+    if entry["agent"] in VALIDATED_IMPLEMENTERS and role(entry) == "implement":
+        with open(args.report, encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+        problems, unlisted = implementer_problems(entry, text, from_sha, head, args.allow_unlisted)
+        if problems:
+            sys.exit("report rejected:\n- " + "\n- ".join(problems))
     entries, invalid = read_ledger(args.ledger)
     warn_invalid(args.ledger, invalid)
     earlier = [e for e in entries if e.get("agent") == entry["agent"] and e.get("task") == args.task
                and role(e) == role(entry)]
     entry.update({"ts": now(), "from": from_sha, "head": head,
                   "round": len(earlier) + 1, "report": args.report})
+    if unlisted:
+        entry["unlisted"] = unlisted
     write_line(args.ledger, entry)
     print(f"{entry['agent']} {entry['verdict']} task={args.task} round={entry['round']}")
+    if unlisted:
+        reason = f" ({args.allow_unlisted.strip()})"
+        write_line(args.ledger, {"event": "note", "ts": now(), "kind": "ruling", "task": args.task,
+                                 "text": f"{entry['agent']} r{entry['round']} report cites files outside "
+                                         f"its diff, accepted with --allow-unlisted: "
+                                         f"{', '.join(unlisted)}{reason}"})
+        print(f"unlisted files accepted, ruling note recorded: {', '.join(unlisted)}")
+
+
+def agent_roles(agent):
+    verdicts = AGENT_VERDICTS[agent]
+    return [kind for kind, sample in (("implement", IMPLEMENTER_VERDICTS[0]), ("review", REVIEWER_VERDICTS[0]))
+            if sample in verdicts]
+
+
+def report_role(args):
+    roles = agent_roles(args.agent)
+    if args.role:
+        kind = ROLES[args.role]
+        if kind not in roles:
+            sys.exit(f"--role {args.role} does not fit {args.agent}")
+        return kind
+    if len(roles) == 1:
+        return roles[0]
+    if args.task == SPEC_TASK:
+        return "review"
+    sys.exit(f"{args.agent} is both implementer and reviewer: pass --role implementer|reviewer")
+
+
+def save_report(args):
+    if not NAME_PATTERN.match(args.task):
+        sys.exit(f"--task must match {NAME_PATTERN.pattern}: {args.task}")
+    if args.agent not in AGENT_VERDICTS:
+        sys.exit(f"unknown agent '{args.agent}' (expected one of: {', '.join(AGENT_VERDICTS)})")
+    if args.file:
+        if not os.path.isfile(args.file):
+            sys.exit(f"--file does not exist: {args.file}")
+        with open(args.file, "rb") as handle:
+            raw = handle.read()
+    else:
+        raw = sys.stdin.buffer.read()
+    text = re.sub(r"\r+\n", "\n", raw.decode("utf-8", errors="replace"))
+    if not text.strip():
+        sys.exit("the report is empty; nothing saved")
+    kind = report_role(args)
+    directory = args.reports_dir or os.path.join(os.path.dirname(args.ledger) or ".", "reports")
+    both = len(agent_roles(args.agent)) == 2
+    suffix = "-review" if both and kind == "review" else ""
+    stem = os.path.join(directory, f"{args.task}-{args.agent}{suffix}-r")
+    if args.round == "auto":
+        entries = read_ledger(args.ledger)[0] if os.path.exists(args.ledger) else []
+        number = 1 + sum(1 for e in entries if e.get("agent") == args.agent and e.get("task") == args.task
+                         and role(e) == kind)
+        while os.path.exists(f"{stem}{number}.md"):
+            number += 1
+    elif args.round.isdigit() and int(args.round) > 0:
+        number = int(args.round)
+    else:
+        sys.exit(f"--round must be 'auto' or a positive integer: {args.round}")
+    path = f"{stem}{number}.md"
+    os.makedirs(directory, exist_ok=True)
+    try:
+        with open(path, "x", encoding="utf-8", newline="\n") as handle:
+            handle.write(text if text.endswith("\n") else text + "\n")
+    except FileExistsError:
+        sys.exit(f"report already exists, not overwriting: {path}")
+    print(path.replace("\\", "/"))
+
+
+def read_lessons(path):
+    return [lesson for _, lesson in read_rows(path)]
+
+
+def read_rows(path):
+    rows = []
+    if not os.path.exists(path):
+        return rows
+    with open(path, encoding="utf-8") as handle:
+        for number, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            try:
+                rows.append([line.rstrip("\r\n"), json.loads(line)])
+            except ValueError:
+                sys.exit(f"{path}:{number} is not valid JSON; fix it before writing lessons")
+    return rows
+
+
+def write_rows(path, rows):
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    temporary = path + ".tmp"
+    with open(temporary, "w", encoding="utf-8", newline="\n") as handle:
+        for raw, _ in rows:
+            handle.write(raw + "\n")
+    os.replace(temporary, path)
+
+
+def write_lessons(path, lessons):
+    write_rows(path, [[json.dumps(lesson, ensure_ascii=False, separators=(",", ":")), lesson] for lesson in lessons])
+
+
+def global_line(lesson):
+    return json.dumps(lesson, ensure_ascii=False)
+
+
+def is_override(lesson):
+    return lesson.get("override") is True
+
+
+def global_files(directory):
+    return sorted(glob.glob(os.path.join(directory, "*.jsonl")))
+
+
+def find_global(directory, lesson_id):
+    for path in global_files(directory):
+        for lesson in read_lessons(path):
+            if lesson.get("id") == lesson_id:
+                return lesson
+    return None
+
+
+def find_lesson(lessons, lesson_id, path):
+    for lesson in lessons:
+        if lesson.get("id") == lesson_id and not is_override(lesson):
+            return lesson
+    if any(lesson.get("id") == lesson_id for lesson in lessons):
+        sys.exit(f"'{lesson_id}' in {path} only carries counters of a global lesson; use 'lesson sync'")
+    sys.exit(f"lesson '{lesson_id}' not found in {path}")
+
+
+def lesson_add(args):
+    for flag, value in (("--id", args.id), ("--stack", args.stack)):
+        if not NAME_PATTERN.match(value):
+            sys.exit(f"{flag} must match {NAME_PATTERN.pattern}: {value}")
+    stacks = [os.path.splitext(os.path.basename(path))[0] for path in global_files(args.lessons_dir)]
+    if args.stack not in stacks:
+        sys.exit(f"--stack must be one of the lesson files in {args.lessons_dir}: "
+                 f"{', '.join(stacks) or '(none found)'}")
+    text = " ".join(args.text.split())
+    if not text:
+        sys.exit("--text is empty")
+    if len(text) > LESSON_TEXT_MAX:
+        sys.exit(f"--text has {len(text)} characters; a lesson is one rule of at most {LESSON_TEXT_MAX}")
+    lessons = read_lessons(args.lessons)
+    if any(lesson.get("id") == args.id for lesson in lessons):
+        sys.exit(f"lesson '{args.id}' already exists in {args.lessons}")
+    if find_global(args.lessons_dir, args.id):
+        sys.exit(f"lesson '{args.id}' already exists in {args.lessons_dir}")
+    code, root = git("rev-parse", "--show-toplevel")
+    project = args.project or os.path.basename(root if code == 0 and root else os.getcwd())
+    lesson = {"id": args.id, "stack": args.stack,
+              "paths": [pattern.strip() for pattern in args.paths.split(",") if pattern.strip()],
+              "text": text,
+              "source": {"project": project, "task": args.task, "agent": args.agent,
+                         "finding": args.finding},
+              "counters": {counter: 0 for counter in COUNTERS},
+              "status": "active", "created": time.strftime("%Y-%m-%d")}
+    write_lessons(args.lessons, lessons + [lesson])
+    print(f"lesson {args.id} added to {args.lessons}")
+
+
+def lesson_mark(args):
+    lessons = read_lessons(args.lessons)
+    lesson = next((item for item in lessons if item.get("id") == args.id), None)
+    if lesson is None:
+        source = find_global(args.lessons_dir, args.id)
+        if source is None:
+            sys.exit(f"lesson '{args.id}' not found in {args.lessons} nor in {args.lessons_dir}")
+        lesson = {"id": args.id, "stack": source.get("stack"), "override": True,
+                  "counters": {counter: 0 for counter in COUNTERS}}
+        lessons.append(lesson)
+    counter = "held" if args.held else "recurred"
+    counters = lesson.setdefault("counters", {})
+    counters[counter] = int(counters.get(counter, 0)) + 1
+    write_lessons(args.lessons, lessons)
+    scope = " (global lesson; counted in this delivery until 'lesson sync')" if is_override(lesson) else ""
+    print(f"lesson {args.id} {counter}={counters[counter]}{scope}")
+
+
+def lesson_list(args):
+    lessons = read_lessons(args.lessons)
+    if args.json:
+        print(json.dumps(lessons, indent=2, ensure_ascii=False))
+        return
+    for lesson in lessons:
+        counters = lesson.get("counters", {})
+        tally = ", ".join(f"{counter} {counters.get(counter, 0)}" for counter in COUNTERS)
+        if is_override(lesson):
+            print(f"{lesson.get('id')}  [{lesson.get('stack')}, global lesson, counters of this delivery]  {tally}")
+            continue
+        print(f"{lesson.get('id')}  [{lesson.get('stack')}, {lesson.get('status')}]  {tally}  "
+              f"paths: {', '.join(lesson.get('paths') or ['(all)'])}")
+        print(f"    {lesson.get('text')}")
+
+
+def lesson_promote(args):
+    lesson = find_lesson(read_lessons(args.lessons), args.id, args.lessons)
+    stack = lesson.get("stack")
+    if os.path.splitext(os.path.basename(args.to))[0] != stack:
+        sys.exit(f"--to {args.to} is not the file of stack '{stack}' (expected lessons/{stack}.jsonl)")
+    rows = read_rows(args.to)
+    if any(existing.get("id") == args.id for _, existing in rows):
+        sys.exit(f"lesson '{args.id}' already exists in {args.to}")
+    write_rows(args.to, rows + [[global_line(lesson), lesson]])
+    print(f"lesson {args.id} promoted to {args.to}")
+
+
+def file_digest(path):
+    if not os.path.isfile(path):
+        return None
+    with open(path, "rb") as handle:
+        return hashlib.sha256(handle.read()).hexdigest()
+
+
+def rows_digest(rows):
+    return hashlib.sha256("".join(raw + "\n" for raw, _ in rows).encode("utf-8")).hexdigest()
+
+
+def sync_journal_path(lessons_path):
+    return os.path.splitext(lessons_path)[0] + ".sync.json"
+
+
+def read_sync_journal(path):
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            journal = json.load(handle)
+    except ValueError:
+        sys.exit(f"{path} is not valid JSON; check the global lesson counters by hand, then delete it")
+    return journal if isinstance(journal, dict) else None
+
+
+def write_sync_journal(path, journal):
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    temporary = path + ".tmp"
+    with open(temporary, "w", encoding="utf-8", newline="\n") as handle:
+        json.dump(journal, handle, indent=2)
+    os.replace(temporary, path)
+
+
+def target_key(path):
+    return os.path.normcase(os.path.abspath(path))
+
+
+def sync_round(args, lessons, group, journal_path):
+    sync_id = group[0]["sync_pending"]["id"]
+    files = {}
+    for lesson in group:
+        path = os.path.join(args.to_dir, f"{lesson.get('stack')}.jsonl")
+        if path not in files:
+            rows = read_rows(path)
+            files[path] = (rows, {row[1].get("id"): row for row in rows})
+        if lesson["id"] not in files[path][1]:
+            sys.exit(f"lesson '{lesson['id']}' not found in {path}; nothing synced")
+    current = {path: file_digest(path) for path in files}
+    for lesson in group:
+        path = os.path.join(args.to_dir, f"{lesson.get('stack')}.jsonl")
+        row = files[path][1][lesson["id"]]
+        counters = row[1].setdefault("counters", {})
+        for counter in COUNTERS:
+            counters[counter] = int(counters.get(counter, 0)) + int(lesson["sync_pending"]["counters"].get(counter, 0))
+        row[0] = global_line(row[1])
+    journal = read_sync_journal(journal_path)
+    if not journal or journal.get("id") != sync_id:
+        journal = {"id": sync_id, "files": {target_key(path): {"before": current[path], "after": rows_digest(rows)}
+                                            for path, (rows, _) in files.items()}}
+        write_sync_journal(journal_path, journal)
+    for path in sorted(files):
+        planned = (journal.get("files") or {}).get(target_key(path))
+        if planned and current[path] == planned.get("after"):
+            continue
+        if not planned or current[path] != planned.get("before"):
+            sys.exit(f"{path} changed since the interrupted sync {sync_id}; check its counters by hand, "
+                     f"then delete {journal_path}")
+        write_rows(path, files[path][0])
+    for lesson in group:
+        journal_counters = lesson.pop("sync_pending")["counters"]
+        lesson["counters"] = {counter: max(0, int(lesson["counters"].get(counter, 0))
+                                           - int(journal_counters.get(counter, 0))) for counter in COUNTERS}
+        lesson["synced"] = time.strftime("%Y-%m-%d")
+        print(f"lesson {lesson['id']} counters added to {args.to_dir}")
+    write_lessons(args.lessons, lessons)
+    os.remove(journal_path)
+
+
+def lesson_sync(args):
+    lessons = read_lessons(args.lessons)
+    journal_path = sync_journal_path(args.lessons)
+    journaled = [lesson for lesson in lessons if is_override(lesson) and lesson.get("sync_pending")]
+    fresh = [lesson for lesson in lessons if is_override(lesson) and not lesson.get("sync_pending")
+             and (not args.id or lesson.get("id") in args.id)
+             and any(int(lesson.get("counters", {}).get(counter, 0)) for counter in COUNTERS)]
+    missing = sorted(set(args.id or ()) - {lesson.get("id") for lesson in journaled + fresh})
+    if missing:
+        sys.exit(f"no global-lesson counters to sync for: {', '.join(missing)}")
+    if not journaled and os.path.isfile(journal_path):
+        os.remove(journal_path)
+    if not journaled and not fresh:
+        print("no global-lesson counters to sync")
+        return
+    for sync_id in dict.fromkeys(lesson["sync_pending"]["id"] for lesson in journaled):
+        sync_round(args, lessons, [lesson for lesson in journaled if lesson["sync_pending"]["id"] == sync_id],
+                   journal_path)
+    if fresh:
+        for lesson in fresh:
+            path = os.path.join(args.to_dir, f"{lesson.get('stack')}.jsonl")
+            if lesson["id"] not in {row.get("id") for _, row in read_rows(path)}:
+                sys.exit(f"lesson '{lesson['id']}' not found in {path}; nothing synced")
+        sync_id = f"{time.strftime('%Y%m%dT%H%M%S')}-{os.urandom(4).hex()}"
+        for lesson in fresh:
+            lesson["sync_pending"] = {"id": sync_id, "counters": {counter: int(lesson["counters"].get(counter, 0))
+                                                                  for counter in COUNTERS}}
+        write_lessons(args.lessons, lessons)
+        sync_round(args, lessons, fresh, journal_path)
 
 
 def note(args):
@@ -288,7 +738,51 @@ def main():
     append_cmd.add_argument("--report", required=True)
     append_cmd.add_argument("--line", required=True)
     append_cmd.add_argument("--spec", help="the reviewed spec document; required with --task spec")
+    append_cmd.add_argument("--allow-unlisted", metavar="REASON",
+                            help="accept an implementer report citing files outside FROM..HEAD; "
+                                 "the reason goes into the ruling note it records")
     append_cmd.set_defaults(run=append)
+
+    save_cmd = commands.add_parser("save-report", help="save an agent report as <task>-<agent>-r<round>.md")
+    save_cmd.add_argument("--task", required=True)
+    save_cmd.add_argument("--agent", required=True)
+    save_cmd.add_argument("--round", default="auto", help="'auto' (next free round) or a number")
+    save_cmd.add_argument("--role", choices=sorted(ROLES),
+                          help="required for db outside the spec task; inferred for the other agents")
+    save_cmd.add_argument("--reports-dir", help="default: 'reports' next to the ledger")
+    source = save_cmd.add_mutually_exclusive_group(required=True)
+    source.add_argument("--stdin", action="store_true")
+    source.add_argument("--file")
+    save_cmd.set_defaults(run=save_report)
+
+    lesson_cmd = commands.add_parser("lesson", help="manage this delivery's lessons")
+    lesson_cmd.add_argument("--lessons", default=LESSONS_DEFAULT)
+    lesson_cmd.add_argument("--lessons-dir", default=LESSONS_DIR_DEFAULT,
+                            help="the global lessons (default: the plugin's lessons/)")
+    actions = lesson_cmd.add_subparsers(dest="action", required=True)
+    add_cmd = actions.add_parser("add")
+    for flag in ("--id", "--stack", "--text", "--task", "--agent", "--finding"):
+        add_cmd.add_argument(flag, required=True)
+    add_cmd.add_argument("--paths", default="", help="comma-separated globs; empty = every task of the stack")
+    add_cmd.add_argument("--project", help="default: the repository folder name")
+    add_cmd.set_defaults(run=lesson_add)
+    mark_cmd = actions.add_parser("mark")
+    mark_cmd.add_argument("--id", required=True)
+    counter = mark_cmd.add_mutually_exclusive_group(required=True)
+    counter.add_argument("--held", action="store_true")
+    counter.add_argument("--recurred", action="store_true")
+    mark_cmd.set_defaults(run=lesson_mark)
+    list_cmd = actions.add_parser("list")
+    list_cmd.add_argument("--json", action="store_true")
+    list_cmd.set_defaults(run=lesson_list)
+    promote_cmd = actions.add_parser("promote")
+    promote_cmd.add_argument("--id", required=True)
+    promote_cmd.add_argument("--to", required=True, help="the plugin's lessons/<stack>.jsonl")
+    promote_cmd.set_defaults(run=lesson_promote)
+    sync_cmd = actions.add_parser("sync", help="add this delivery's counters of global lessons to the global files")
+    sync_cmd.add_argument("--to-dir", required=True, help="the plugin's lessons/ folder")
+    sync_cmd.add_argument("--id", action="append", help="sync only this lesson (repeatable)")
+    sync_cmd.set_defaults(run=lesson_sync)
 
     note_cmd = commands.add_parser("note")
     note_cmd.add_argument("--kind", required=True, choices=NOTE_KINDS)

@@ -1,0 +1,4 @@
+# supabase local
+/supabase/.branches
+/supabase/.temp
+*.types.tmp

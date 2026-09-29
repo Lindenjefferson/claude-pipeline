@@ -26,7 +26,8 @@ def ledger(*args):
 
 
 def append(line, head):
-    return ledger("append", "--task", "1", "--from", base, "--head", head, "--report", REPORT,
+    report = IMPL_REPORT if line == DB_DONE else REPORT
+    return ledger("append", "--task", "1", "--from", base, "--head", head, "--report", report,
                   "--line", line)
 
 
@@ -47,6 +48,9 @@ sh("git", "commit", "-q", "--allow-empty", "-m", "base")
 base = sh("git", "rev-parse", "HEAD")
 sh("git", "commit", "-q", "--allow-empty", "-m", "migration")
 head1 = sh("git", "rev-parse", "HEAD")
+IMPL_REPORT = os.path.join(repo, "impl-report.md")
+open(IMPL_REPORT, "w").write(f"Migration committed as {head1[:8]}. " + "Details of the migration. " * 12
+                             + "\n" + DB_DONE + "\n")
 ledger("start", "--slug", "x", "--base", base)
 
 r = append(DB_DONE, head1)
