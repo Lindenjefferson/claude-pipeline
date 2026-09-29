@@ -1,11 +1,11 @@
-import atexit, hashlib, json, os, shutil, stat, subprocess, sys, tempfile, time
+import atexit, hashlib, json, os, shutil, stat, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LEDGER_PY = os.path.join(HERE, "..", "ledger.py")
 sys.path.insert(0, os.path.join(HERE, ".."))
 import ledger as lg
 
-repo = os.path.join(tempfile.gettempdir(), f"ledgerrepair_{int(time.time() * 1000)}")
+repo = tempfile.mkdtemp(prefix="ledgerrepair_")
 os.makedirs(os.path.join(repo, "src"))
 LEDGER = os.path.join(repo, ".superpowers", "ledger.jsonl")
 REPORTS = os.path.join(repo, ".superpowers", "reports")

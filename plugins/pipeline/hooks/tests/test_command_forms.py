@@ -1,7 +1,7 @@
-import json, os, subprocess, sys, tempfile, time
+import json, os, subprocess, sys, tempfile
 
 HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "pre-commit-secret-scan.py")
-base = os.path.join(tempfile.gettempdir(), f"hookforms_{int(time.time())}")
+base = tempfile.mkdtemp(prefix="hookforms_")
 repo = os.path.join(base, "repo")
 elsewhere = os.path.join(base, "elsewhere")
 os.makedirs(repo)

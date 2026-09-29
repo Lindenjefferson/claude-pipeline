@@ -1,14 +1,14 @@
 import tempfile
-import os, shutil, subprocess, sys, time
+import os, shutil, subprocess, sys
 
 HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "pre-commit-secret-scan.py")
 os.environ["CLAUDE_PIPELINE_HOME"] = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-base = os.path.join(tempfile.gettempdir(), f"prepush_{int(time.time())}")
-os.makedirs(base)
+base = tempfile.mkdtemp(prefix="prepush_")
+os.makedirs(base, exist_ok=True)
 remote = os.path.join(base, "remote.git")
 repo = os.path.join(base, "repo")
 wt = os.path.join(base, "wt")
-os.makedirs(repo)
+os.makedirs(repo, exist_ok=True)
 results = []
 
 

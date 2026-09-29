@@ -1,8 +1,8 @@
-import json, os, subprocess, sys, tempfile, time
+import json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, "..", "pre-commit-secret-scan.py")
-base = os.path.join(tempfile.gettempdir(), f"unresolved_{int(time.time() * 1000)}")
+base = tempfile.mkdtemp(prefix="unresolved_")
 repo = os.path.join(base, "repo")
 xdg = os.path.join(base, "xdg")
 os.makedirs(repo)

@@ -1,12 +1,12 @@
-import os, subprocess, sys, tempfile, time
+import os, subprocess, sys, tempfile
 
 HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "pre-commit-secret-scan.py")
 os.environ["CLAUDE_PIPELINE_HOME"] = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-base = os.path.join(tempfile.gettempdir(), f"prepushstale_{int(time.time() * 1000)}")
+base = tempfile.mkdtemp(prefix="prepushstale_")
 remote = os.path.join(base, "remote.git")
 repo = os.path.join(base, "repo")
 peer = os.path.join(base, "peer")
-os.makedirs(base)
+os.makedirs(base, exist_ok=True)
 results = []
 
 
@@ -25,7 +25,7 @@ def configure(path):
 
 
 run(base, "git", "init", "-q", "--bare", remote)
-os.makedirs(repo)
+os.makedirs(repo, exist_ok=True)
 run(repo, "git", "init", "-q", "-b", "main")
 configure(repo)
 run(repo, "git", "remote", "add", "origin", remote)

@@ -2,8 +2,8 @@ import os, subprocess, sys, tempfile, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LEDGER_PY = os.path.join(HERE, "..", "ledger.py")
-repo = os.path.join(tempfile.gettempdir(), f"ledgerconcurrency_{int(time.time() * 1000)}")
-os.makedirs(repo)
+repo = tempfile.mkdtemp(prefix="ledgerconcurrency_")
+os.makedirs(repo, exist_ok=True)
 LEDGER = os.path.join(repo, ".superpowers", "ledger.jsonl")
 REPORTS = os.path.join(repo, ".superpowers", "reports")
 AGENTS = ("code-review", "code-review", "code-review", "design", "audit", "qa", "security", "design")

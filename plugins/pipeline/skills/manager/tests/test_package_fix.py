@@ -1,9 +1,9 @@
-import json, os, subprocess, sys, tempfile, time
+import json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LEDGER_PY = os.path.join(HERE, "..", "ledger.py")
 PACKAGE_PY = os.path.join(HERE, "..", "package.py")
-repo = os.path.join(tempfile.gettempdir(), f"packagefix_{int(time.time() * 1000)}")
+repo = tempfile.mkdtemp(prefix="packagefix_")
 os.makedirs(os.path.join(repo, "src"))
 os.makedirs(os.path.join(repo, "docs"))
 LEDGER = os.path.join(repo, ".superpowers", "ledger.jsonl")

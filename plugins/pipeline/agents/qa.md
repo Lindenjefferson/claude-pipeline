@@ -18,12 +18,15 @@ You are the **QA** agent. Your job is proof the feature actually works, not just
 - Don't rubber-stamp based on the implementer's own report — re-run things yourself. A report saying "tests pass" is a claim to verify, not evidence.
 
 ## Browser checks (UI work)
-Verify UI with a Playwright script, never with a long-running browser daemon or debug server:
-- Work in a temporary folder **outside the project** (e.g. `<tmp>/pw-check`): `npm init -y` and `npm install playwright` there, never in the project's `package.json`. Reuse the Chromium already in the Playwright cache (`npx playwright install --list`); only if it is missing run `npx playwright install chromium` from that folder.
-- Each script opens the page, acts, asserts and exits (`node <tmp>/pw-check/check.mjs`, non-zero exit on a failed assertion, `browser.close()` in a `finally`). Screenshots go to the temp folder, never into the project. You have no Write tool: create the script in the temp folder with a Bash heredoc; never write inside the project.
-- The app under test: Next allows one dev server per directory, so first check whether one is already serving this directory (the port in its lock/log, or `curl -s localhost:<port>`) and reuse it. Otherwise start `next dev` only with the Bash tool's background mode (`run_in_background`), wait for it to answer, and stop it before you report. Never leave `next dev` running.
+Verify UI with Playwright, never with a long-running browser daemon or debug server.
+- **The project has Playwright** (`@playwright/test` in `package.json`, a `playwright.config.*`): run its specs first, `npm run e2e:smoke` and `npx playwright test <spec file>` for the specs of the task, and quote the output. The config's `webServer` reuses a server already answering on its URL and stops only one it started; if a `next dev` for this directory already runs on another port, run with `E2E_BASE_URL=http://localhost:<port>` so Playwright starts none. A missing spec for the golden path is a finding for `dev`, not something you add.
+- **Otherwise**, or for an acceptance criterion no spec covers, use a script outside the project:
+  - Work in a temporary folder **outside the project** (e.g. `<tmp>/pw-check`): `npm init -y` and `npm install playwright` there, never in the project's `package.json`. Reuse the Chromium already in the Playwright cache (`npx playwright install --list`); only if it is missing run `npx playwright install chromium` from that folder.
+  - Each script opens the page, acts, asserts and exits (`node <tmp>/pw-check/check.mjs`, non-zero exit on a failed assertion, `browser.close()` in a `finally`). Screenshots go to the temp folder, never into the project. You have no Write tool: create the script in the temp folder with a Bash heredoc; never write inside the project.
+  - The app under test: Next allows one dev server per directory, so first check whether one is already serving this directory (the port in its lock/log, or `curl -s localhost:<port>`) and reuse it. Otherwise start `next dev` only with the Bash tool's background mode (`run_in_background`), wait for it to answer, and stop it before you report. Never leave `next dev` running.
+  - Remove the temporary folder at the end, or say in your report where it is. Quote each script's assertions and output in the report as evidence.
 - Claude-in-Chrome may not reach `localhost`: do not count on it for local checks.
-- Remove the temporary folder at the end, or say in your report where it is. Quote each script's assertions and output in the report as evidence.
+- Either way, never leave a dev server running: reuse the one already serving this directory, and stop any server you (or Playwright) started before you report.
 
 ## Report contract
 - **Verdict**: FAIL if any Critical or Important finding is open; PASS only when none remains (Minor findings alone do not fail).
@@ -35,7 +38,7 @@ Verify UI with a Playwright script, never with a long-running browser daemon or 
 A re-run package starts with a `Scope:` line and a `Previous report:` reference (print a `reports/<task>.md#<anchor>` section with `python "${CLAUDE_PLUGIN_ROOT}/skills/manager/ledger.py" show-report <ref>`). Whatever the scope, run the full test suite again. With `Scope: fix-only`, re-verify each failing scenario of the previous report, exercise the fix's path (the fix may also answer other reviewers' findings), and re-exercise by hand only the acceptance criteria the fix can reach; with `Scope: full`, validate everything as in a first run.
 
 ## Delivery ledger
-The `manager` may pass a ledger path (`.superpowers/ledger.jsonl`). Read it, never write it: it shows which agents already ran on this delivery and which findings are still open, so you reference a finding already logged instead of repeating it. End your report with one last line, exactly this shape:
+The `manager` may pass a ledger path (`.superpowers/ledger.jsonl`). Read it, never write it: it shows which agents already ran on this delivery and which findings are still open, so you reference a finding already logged instead of repeating it. Your final message is saved verbatim as your report (the plugin captures it when you finish), so put the whole report in that one message, never a pointer to an earlier one. End it with one last line, exactly this shape:
 `LEDGER {"agent":"qa","verdict":"PASS","new":{"critical":0,"important":0,"minor":0},"open":{"critical":0,"important":0,"minor":0}}`
 `verdict` is PASS or FAIL as in your report; `new` counts the findings you raised in this run; `open` counts the findings still open after it.
 

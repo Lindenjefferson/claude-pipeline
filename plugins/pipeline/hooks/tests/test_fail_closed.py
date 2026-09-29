@@ -1,7 +1,7 @@
-import importlib.util, io, json, os, subprocess, sys, tempfile, time
+import importlib.util, io, json, os, subprocess, sys, tempfile
 
 HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "pre-commit-secret-scan.py")
-base = os.path.join(tempfile.gettempdir(), f"hookfailclosed_{int(time.time() * 1000)}")
+base = tempfile.mkdtemp(prefix="hookfailclosed_")
 repo = os.path.join(base, "repo")
 os.makedirs(repo)
 ALLOW = ".pipeline-secrets-allow"

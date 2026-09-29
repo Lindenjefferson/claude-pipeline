@@ -879,6 +879,7 @@ def find_git_ops(command, powershell, steps=None, ops=None, env=None):
     steps = [] if steps is None else steps
     ops = [] if ops is None else ops
     env = {"relocated": False} if env is None else env
+    env.setdefault("vars", {})
     if powershell and (any(dynamic_or_watched(match.group(1)) for match in PS_ENV_ASSIGN.finditer(command))
                        or any(match.group(2) is None or dynamic_or_watched(match.group(2))
                               for match in PS_SET_ENV.finditer(command))):
@@ -900,6 +901,7 @@ def find_git_ops(command, powershell, steps=None, ops=None, env=None):
         if (sets_relocating_var(segment, tokens, assigns, powershell)
                 or runs_sourced_code(tokens, assigns, powershell)):
             env["relocated"] = True
+        record_variables(segment, tokens, assigns, powershell, env["vars"])
         if not tokens:
             continue
         name = program(tokens[0][0])
@@ -929,8 +931,26 @@ def find_git_ops(command, powershell, steps=None, ops=None, env=None):
         if rest:
             ops.append({"op": rest[0][0], "steps": steps + local, "tokens": rest[1:],
                         "configs": configs, "pairs": pairs, "assigns": assigns,
-                        "relocated": relocated, "chain": ()})
+                        "relocated": relocated, "chain": (), "variables": dict(env["vars"])})
     return ops
+
+
+def record_variables(segment, tokens, assigns, powershell, variables):
+    if powershell:
+        match = POWERSHELL_ASSIGNMENT.match(segment)
+        if match and not match.group(2):
+            literal = POWERSHELL_LITERAL.match(match.group(4).strip())
+            name = match.group(3).lower()
+            if literal:
+                variables[name] = next(group for group in literal.groups() if group is not None)
+            else:
+                variables[name] = "$" + name
+        return
+    pairs = [assign.split("=", 1) for assign in assigns if ASSIGNMENT.match(assign)] if not tokens else []
+    if tokens and tokens[0][0] in BASH_DECLARERS:
+        pairs = [text.split("=", 1) for text, _ in tokens[1:] if ASSIGNMENT.match(text)]
+    for key, value in pairs:
+        variables[key] = value
 
 
 def shell_quote(text):
@@ -1274,14 +1294,27 @@ def gate_enabled(cwd, top, shas):
     return any(git(["cat-file", "-e", sha + ":docs/quality-reports"], cwd)[0] == 0 for sha in shas)
 
 
-def push_reason(cwd, top, tokens):
+def remote_mirrors(cwd, remote, pairs):
+    key = f"remote.{remote}.mirror".lower()
+    given = [value for name, value in pairs if name == key]
+    if given:
+        return given[-1].strip().lower() not in GATE_OFF
+    code, value = git(["config", "--bool", "--get", key], cwd)
+    return code == 0 and value.strip() == "true"
+
+
+def push_reason(cwd, top, tokens, pairs=()):
     flags, refspecs, repo = parse_push(tokens)
     if flags & {"--dry-run", "-n", "--delete", "-d"}:
         return None
-    sources = push_sources(cwd, flags, refspecs)
-    if sources is None or (repo is not None and expanded(repo)):
+    if repo is not None and expanded(repo):
         return UNVERIFIABLE.format(op="push", what="a ref or the remote in the command")
     remote = repo[0] if repo is not None else default_remote(cwd)
+    if remote_mirrors(cwd, remote, pairs):
+        flags.add("--mirror")
+    sources = push_sources(cwd, flags, refspecs)
+    if sources is None:
+        return UNVERIFIABLE.format(op="push", what="a ref or the remote in the command")
     rules = url_rewrites(cwd)
     urls = configured_push_urls(cwd, remote, rules) if rules["fetch"] or rules["push"] else push_urls(cwd, remote)
     rewrites = split_rewrites(rules, urls)
@@ -1541,7 +1574,17 @@ GENERIC_PROTECTED = (([".git", "hooks"], "hooks"), ([".git", "config"], "config"
 HOOK_CANDIDATES = ("pre-commit", "pre-push", "pre-commit.pipeline-chained")
 SUBSTITUTION_MARK = "$__substitution__"
 GIT_SUBSTITUTION_MARK = "$__git_substitution__"
+GIT_DIR_MARK = GIT_SUBSTITUTION_MARK + "dir__"
+GIT_DIR_QUERY = re.compile(r"^\s*git\s+rev-parse(?:\s+--path-format=(?:absolute|relative))?"
+                           r"\s+--(?:absolute-git-dir|git-dir|git-common-dir)\s*$")
 GIT_DERIVED_REACH = "git-derived"
+UNKNOWN_CWD_REACH = "unknown-cwd"
+REMOVE_PROGRAMS = {"rm", "unlink", "del", "erase", "remove-item", "ri"}
+PIPELINE_PRODUCERS = {"get-childitem", "gci", "ls", "dir", "get-item", "gi"}
+PIPELINE_WRITERS = {"remove-item", "ri", "del", "erase", "rd", "rmdir", "move-item", "mi", "move", "set-content",
+                    "sc", "add-content", "ac", "out-file", "clear-content", "clc", "rename-item", "rni"}
+PIPELINE_BLOCK_RUNNERS = {"foreach-object", "%", "foreach"}
+PIPELINE_VALUE_PARAMS = ("-filter", "-include", "-exclude", "-depth", "-attributes", "-credential")
 COPY_PROGRAMS = {"cp", "copy", "copy-item", "cpi", "rsync", "xcopy"}
 MOVE_PROGRAMS = {"mv", "move", "move-item", "mi"}
 PS_COPY_VALUE_PARAMS = ("-path", "-literalpath", "-pspath", "-filter", "-include", "-exclude", "-credential",
@@ -1696,19 +1739,30 @@ def segment_targets(tokens):
     return targets, [token for token in redirected if not HARMLESS_TARGET.match(token[0])]
 
 
-def strip_prefix(tokens, powershell, variables):
+def assigned_value(value, variables, git_vars):
+    def frozen(match):
+        name = match.group(1)
+        if name.startswith("__") or name.upper() in GIT_LOCATION_VARS or name.lower() in git_vars \
+                or name in os.environ:
+            return match.group(0)
+        return "$__prior_" + name
+    value = substitute((value, False), variables, False)[0]
+    return re.sub(r"\$\{?([A-Za-z_]\w*)\}?", frozen, value)
+
+
+def strip_prefix(tokens, powershell, variables, git_vars=frozenset()):
     tokens = strip_reserved(tokens, powershell)
     while tokens and (tokens[0][0].lower() in WRAPPERS
                       or (not powershell and ASSIGNMENT.match(tokens[0][0]))):
         key, _, value = tokens[0][0].partition("=")
         if not powershell and ASSIGNMENT.match(tokens[0][0]):
-            variables[key] = value
+            variables[key] = assigned_value(value, variables, git_vars)
         tokens = strip_reserved(tokens[1:], powershell)
     if tokens and not powershell and tokens[0][0] in ("export", "declare", "typeset", "local", "readonly"):
         for text, _ in tokens[1:]:
             if ASSIGNMENT.match(text):
                 key, _, value = text.partition("=")
-                variables[key] = value
+                variables[key] = assigned_value(value, variables, git_vars)
     return tokens
 
 
@@ -1807,7 +1861,8 @@ def first_reach(tokens, state, powershell, variable_rule):
 
 
 def reach_reason(reach, reason):
-    return {UNRESOLVED_REACH: UNRESOLVED_DENY, GIT_DERIVED_REACH: GIT_DERIVED_DENY}.get(reach, reason)
+    return {UNRESOLVED_REACH: UNRESOLVED_DENY, GIT_DERIVED_REACH: GIT_DERIVED_DENY,
+            UNKNOWN_CWD_REACH: UNKNOWN_CWD_DENY}.get(reach, reason)
 
 
 def reaches_hooks(token, state, powershell, variable_rule):
@@ -1818,9 +1873,34 @@ def reaches_hooks(token, state, powershell, variable_rule):
         return True
     parts = resolved_parts(token, state, powershell)
     if parts is None:
+        if variable_rule and unknown_cwd_reach(text, state, powershell):
+            return UNKNOWN_CWD_REACH
         return variable_rule and not literal and unresolved_reach(text, state, powershell)
     return any(parts_cover(target, parts, powershell, inside=kind == "hooks")
                for target, kind in protected_git_dirs(state) if kind != "gitdir")
+
+
+def hooks_path_names(state):
+    if state.get("hooks_names") is None:
+        state["hooks_names"] = set()
+        code, out = git(["config", "core.hooksPath"], state["base"])
+        parts = lexical_parts(out.strip()) if code == 0 else []
+        parts = [part for part in parts if part != ".."]
+        if parts:
+            state["hooks_names"].add(parts[-1])
+            if not os.path.isabs(out.strip()) and not out.strip().startswith("~"):
+                state["hooks_names"].add(parts[0])
+    return state["hooks_names"]
+
+
+def unknown_cwd_reach(text, state, powershell):
+    if state["cwd"] is not None or VARIABLE_MARK.search(text) or os.path.isabs(text) or text.startswith("~"):
+        return False
+    parts = lexical_parts(text)
+    if not parts or parts[0] == "..":
+        return False
+    return (any(part_matches(".git", part, powershell) for part in parts)
+            or any(part_matches(name, parts[0], powershell) for name in hooks_path_names(state)))
 
 
 def enters_git_dir(token, state, powershell):
@@ -1903,6 +1983,7 @@ def find_reaches_git(targets, state, powershell):
 FIND_PATH_TESTS = {"-path": False, "-wholename": False, "-ipath": True, "-iwholename": True}
 FIND_NAME_TESTS = {"-name": False, "-iname": True}
 FIND_TESTS = {**FIND_PATH_TESTS, **FIND_NAME_TESTS}
+FIND_OR = ("-o", "-or", ",")
 
 
 def find_pattern_matches(test, pattern, path):
@@ -1932,11 +2013,78 @@ def branch_excludes(branch, path, prefix, tests_apply):
     return False
 
 
+def find_top_level_or(expression):
+    depth, index = 0, 0
+    while index < len(expression):
+        text = expression[index]
+        if text in FIND_ACTIONS - {"-delete"}:
+            index = next((position for position in range(index + 1, len(expression))
+                          if expression[position] in (";", "+")), len(expression))
+        elif text == "(":
+            depth += 1
+        elif text == ")":
+            depth -= 1
+        elif depth == 0 and text in FIND_OR:
+            return True
+        index += 1
+    return False
+
+
+def find_group_end(tokens, start):
+    depth = 0
+    for index in range(start, len(tokens)):
+        depth += {"(": 1, ")": -1}.get(tokens[index], 0)
+        if depth == 0:
+            return index
+    return None
+
+
+def find_alternatives(tokens):
+    alternatives, current, depth = [], [], 0
+    for text in tokens:
+        depth += {"(": 1, ")": -1}.get(text, 0)
+        if depth == 0 and text in FIND_OR:
+            alternatives.append(current)
+            current = []
+        else:
+            current.append(text)
+    return alternatives + [current]
+
+
+def terms_exclude(tokens, path, prefix, tests_apply):
+    index = 0
+    while index < len(tokens):
+        text = tokens[index]
+        negated = index > 0 and tokens[index - 1] in ("-not", "!")
+        if text == "(":
+            end = find_group_end(tokens, index)
+            if end is None:
+                return False
+            if not negated and all(terms_exclude(alternative, path, prefix, tests_apply)
+                                   for alternative in find_alternatives(tokens[index + 1:end])):
+                return True
+            index = end + 1
+            continue
+        if text in FIND_TESTS and index + 1 < len(tokens):
+            pattern = tokens[index + 1]
+            if negated and text in FIND_PATH_TESTS and find_pattern_matches(text, pattern, path):
+                return True
+            if tests_apply and not negated and not any(find_pattern_matches(text, pattern, ancestor)
+                                                       for ancestor in find_ancestors(path, prefix)):
+                return True
+            index += 2
+            continue
+        index += 1
+    return False
+
+
 def find_excludes(expression, candidates, tests_apply):
+    if not find_top_level_or(expression):
+        end = find_write_action(expression)
+        head = expression[:len(expression) if end is None else end]
+        return all(terms_exclude(head, path, prefix, tests_apply) for path, prefix in candidates)
     expression = [text for text in expression if text not in ("(", ")")]
-    ors = [index for index, text in enumerate(expression) if text in ("-o", "-or", ",")]
-    if not ors:
-        return all(branch_excludes(expression, path, prefix, tests_apply) for path, prefix in candidates)
+    ors = [index for index, text in enumerate(expression) if text in FIND_OR]
     if ors != [3] or expression[0] not in FIND_TESTS or expression[2] != "-prune":
         return False
     test, pattern = expression[0], expression[1]
@@ -1946,6 +2094,8 @@ def find_excludes(expression, candidates, tests_apply):
 
 
 def substitution_mark(script, git_names):
+    if GIT_DIR_QUERY.match(script):
+        return GIT_DIR_MARK
     return GIT_SUBSTITUTION_MARK if names_git_source(script, git_names) else SUBSTITUTION_MARK
 
 
@@ -1971,8 +2121,8 @@ def powershell_expression_paren(command, index):
     return not (word and word.group(1).lower() in POWERSHELL_BLOCK_KEYWORDS)
 
 
-def command_substitutions(command, powershell, git_names=frozenset()):
-    collapsed, inner, quote, index = [], [], None, 0
+def scan_substitutions(command, powershell, replace):
+    collapsed, quote, index = [], None, 0
     while index < len(command):
         char = command[index]
         if quote == "'":
@@ -1987,27 +2137,49 @@ def command_substitutions(command, powershell, git_names=frozenset()):
             end = index + 1
             while end < len(command) and command[end] != "`":
                 end += 2 if command[end] == "\\" else 1
-            inner.append(command[index + 1:end])
-            collapsed.append(substitution_mark(inner[-1], git_names))
+            collapsed.append(replace("substitution", command[index + 1:end], command[index:end + 1]))
             index = end + 1
             continue
         elif command.startswith("$(", index) and not command.startswith("$((", index):
             end, closed = closing_paren(command, index + 2)
-            inner.append(command[index + 2:end - 1 if closed else end])
-            collapsed.append(substitution_mark(inner[-1], git_names))
+            collapsed.append(replace("substitution", command[index + 2:end - 1 if closed else end],
+                                     command[index:end]))
             index = end
             continue
         elif powershell and char == "(" and quote is None and powershell_expression_paren(command, index):
             end, closed = closing_paren(command, index + 1)
-            script = command[index + 1:end - 1 if closed else end]
-            if names_git_source(script, git_names):
-                inner.append(script)
-                collapsed.append(GIT_SUBSTITUTION_MARK)
+            replacement = replace("expression", command[index + 1:end - 1 if closed else end], command[index:end])
+            if replacement is not None:
+                collapsed.append(replacement)
                 index = end
                 continue
         collapsed.append(char)
         index += 1
-    return "".join(collapsed), inner
+    return "".join(collapsed)
+
+
+def command_substitutions(command, powershell, git_names=frozenset()):
+    inner = []
+
+    def replace(kind, script, _):
+        if kind == "expression" and not names_git_source(script, git_names):
+            return None
+        inner.append(script)
+        return substitution_mark(script, git_names)
+
+    return scan_substitutions(command, powershell, replace), inner
+
+
+def raw_statements(command, powershell):
+    raws = []
+
+    def replace(_, __, raw):
+        raws.append(raw)
+        return f"\0{len(raws) - 1}\0"
+
+    collapsed = scan_substitutions(command, powershell, replace)
+    return [re.sub(r"\0(\d+)\0", lambda m: raws[int(m.group(1))], statement)
+            for statement in split_statements(collapsed, powershell)]
 
 
 def split_statements(command, powershell):
@@ -2061,8 +2233,13 @@ def statement_assignments(statement, powershell):
 
 def track_git_vars(statement, powershell, state):
     for name, value in statement_assignments(statement, powershell):
+        name = name.lower()
+        state["git_vars"].discard(name)
+        state.setdefault("git_dir_vars", set()).discard(name)
         if names_git_source(value, state["git_vars"]):
-            state["git_vars"].add(name.lower())
+            state["git_vars"].add(name)
+        if is_git_dir_reference(value.strip().strip("'\""), state):
+            state["git_dir_vars"].add(name)
     if powershell:
         for name, value, env in powershell_assignments(statement):
             literal = None if env else POWERSHELL_LITERAL.match(value.strip())
@@ -2076,7 +2253,7 @@ def git_variable_names(command, powershell, state):
     names = set(state["git_vars"])
     while True:
         collapsed, _ = command_substitutions(command, powershell, names)
-        probe = dict(state, git_vars=set(names), variables={})
+        probe = dict(state, git_vars=set(names), variables={}, git_dir_vars=set())
         for statement in split_statements(collapsed, powershell):
             track_git_vars(statement, powershell, probe)
         if probe["git_vars"] <= names:
@@ -2085,18 +2262,32 @@ def git_variable_names(command, powershell, state):
 
 
 def tampers_with_hooks(command, powershell, state):
-    command, substitutions = command_substitutions(command, powershell,
-                                                   git_variable_names(command, powershell, state))
-    for script in substitutions:
-        reason = tampers_with_hooks(script, powershell, dict(state, variables=dict(state["variables"])))
-        if reason:
-            return reason
-    for statement in split_statements(command, powershell):
+    for raw in raw_statements(command, powershell):
+        statement, substitutions = command_substitutions(raw, powershell, git_variable_names(raw, powershell, state))
+        for script in substitutions:
+            reason = tampers_with_hooks(script, powershell, dict(state, variables=dict(state["variables"])))
+            if reason:
+                return reason
         track_git_vars(statement, powershell, state)
-        reason = segments_tamper(statement, powershell, state)
+        reason = segments_tamper(statement, powershell, state) or (
+            powershell and pipeline_tamper(statement, state))
         if reason:
             return reason
     return None
+
+
+def is_git_dir_reference(text, state):
+    match = re.fullmatch(r"(?i)\$\{?(?:env:)?(\w+)\}?", text)
+    if text == GIT_DIR_MARK:
+        return True
+    return bool(match) and (match.group(1).upper() in GIT_LOCATION_VARS
+                            or match.group(1).lower() in state.get("git_dir_vars", ()))
+
+
+def git_dir_lock_file(text, state):
+    head, _, name = text.replace("\\", "/").rpartition("/")
+    return (bool(re.fullmatch(r"[^/$`*?\[\]]+\.lock", name)) and name not in ("..", ".")
+            and is_git_dir_reference(head.rstrip("/"), state))
 
 
 def segments_tamper(command, powershell, state):
@@ -2104,7 +2295,8 @@ def segments_tamper(command, powershell, state):
         if segment in ("(", ")"):
             continue
         tokens = [substitute(token, state["variables"], powershell)
-                  for token in strip_prefix(tokenize(segment, powershell), powershell, state["variables"])]
+                  for token in strip_prefix(tokenize(segment, powershell), powershell, state["variables"],
+                                            state["git_vars"])]
         if not tokens:
             continue
         name = program(tokens[0][0])
@@ -2149,10 +2341,85 @@ def segments_tamper(command, powershell, state):
             continue
         if state["in_git"]:
             return state["in_git"]
+        written = write_targets(name, targets, state, powershell)
         reach = (first_reach(redirected, state, powershell, True)
-                 or (command_writes and first_reach(targets, state, powershell, name in DELETE_WRITE_PROGRAMS)))
+                 or (command_writes and first_reach(written, state, powershell, name in DELETE_WRITE_PROGRAMS)))
         if reach:
             return reach_reason(reach, HOOKS_DENY)
+    return None
+
+
+def write_targets(name, targets, state, powershell):
+    if name in COPY_PROGRAMS:
+        return copy_destinations(name, targets, powershell)
+    if name in REMOVE_PROGRAMS:
+        return [token for token in targets if not git_dir_lock_file(token[0], state)]
+    return targets
+
+
+def pipeline_stages(statement):
+    stages, start, quote, depth, index = [], 0, None, 0, 0
+    while index < len(statement):
+        char = statement[index]
+        if quote:
+            if char == "`":
+                index += 1
+            elif char == quote:
+                quote = None
+        elif char == "`":
+            index += 1
+        elif char in "'\"":
+            quote = char
+        elif char in "({":
+            depth += 1
+        elif char in ")}":
+            depth = max(depth - 1, 0)
+        elif char == "|" and depth == 0 and statement[index + 1:index + 2] != "|":
+            stages.append(statement[start:index])
+            start = index + 1
+        index += 1
+    return [stage.strip() for stage in stages + [statement[start:]]]
+
+
+def producer_paths(tokens):
+    paths, index = [], 1
+    while index < len(tokens):
+        text, literal = tokens[index]
+        key, colon, value = text.lower().partition(":")
+        if key.startswith("-") and len(key) > 1:
+            if any(param.startswith(key) for param in ("-path", "-literalpath")) and len(key) >= 3:
+                paths.extend([(text.split(":", 1)[1], literal)] if colon else tokens[index + 1:index + 2])
+                index += 1 if colon else 2
+                continue
+            index += 2 if not colon and any(param.startswith(key) for param in PIPELINE_VALUE_PARAMS) else 1
+            continue
+        paths.append(tokens[index])
+        index += 1
+    return paths or [(".", True)]
+
+
+def pipeline_tamper(statement, state):
+    stages = pipeline_stages(statement)
+    for producer, consumer in zip(stages, stages[1:]):
+        consumer_tokens = strip_prefix(tokenize(consumer, True), True, {})
+        producer_tokens = [substitute(token, state["variables"], True)
+                           for token in strip_prefix(tokenize(producer.lstrip("({ \t"), True), True, {})]
+        if not (consumer_tokens and producer_tokens and program(producer_tokens[0][0]) in PIPELINE_PRODUCERS):
+            continue
+        consumer_name = program(consumer_tokens[0][0])
+        if consumer_name in PIPELINE_BLOCK_RUNNERS:
+            if not any(program(text) in PIPELINE_WRITERS for text, _ in consumer_tokens[1:]):
+                continue
+        elif consumer_name not in PIPELINE_WRITERS:
+            continue
+        if state["in_git"]:
+            return state["in_git"]
+        for text, literal in producer_paths(producer_tokens):
+            children = text.rstrip("/\\") + "/*"
+            reach = (reaches_hooks((text, literal), state, True, True)
+                     or reaches_hooks((children, literal), state, True, True))
+            if reach:
+                return reach_reason(reach, HOOKS_DENY)
     return None
 
 
@@ -2186,17 +2453,24 @@ REMOTE_REF_REDIRECT = re.compile(r"(?i)>\s*[\"']?[^\s;|&]*(?:refs[\\/]+remotes[\
 REF_VALUE_OPTIONS = {"-m"}
 FETCH_OPS = {"fetch", "pull"}
 PROTECTED_KEY = re.compile(r"(?i)^(?:pipeline\..+|core\.hookspath|core\.worktree|include\..+|includeif\..+|"
-                           r"url\..+\.(?:push)?insteadof|remote\..+\.(?:url|pushurl|fetch|mirror))$")
+                           r"url\..+|remote\..+)$")
+HARMLESS_REMOTE_KEY = re.compile(r"(?i)^remote\.(?:pushdefault|.+\.(?:prune|prunetags|tagopt|skipdefaultupdate"
+                                 r"|skipfetchall|mirror))$")
 PROTECTED_SECTION = re.compile(r"(?i)^(?:pipeline|core|include|includeif(?:\..+)?|url(?:\..+)?|remote(?:\..+)?)$")
 PROTECTED_CONFIG_VALUE = re.compile(r"(?i)pipeline\.|hookspath|insteadof|pushurl|include|remote\.[^\s=]*\.(?:url|fetch)")
 CONFIG_READ_FLAGS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "-l", "--list", "--show-origin",
-                     "--show-scope", "--name-only", "-z", "--null", "--includes", "--no-includes", "--global",
-                     "--system", "--local", "--worktree", "--bool", "--int", "--bool-or-int", "--path",
-                     "--expiry-date", "--all", "--regexp", "--fixed-value"}
+                     "--show-scope", "--show-names", "--no-show-names", "--name-only", "-z", "--null", "--includes",
+                     "--no-includes", "--global", "--system", "--local", "--worktree", "--bool", "--int",
+                     "--bool-or-int", "--path", "--expiry-date", "--all", "--regexp", "--fixed-value"}
 CONFIG_READ_VALUE_FLAGS = {"--type", "-t", "--default", "--file", "-f", "--blob", "--value"}
 CONFIG_READ_ATTACHED = ("--type=", "--default=", "--file=", "--blob=", "--value=")
 CONFIG_GET_FLAGS = {"--get", "--get-all", "--get-regexp"}
 CONFIG_READ_SUBCOMMANDS = {"get", "list"}
+CONFIG_WRITE_FLAGS = {"--add", "--replace-all", "--unset", "--unset-all", "--no-type", "--get-color",
+                      "--get-colorbool", "--append"}
+CONFIG_WRITE_VALUE_FLAGS = {"--comment"}
+CONFIG_SECTION_EDITS = {"--rename-section", "--remove-section", "rename-section", "remove-section"}
+CONFIG_SUBCOMMANDS = {"get", "set", "unset", "list", "rename-section", "remove-section"}
 REMOTE_REF_FILES = re.compile(r"(?i)\.git[\\/]+(?:refs[\\/]+remotes(?![\w.-])|packed-refs(?![\w.-]))")
 GIT_INTERNALS = re.compile(r"(?i)\.git[\\/]+(?:hooks(?![\w.-])|config(?:\.worktree)?(?![\w.-])|"
                            r"worktrees[\\/]+[^\\/\s]+[\\/]+config\.worktree(?![\w.-]))")
@@ -2222,6 +2496,10 @@ GIT_DERIVED_DENY = ("This command writes to a path derived from where git keeps 
                     ".git/config. Use a literal path instead: git rev-parse --show-toplevel for the root of the "
                     "current worktree, or the literal path of the main worktree as printed by git worktree list "
                     "(cd /c/work/repo && rm -rf dist)." + GUARD_SCOPE)
+UNKNOWN_CWD_DENY = ("This command writes to a path under a .git folder (a submodule's .git/modules, a nested .git) "
+                    "or to the core.hooksPath folder after a cd/pushd/Set-Location into a folder this check "
+                    "cannot resolve (a variable or $(...)), so it may reach git hooks or git config. cd with a "
+                    "literal path, or write with a literal full path." + GUARD_SCOPE)
 FIND_DENY = ("This find could delete or modify files under .git or the git hooks folder (.git/hooks or the "
              "core.hooksPath folder): its -delete or writing -exec is not kept away from them. Exclude .git "
              "first (find . -not -path './.git/*' ...), or search a subfolder (find src ...)." + GUARD_SCOPE)
@@ -2347,8 +2625,68 @@ def is_edit_option(text):
     return False
 
 
+def is_protected_key(key):
+    return bool(PROTECTED_KEY.match(key)) and not HARMLESS_REMOTE_KEY.match(key)
+
+
 def mentions_protected(text):
-    return any(PROTECTED_KEY.match(part) or PROTECTED_SECTION.match(part) for part in [text, *text.split("=", 1)])
+    return any(is_protected_key(part) or PROTECTED_SECTION.match(part) for part in [text, *text.split("=", 1)])
+
+
+def config_key_words(tokens):
+    words, section_edit, subcommand, index = [], False, None, 0
+    while index < len(tokens):
+        text = tokens[index][0]
+        if text == "--":
+            words.extend(tokens[index + 1:])
+            break
+        if text.startswith("-") and text != "-":
+            name = text.split("=", 1)[0]
+            section_edit = section_edit or text in CONFIG_SECTION_EDITS
+            if text in CONFIG_READ_VALUE_FLAGS or text in CONFIG_WRITE_VALUE_FLAGS:
+                index += 2
+                continue
+            if not (text in CONFIG_READ_FLAGS or text in CONFIG_WRITE_FLAGS or text in CONFIG_SECTION_EDITS
+                    or text.startswith(CONFIG_READ_ATTACHED) or name in CONFIG_WRITE_VALUE_FLAGS):
+                return None
+        elif subcommand is None and not words and text in CONFIG_SUBCOMMANDS:
+            subcommand = text
+            section_edit = section_edit or text in CONFIG_SECTION_EDITS
+        else:
+            words.append(tokens[index])
+            if subcommand is None and not section_edit:
+                break
+        index += 1
+    return (words if section_edit else words[:1]), section_edit
+
+
+def config_key_value(token, variables, powershell):
+    text, literal = substitute(token, variables, powershell)
+    if literal:
+        return text
+    return re.sub(r"(?i)\$\{?(?:env:)?([A-Za-z_]\w*)\}?", lambda m: os.environ.get(m.group(1), m.group(0)), text)
+
+
+def config_writes_protected(tokens, variables=None, powershell=False):
+    texts = [text for text, _ in tokens]
+    options = texts[:texts.index("--")] if "--" in texts else texts
+    if any(is_edit_option(text) for text in options) or config_first_word(texts) == "edit":
+        return True
+    keys = config_key_words(tokens)
+    if keys is None:
+        if not any(mentions_protected(text) for text in texts):
+            return False
+        return not config_is_plain_read(texts)
+    words, section_edit = keys
+    values = [(config_key_value(token, variables or {}, powershell), token[1]) for token in words]
+    if any(not literal and value.endswith("$") for value, literal in values):
+        return True
+    unresolved = any(not literal and re.search(r"[$`]", value) for value, literal in values)
+    protected = any(mentions_protected(value) if section_edit else is_protected_key(value.split("=", 1)[0])
+                    for value, _ in values)
+    if not (unresolved or protected):
+        return False
+    return not config_is_plain_read(texts)
 
 
 def config_first_word(texts):
@@ -2390,16 +2728,6 @@ def config_is_plain_read(texts):
     return len(words) <= (2 if reads_value else 1)
 
 
-def config_writes_protected(tokens):
-    texts = [text for text, _ in tokens]
-    options = texts[:texts.index("--")] if "--" in texts else texts
-    if any(is_edit_option(text) for text in options) or config_first_word(texts) == "edit":
-        return True
-    if not any(mentions_protected(text) for text in texts):
-        return False
-    return not config_is_plain_read(texts)
-
-
 def writes_path(command, powershell, pattern):
     for segment in split_segments(command, powershell):
         tokens = tokenize(segment, powershell)
@@ -2424,15 +2752,21 @@ EXEC_WRAPPERS = {"xargs", "parallel", "eval", "invoke-expression", "iex", "start
 INLINE_CODE_SHORT = re.compile(r"^-[A-Za-z]{0,2}[ceE]$")
 INLINE_CODE_FLAGS = {"--eval", "--print", "-p", "-r", "/c", "/k", "eval", "-command"}
 GIT_THEN_NO_VERIFY = re.compile(r"(?i)\bgit\b.*no-veri")
+LINE_CODE_INTERPRETERS = {"cmd", "powershell", "pwsh"}
+SHELL_ARGS = re.compile(r"\$\{?[@*1-9]")
 
 
-def inline_code(rest):
+def inline_code(name, rest):
+    code = []
     for index, text in enumerate(rest):
         low = text.lower()
         if INLINE_CODE_SHORT.match(text) or low in INLINE_CODE_FLAGS or (
                 len(low) >= 3 and low.startswith("-c") and "-command".startswith(low)):
-            return rest[index + 1:]
-    return []
+            script = rest[index + 1:index + 2]
+            if name in LINE_CODE_INTERPRETERS or (name in SHELLS and any(SHELL_ARGS.search(text) for text in script)):
+                return rest[index + 1:]
+            code.extend(script)
+    return code
 
 
 def interpreter_no_verify(command, powershell):
@@ -2444,7 +2778,7 @@ def interpreter_no_verify(command, powershell):
         name, rest = program(tokens[0][0]), [text for text, _ in tokens[1:]]
         if INTERPRETERS.match(name):
             interpreter_seen = True
-            if any(NO_VERIFY.search(text) for text in inline_code(rest)):
+            if any(NO_VERIFY.search(text) for text in inline_code(name, rest)):
                 return True
             continue
         if name == "find":
@@ -2461,7 +2795,7 @@ def guard_reason(command, powershell, ops, base=None):
     if interpreter_no_verify(command, powershell):
         return HOOKS_DENY
     for item in ops:
-        if any(PROTECTED_KEY.match(key) for key, _ in item["pairs"]):
+        if any(is_protected_key(key) for key, _ in item["pairs"]):
             return CONFIG_DENY
         for assign in item["assigns"]:
             key, _, value = assign.partition("=")
@@ -2472,10 +2806,10 @@ def guard_reason(command, powershell, ops, base=None):
                 return CONFIG_DENY
         if item["op"] in ("commit", "push") and skips_hooks(item["op"], item["tokens"]):
             return HOOKS_DENY
-        if item["op"] == "config" and config_writes_protected(item["tokens"]):
+        if item["op"] == "config" and config_writes_protected(item["tokens"], item.get("variables"), powershell):
             return CONFIG_DENY
     state = {"base": base, "cwd": base or os.getcwd(), "in_git": False, "protected": None, "variables": {},
-             "git_vars": set()}
+             "git_vars": set(), "git_dir_vars": set(), "hooks_names": None}
     if writes_path(command, powershell, GIT_INTERNALS):
         return HOOKS_DENY
     reason = tampers_with_hooks(command, powershell, state)
@@ -2646,7 +2980,7 @@ def main(raw):
                 deny(UNVERIFIABLE.format(op="commit", what="a path in the command"))
             reason = commit_reason(cwd, top, pending.get(top, []) + [(cwd, args) for args in stage])
         else:
-            reason = push_reason(cwd, top, item["tokens"])
+            reason = push_reason(cwd, top, item["tokens"], item["pairs"])
         if reason:
             deny(reason)
     warn_missing_hooks(targets, tops)

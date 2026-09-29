@@ -1,8 +1,8 @@
-import json, os, subprocess, sys, tempfile, time
+import json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, "..", "pre-commit-secret-scan.py")
-base = os.path.join(tempfile.gettempdir(), f"guardround7_{int(time.time() * 1000)}")
+base = tempfile.mkdtemp(prefix="guardround7_")
 repo = os.path.join(base, "repo")
 worktree = os.path.join(base, "wt")
 remote = os.path.join(base, "remote.git")
@@ -100,10 +100,10 @@ for command in ('cd "$(git rev-parse --git-common-dir)/.." && npm run build > ou
                 'd=$(git rev-parse --git-dir); cd "$(dirname "$d")" && rm -f ../hooks/pre-push',
                 'd=$(git rev-parse --git-dir); p=$(dirname "$d"); cd "$p" && rm -f ../hooks/pre-push',
                 'd=$(git rev-parse --git-dir); rm -f "$(dirname "$d/hooks/x")/pre-push"',
-                'd=.git; rm -f "$(echo $d/hooks)/pre-push"',
                 'd=$(git rev-parse --git-dir); rm -f "`dirname $d/hooks/x`/pre-push"',
                 'cd "$(dirname "$GIT_DIR")" && rm -rf dist', 'cd "$GIT_COMMON_DIR/.." && rm -rf dist'):
     expect(command, "DENY", reason_has=GIT_DERIVED)
+expect('d=.git; rm -f "$(echo $d/hooks)/pre-push"', "DENY")
 for command in ("$root = Split-Path (git rev-parse --git-common-dir); Set-Location $root; Remove-Item dist -Recurse",
                 "$root = Split-Path -Path (git rev-parse --git-common-dir) -Parent; Set-Location $root; "
                 "Remove-Item dist -Recurse",

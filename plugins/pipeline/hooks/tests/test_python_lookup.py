@@ -1,10 +1,10 @@
-import json, os, shutil, subprocess, sys, tempfile, time
+import json, os, shutil, subprocess, sys, tempfile
 
 HOOKS = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 PLUGIN = os.path.dirname(HOOKS)
 HOOK = os.path.join(HOOKS, "pre-commit-secret-scan.py")
 BASH = shutil.which("bash")
-base = os.path.join(tempfile.gettempdir(), f"pylookup_{int(time.time() * 1000)}")
+base = tempfile.mkdtemp(prefix="pylookup_")
 repo = os.path.join(base, "repo")
 remote = os.path.join(base, "remote.git")
 os.makedirs(repo)
