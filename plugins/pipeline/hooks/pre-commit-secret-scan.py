@@ -1524,7 +1524,7 @@ HARMLESS_TARGET = re.compile(r"(?i)^(?:&\d|/dev/null|\$null|nul)$")
 VARIABLE_MARK = re.compile(r"\$|`")
 UNRESOLVED_REACH = "unresolved"
 GIT_SOURCE_HINT = re.compile(r"(?i)--(?:absolute-)?git-(?:dir|path|common-dir)|(?<![\w.-])\.git(?![\w-])|hookspath")
-GIT_LOCATION_VARS = {"GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE"}
+GIT_LOCATION_VARS = {"GIT_DIR", "GIT_COMMON_DIR"}
 VARIABLE_SOURCE = re.compile(r"(?i)\$(\{)?(?:env:|global:|script:|local:|private:)?([A-Za-z_]\w*|\d)?"
                              r"(?(1)(?:\}|([^}]+\}))?)")
 POWERSHELL_SCOPE = r"(?:global|script|local|private):"
@@ -1541,16 +1541,7 @@ GENERIC_PROTECTED = (([".git", "hooks"], "hooks"), ([".git", "config"], "config"
 HOOK_CANDIDATES = ("pre-commit", "pre-push", "pre-commit.pipeline-chained")
 SUBSTITUTION_MARK = "$__substitution__"
 GIT_SUBSTITUTION_MARK = "$__git_substitution__"
-GIT_PARENT_MARK = "$__git_parent_substitution__"
-GIT_DIR_MARK = "$__git_dir_substitution__"
-GIT_MARKS = (GIT_SUBSTITUTION_MARK, GIT_DIR_MARK)
-GIT_DIR_QUERY = (r"""git(?:\.exe)?\s+(?:-C\s+(?:"[^"]*"|'[^']*'|[^\s;&|()]+)\s+)?rev-parse"""
-                 r"\s+(?:--path-format=(?:absolute|relative)\s+)?--git-common-dir")
-PLAIN_GIT_DIR = re.compile(r"(?i)^\s*" + GIT_DIR_QUERY + r"\s*$")
-PARENT_OF_GIT_DIR = re.compile(r"""(?is)^\s*(?:\S*[\\/])?(?:dirname|split-path)(?:\.exe)?(?:\s+-parent)?"""
-                               r"""(?:\s+-(?:literal)?path)?(?:\s+-parent)?\s+(["']?)"""
-                               r"(?:\$?\(\s*" + GIT_DIR_QUERY + r"\s*\)|" + re.escape(GIT_DIR_MARK) + r")\1"
-                               r"(?:\s+-parent)?\s*$")
+GIT_DERIVED_REACH = "git-derived"
 COPY_PROGRAMS = {"cp", "copy", "copy-item", "cpi", "rsync", "xcopy"}
 MOVE_PROGRAMS = {"mv", "move", "move-item", "mi"}
 PS_COPY_VALUE_PARAMS = ("-path", "-literalpath", "-pspath", "-filter", "-include", "-exclude", "-credential",
@@ -1751,78 +1742,33 @@ def resolved_parts(token, state, powershell):
     return None if resolved is None else lexical_parts(resolved)
 
 
-def points_at_git_value(value, state, parents=True):
-    if any(mark in value for mark in GIT_MARKS) or GIT_SOURCE_HINT.search(value):
+def names_git_source(text, git_names):
+    if GIT_SUBSTITUTION_MARK in text or GIT_SOURCE_HINT.search(text):
         return True
-    names = (match.group(2) or "" for match in VARIABLE_SOURCE.finditer(value))
-    known = state["git_vars"] | state["git_parent_vars"] if parents else state["git_vars"]
-    return any(name.upper() in GIT_LOCATION_VARS or name.lower() in known for name in names)
-
-
-def parent_value_kind(value, state, powershell):
-    kinds = []
-    for match in VARIABLE_SOURCE.finditer(value):
-        name = (match.group(2) or "").lower()
-        if value.startswith(GIT_PARENT_MARK, match.start()) or name in state["git_parent_vars"]:
-            kinds.append(parent_tail_kind(value[match.end():], powershell))
-    if "git" in kinds:
-        return "git"
-    return "parent" if "parent" in kinds else None
-
-
-def parent_tail_kind(rest, powershell):
-    rest = re.sub(r"(?i)^-childpath\s+", "", rest.strip().strip("\"'").strip())
-    rest = rest.lstrip("\\/").strip("\"' ")
-    if VARIABLE_MARK.search(rest) or re.search(r"\s", rest) or ".." in re.split(r"[\\/]", rest):
-        return "git"
-    parts = lexical_parts(rest)
-    if not parts:
-        return "parent"
-    return "git" if part_matches(".git", parts[0], powershell) else None
+    names = (match.group(2) or "" for match in VARIABLE_SOURCE.finditer(text))
+    return any(name.upper() in GIT_LOCATION_VARS or name.lower() in git_names for name in names)
 
 
 def cd_target_in_git(token, state):
     text, literal = token
-    return not literal and any(points_at_git(text[mark.start():], state, entering=True)
-                               and not (names_git_dir(text[mark.start():], state)
-                                        and climbs_one_level(reference_tail(text, mark)))
-                               for mark in VARIABLE_MARK.finditer(text))
+    return not literal and derived_from_git(text, state)
 
 
-def cd_target_beside_git(token, state):
-    text, literal = token
-    return not literal and any(points_at_git(text[mark.start():], state) for mark in VARIABLE_MARK.finditer(text))
+def derived_from_git(text, state):
+    return any(points_at_git(text[mark.start():], state) for mark in VARIABLE_MARK.finditer(text))
 
 
-def climbs_back(token):
-    text = token[0]
-    return not text.startswith("-") and re.split(r"[\\/]", text)[0] == ".."
-
-
-def reference_name(reference):
-    match = VARIABLE_SOURCE.match(reference)
-    return ((match.group(2) or "") if match else ""), match
-
-
-def names_git_dir(reference, state):
-    if reference.startswith(GIT_DIR_MARK):
+def points_at_git(reference, state):
+    if reference.startswith(GIT_SUBSTITUTION_MARK):
         return True
-    name, match = reference_name(reference)
-    return not (match and match.group(3)) and (name.upper() == "GIT_COMMON_DIR"
-                                               or name.lower() in state["git_dir_vars"])
-
-
-def points_at_git(reference, state, entering=False):
-    if reference.startswith(GIT_MARKS + (GIT_PARENT_MARK, SUBSTITUTION_MARK)):
-        return (reference.startswith(GIT_MARKS)
-                or (not entering and reference.startswith(GIT_PARENT_MARK)))
+    if reference.startswith(SUBSTITUTION_MARK):
+        return False
     if reference.startswith("`"):
         return bool(GIT_SOURCE_HINT.search(reference))
-    name, match = reference_name(reference)
-    locations = GIT_LOCATION_VARS - {"GIT_WORK_TREE"} if entering else GIT_LOCATION_VARS
-    return (name.upper() in locations or name.lower() in state["git_vars"]
-            or bool(match and match.group(3) and GIT_SOURCE_HINT.search(match.group(3)))
-            or (not entering and name.lower() in state["git_parent_vars"]))
+    match = VARIABLE_SOURCE.match(reference)
+    name = (match.group(2) or "") if match else ""
+    return (name.upper() in GIT_LOCATION_VARS or name.lower() in state["git_vars"]
+            or bool(match and match.group(3) and GIT_SOURCE_HINT.search(match.group(3))))
 
 
 def reference_tail(text, mark):
@@ -1830,25 +1776,21 @@ def reference_tail(text, mark):
     return pieces[1] if len(pieces) == 2 else ""
 
 
-def climbs_one_level(tail):
-    return [part for part in re.split(r"[\\/]", tail) if part not in ("", ".")] == [".."]
-
-
-def unresolved_tail_reaches(text, state, powershell):
+def unresolved_reach(text, state, powershell):
+    if derived_from_git(text, state):
+        return GIT_DERIVED_REACH
     marks = list(VARIABLE_MARK.finditer(text))
-    return any(tail_reaches(reference_tail(text, mark), text[mark.start():], state, powershell)
-               for index, mark in enumerate(marks)
-               if index == len(marks) - 1 or points_at_git(text[mark.start():], state))
+    if marks and tail_reaches(reference_tail(text, marks[-1]), state, powershell):
+        return UNRESOLVED_REACH
+    return False
 
 
-def tail_reaches(rest, reference, state, powershell):
+def tail_reaches(rest, state, powershell):
     if ".." in re.split(r"[\\/]", rest):
         return True
     tail = ["*" if VARIABLE_MARK.search(part) else part for part in lexical_parts(rest)]
-    if len(tail) == 1 and part_matches(".git", tail[0], powershell) and points_at_git(reference, state):
-        return True
     if not tail or (len(tail) == 1 and any(part_matches(name, tail[0], powershell) for name in HOOK_CANDIDATES)):
-        return points_at_git(reference, state)
+        return False
     targets = list(GENERIC_PROTECTED) + [item for item in protected_git_dirs(state) if item[1] != "gitdir"]
     for target, kind in targets:
         for size in range(1, min(len(tail), len(target)) + 1):
@@ -1865,7 +1807,7 @@ def first_reach(tokens, state, powershell, variable_rule):
 
 
 def reach_reason(reach, reason):
-    return UNRESOLVED_DENY if reach == UNRESOLVED_REACH else reason
+    return {UNRESOLVED_REACH: UNRESOLVED_DENY, GIT_DERIVED_REACH: GIT_DERIVED_DENY}.get(reach, reason)
 
 
 def reaches_hooks(token, state, powershell, variable_rule):
@@ -1876,8 +1818,7 @@ def reaches_hooks(token, state, powershell, variable_rule):
         return True
     parts = resolved_parts(token, state, powershell)
     if parts is None:
-        unresolved = variable_rule and not literal and unresolved_tail_reaches(text, state, powershell)
-        return UNRESOLVED_REACH if unresolved else False
+        return variable_rule and not literal and unresolved_reach(text, state, powershell)
     return any(parts_cover(target, parts, powershell, inside=kind == "hooks")
                for target, kind in protected_git_dirs(state) if kind != "gitdir")
 
@@ -2004,12 +1945,8 @@ def find_excludes(expression, candidates, tests_apply):
                for path, prefix in candidates)
 
 
-def substitution_mark(script):
-    if not GIT_SOURCE_HINT.search(script):
-        return SUBSTITUTION_MARK
-    if PLAIN_GIT_DIR.match(script):
-        return GIT_DIR_MARK
-    return GIT_PARENT_MARK if PARENT_OF_GIT_DIR.match(script) else GIT_SUBSTITUTION_MARK
+def substitution_mark(script, git_names):
+    return GIT_SUBSTITUTION_MARK if names_git_source(script, git_names) else SUBSTITUTION_MARK
 
 
 def closing_paren(command, start):
@@ -2034,7 +1971,7 @@ def powershell_expression_paren(command, index):
     return not (word and word.group(1).lower() in POWERSHELL_BLOCK_KEYWORDS)
 
 
-def command_substitutions(command, powershell):
+def command_substitutions(command, powershell, git_names=frozenset()):
     collapsed, inner, quote, index = [], [], None, 0
     while index < len(command):
         char = command[index]
@@ -2051,21 +1988,21 @@ def command_substitutions(command, powershell):
             while end < len(command) and command[end] != "`":
                 end += 2 if command[end] == "\\" else 1
             inner.append(command[index + 1:end])
-            collapsed.append(substitution_mark(inner[-1]))
+            collapsed.append(substitution_mark(inner[-1], git_names))
             index = end + 1
             continue
         elif command.startswith("$(", index) and not command.startswith("$((", index):
             end, closed = closing_paren(command, index + 2)
             inner.append(command[index + 2:end - 1 if closed else end])
-            collapsed.append(substitution_mark(inner[-1]))
+            collapsed.append(substitution_mark(inner[-1], git_names))
             index = end
             continue
         elif powershell and char == "(" and quote is None and powershell_expression_paren(command, index):
             end, closed = closing_paren(command, index + 1)
             script = command[index + 1:end - 1 if closed else end]
-            if GIT_SOURCE_HINT.search(script):
+            if names_git_source(script, git_names):
                 inner.append(script)
-                collapsed.append(substitution_mark(script))
+                collapsed.append(GIT_SUBSTITUTION_MARK)
                 index = end
                 continue
         collapsed.append(char)
@@ -2124,21 +2061,8 @@ def statement_assignments(statement, powershell):
 
 def track_git_vars(statement, powershell, state):
     for name, value in statement_assignments(statement, powershell):
-        key, bare = name.lower(), value.strip().strip("\"'")
-        plain_dir = (bare == GIT_DIR_MARK or bool(PLAIN_GIT_DIR.match(bare))) and (
-            key not in state["git_vars"] or key in state["git_dir_vars"])
-        if bare == GIT_PARENT_MARK or PARENT_OF_GIT_DIR.match(bare):
-            state["git_parent_vars"].add(key)
-        elif points_at_git_value(value, state, parents=False):
-            state["git_vars"].add(key)
-        else:
-            kind = parent_value_kind(value, state, powershell)
-            if kind:
-                state["git_vars" if kind == "git" else "git_parent_vars"].add(key)
-        if plain_dir:
-            state["git_dir_vars"].add(key)
-        else:
-            state["git_dir_vars"].discard(key)
+        if names_git_source(value, state["git_vars"]):
+            state["git_vars"].add(name.lower())
     if powershell:
         for name, value, env in powershell_assignments(statement):
             literal = None if env else POWERSHELL_LITERAL.match(value.strip())
@@ -2148,8 +2072,21 @@ def track_git_vars(statement, powershell, state):
                 state["variables"].pop(name.lower(), None)
 
 
+def git_variable_names(command, powershell, state):
+    names = set(state["git_vars"])
+    while True:
+        collapsed, _ = command_substitutions(command, powershell, names)
+        probe = dict(state, git_vars=set(names), variables={})
+        for statement in split_statements(collapsed, powershell):
+            track_git_vars(statement, powershell, probe)
+        if probe["git_vars"] <= names:
+            return names
+        names |= probe["git_vars"]
+
+
 def tampers_with_hooks(command, powershell, state):
-    command, substitutions = command_substitutions(command, powershell)
+    command, substitutions = command_substitutions(command, powershell,
+                                                   git_variable_names(command, powershell, state))
     for script in substitutions:
         reason = tampers_with_hooks(script, powershell, dict(state, variables=dict(state["variables"])))
         if reason:
@@ -2183,9 +2120,9 @@ def segments_tamper(command, powershell, state):
         if name in (CD_POWERSHELL if powershell else CD_BASH):
             paths = [token for token in targets if not token[0].startswith("-")]
             if paths:
-                entered = enters_git_dir(paths[0], state, powershell) or cd_target_in_git(paths[0], state)
-                state["in_git"] = state["in_git"] or entered
-                state["beside_git"] = state["beside_git"] or (not entered and cd_target_beside_git(paths[0], state))
+                state["in_git"] = state["in_git"] or (
+                    HOOKS_DENY if enters_git_dir(paths[0], state, powershell)
+                    else GIT_DERIVED_DENY if cd_target_in_git(paths[0], state) else False)
                 state["cwd"] = (resolve_path(paths[0][0], paths[0][1], state["cwd"], powershell)
                                 if state["cwd"] is not None else None)
             continue
@@ -2210,9 +2147,8 @@ def segments_tamper(command, powershell, state):
         command_writes = name not in FILE_READERS and name not in ("git", "find")
         if not (redirected or command_writes):
             continue
-        written = redirected + (targets if command_writes else [])
-        if state["in_git"] or (state["beside_git"] and any(climbs_back(token) for token in written)):
-            return HOOKS_DENY
+        if state["in_git"]:
+            return state["in_git"]
         reach = (first_reach(redirected, state, powershell, True)
                  or (command_writes and first_reach(targets, state, powershell, name in DELETE_WRITE_PROGRAMS)))
         if reach:
@@ -2275,9 +2211,17 @@ HOOKS_DENY = ("This command would skip or rewire git's own hooks (--no-verify, a
               "without that option, or ask the user to run it." + GUARD_SCOPE)
 UNRESOLVED_DENY = ("This command writes to a path built from a variable or $(...) that this check cannot resolve "
                    "and that may resolve to the git hooks folder (.git/hooks or the core.hooksPath folder) or "
-                   "to .git/config: its value comes from git rev-parse, GIT_DIR or a .git/hooks path, or the "
-                   "path climbs out with a .. segment. Write the literal path instead (rm -rf build/hooks, not "
-                   "rm -rf \"$dir\"/hooks)." + GUARD_SCOPE)
+                   "to .git/config: the rest of the path can end in one of them, or it climbs out with a .. "
+                   "segment. Write the literal path instead (rm -rf build/hooks, not rm -rf \"$dir\"/hooks)."
+                   + GUARD_SCOPE)
+GIT_DERIVED_DENY = ("This command writes to a path derived from where git keeps its data ($(git rev-parse "
+                    "--git-dir/--git-common-dir/--absolute-git-dir/--git-path), GIT_DIR, GIT_COMMON_DIR, "
+                    "a .git path, or a variable, dirname, Split-Path or .. built from them), directly "
+                    "or after a cd/pushd/Set-Location into it. In a linked worktree or a submodule that path, and "
+                    "its parent, can still be inside another repository's .git, next to the git hooks folder and "
+                    ".git/config. Use a literal path instead: git rev-parse --show-toplevel for the root of the "
+                    "current worktree, or the literal path of the main worktree as printed by git worktree list "
+                    "(cd /c/work/repo && rm -rf dist)." + GUARD_SCOPE)
 FIND_DENY = ("This find could delete or modify files under .git or the git hooks folder (.git/hooks or the "
              "core.hooksPath folder): its -delete or writing -exec is not kept away from them. Exclude .git "
              "first (find . -not -path './.git/*' ...), or search a subfolder (find src ...)." + GUARD_SCOPE)
@@ -2531,7 +2475,7 @@ def guard_reason(command, powershell, ops, base=None):
         if item["op"] == "config" and config_writes_protected(item["tokens"]):
             return CONFIG_DENY
     state = {"base": base, "cwd": base or os.getcwd(), "in_git": False, "protected": None, "variables": {},
-             "git_vars": set(), "git_parent_vars": set(), "git_dir_vars": set(), "beside_git": False}
+             "git_vars": set()}
     if writes_path(command, powershell, GIT_INTERNALS):
         return HOOKS_DENY
     reason = tampers_with_hooks(command, powershell, state)
