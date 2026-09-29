@@ -1,7 +1,6 @@
 ---
 stack: postgres-supabase
 paths: ["supabase/**", "**/*.sql"]
-agents: [db, security, code-review, audit]
 ---
 
 # Postgres / Supabase checklist
@@ -11,7 +10,7 @@ Each item: the check — why — how to verify. An unmet item is a finding, with
 ## RLS tests (pgTAP)
 - **Every write under RLS asserts the affected-row count** — `lives_ok` passes when the policy silently filters every row. Verify: the test checks `row_count` (helper with `get diagnostics`) or the resulting state, not only "no error".
 - **Every restrictive policy has a negative test** — an admin-only rule with only positive tests proves nothing. Verify: a non-authorized role tries the read/write and the test asserts zero rows or the expected error.
-- **Mutation check on policies, checks and guards** — tests that stay green when the rule is loosened are vacuous. Verify: loosen each rule (policy to `true`, guard removed) in a rolled-back transaction or temporary edit, run the suite, see red; the implementer reports a mutation → failing test table, and `code-review` runs its own mutations.
+- **Mutation check on policies, checks and guards** — tests that stay green when the rule is loosened are vacuous. Verify: loosen each rule (policy to `true`, guard removed) in a rolled-back transaction or temporary edit, run the suite, see red.
 - **No data-modifying `WITH` inside `is()` / `results_eq()`** — Postgres rejects it (must be top level). Verify: writes run as top-level statements or via a helper, and the assertion reads the result afterwards.
 
 ## Privileges
