@@ -119,4 +119,18 @@ with open(LEDGER, "a") as handle:
 data = json.loads(ledger("status", "--json").stdout)
 check("status flags a spec line written around the validation", len(data["invalid"]) == 1, json.dumps(data["invalid"]))
 
+with open(LEDGER, "a") as handle:
+    handle.write(json.dumps({"agent": "design", "verdict": "PASS", "task": "spec", "from": spec1,
+                             "head": sh("git", "rev-parse", "HEAD"), "round": 1, "report": REPORT, "spec": SPEC,
+                             "scope": "fix", "covers_from": base,
+                             "new": {"critical": 0, "important": 0, "minor": 0},
+                             "open": {"critical": 0, "important": 0, "minor": 0}}) + "\n")
+data = json.loads(ledger("status", "--json", "--head", "HEAD").stdout)
+item = next((s for s in data["stale"] if (s["task"], s["agent"]) == ("spec", "design")), {})
+check("a spec review whose fix-scoped chain is broken is flagged even with the spec unchanged",
+      item.get("chain_broken") is True and item.get("commits_after") == 0, json.dumps(data["stale"]))
+text = ledger("status", "--head", "HEAD").stdout
+row = next((line for line in text.splitlines() if line.startswith("spec") and " design " in line), "")
+check("text status says 'chain broken' for it", "chain broken" in row and "None" not in row, text)
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

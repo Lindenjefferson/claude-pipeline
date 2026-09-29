@@ -8,7 +8,7 @@
             "type": "command",
             "command": "for py in python python3; do \"$py\" -c 'import sys; sys.exit(sys.version_info[0] < 3)' </dev/null >/dev/null 2>&1 && exec \"$py\" \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-commit-secret-scan.py\"; done; echo 'pipeline plugin: no Python 3 found on PATH (tried python, python3); git commit and git push are NOT being scanned for secrets' >&2; exit 1",
             "shell": "bash",
-            "timeout": 20
+            "timeout": 60
           }
         ]
       },

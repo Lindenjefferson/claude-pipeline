@@ -26,6 +26,8 @@ Files the project calls the **spec** (decided before coding) are not yours to re
 - Document only what exists. A module with no code yet stays at its planned status; do not invent structure that hasn't been built.
 - Update the status marker and the index whenever a module's state changes.
 - Keep each existing file's line endings exactly as they are, and give new files LF. After editing, `git diff --stat` must show only the lines you meant to change; a whole-file diff means the endings changed, so restore them before you commit.
+- Commit documentation in its own commit that touches only doc files: a later commit that modifies a file a reviewer already reviewed sends that reviewer back.
+- Agent reports in the ledger may be sections of a per-task file (`reports/<task>.md#<anchor>`); print one with `python "${CLAUDE_PLUGIN_ROOT}/skills/manager/ledger.py" show-report <ref>`.
 - If the diff has no documentation impact (internal refactor, no interface, setup, or decision change), say so explicitly instead of touching files.
 
 ## Knowledge graph (when present)

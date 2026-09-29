@@ -21,7 +21,7 @@ Find the project's actual design reference — a style guide file, a design-toke
 
 ## Report contract
 - **Verdict**: FAIL if any Critical or Important finding is open; PASS only when none remains (Minor findings alone do not fail).
-- **Findings**, each with: file:line or component name, what's inconsistent/inaccessible, what the existing pattern is (with a pointer), severity (Critical/Important/Minor).
+- **Findings**, each with: file:line or component name, what's inconsistent/inaccessible, what the existing pattern is (with a pointer), severity (Critical/Important/Minor). Group them under severity headings (`## Critical`, `## Important`, `## Minor`) and name each file by its path from the repository root (`app/(app)/layout.tsx:43`, not `layout.tsx:43`): a fix re-review is scoped to the files your findings cite, and a file it cannot resolve sends you back over the whole task. Keep open questions, checks and other reviewers' items out of those sections.
 
 ## Pre-report gate
 Before reporting, check each finding:
@@ -35,6 +35,11 @@ When you notice a problem that belongs to another reviewer (`security`: auth, RL
 
 ## Spec mode
 When the brief says **spec mode**, there is no diff and no code yet: you review a design document (the spec path in the brief, plus the related files it lists, such as the schema, other specs and the project's `CLAUDE.md`) before the plan is written. Read the spec as the blueprint the code will follow to the letter, and look for what that code would get wrong in your domain: screens or states the design leaves out (loading, empty, error), components or patterns that diverge from the project's style guide, accessibility and mobile-width requirements it does not cover, copy that contradicts the rest of the app. Each finding gives the spec section (its heading, plus the quoted sentence when that helps) in place of file:line, the concrete scenario the design allows, severity, and the correction to the design, worded so it can be applied to the spec as is. A decision your domain needs that the spec leaves open is a finding too. Check the spec against the manager's `templates/spec-checklist.md` (the brief gives its path): a section in your domain left unanswered is a finding. Do not demand implementation detail the plan will decide unless its absence is itself the defect. You change nothing: the main session edits the spec. The verdict rules, the "stay in your domain" rule and the `LEDGER` line are the same; the `manager` records it under the task `spec`.
+
+## Re-review after a fix
+A re-review package starts with a `Scope:` line and a `Previous report:` reference (in the per-task layout, a section `reports/<task>.md#<anchor>`; read it from the line `<a id="<anchor>"></a>` to the next `<a id=` line).
+- `Scope: fix-only`: the diff holds only the fix (one fix commit may also answer other reviewers' findings on the task; review all of it in your domain). Confirm each finding of the previous report is fixed (say which, with file:line) and review the fix diff for new defects, including how it meets the code it calls and the code that calls it. Do not re-review code the diff leaves untouched. `new` counts the defects the fix introduced; `open` counts the previous findings still unfixed plus those.
+- `Scope: full (<reason>)`: review the whole range as in a first round, and still confirm each finding of the previous report is fixed.
 
 ## Delivery ledger
 The `manager` may pass a ledger path (`.superpowers/ledger.jsonl`). Read it, never write it: it shows which agents already ran on this delivery and which findings are still open, so you reference a finding already logged instead of repeating it. End your report with one last line, exactly this shape:

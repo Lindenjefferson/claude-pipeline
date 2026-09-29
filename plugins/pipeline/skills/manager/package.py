@@ -8,7 +8,8 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ledger import cited_paths
+from findings import fix_scope_reason
+from ledger import FULL_SCOPE_AGENTS, SPEC_TASK, cited_paths, coverage_start, open_findings_reports, read_ledger, role
 
 PLUGIN_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 LOCKFILES = ("package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "Cargo.lock", "poetry.lock")
@@ -153,7 +154,53 @@ def dependency_section(span, locks):
     return "\n".join(parts)
 
 
+def scope_reason(args, entries, last, fixed, universe, spec):
+    if args.agent in FULL_SCOPE_AGENTS:
+        return f"{args.agent} always re-reviews the task's full range"
+    if spec:
+        return None
+    return fix_scope_reason(open_findings_reports(entries, args.fix_of, args.agent, last["head"]), fixed, universe)
+
+
+def fix_package(args):
+    entries = read_ledger(args.ledger)[0]
+    group = [e for e in entries if e.get("agent") == args.agent and e.get("task") == args.fix_of
+             and role(e) == "review"]
+    if not group:
+        sys.exit(f"no {args.agent} review of task {args.fix_of} in {args.ledger}; build a full package with --base")
+    last = group[-1]
+    start = coverage_start(group, len(group) - 1)
+    if start is None:
+        sys.exit(f"the fix-scoped chain of {args.agent} on task {args.fix_of} is broken; "
+                 "build a full package with --base <task start>")
+    code, head, _ = git("rev-parse", "--verify", "--quiet", f"{args.head}^{{commit}}")
+    if code != 0:
+        sys.exit(f"bad head: {args.head}")
+    head = head.strip()
+    spec = last.get("spec") if args.fix_of == SPEC_TASK else None
+    only = ["--", f":(top,literal){spec}"] if spec else []
+    fixed = git("diff", "--name-only", f"{last['head']}..{head}", *only)[1].splitlines()
+    if not fixed:
+        sys.exit(f"nothing changed{f' in {spec}' if spec else ''} since {last['head'][:8]}, "
+                 f"the head of the last {args.agent} review of task {args.fix_of}")
+    universe = git("diff", "--name-only", f"{start}..{head}")[1].splitlines()
+    reason = scope_reason(args, entries, last, fixed, universe, spec)
+    return {"base": last["head"] if reason is None else start, "head": head,
+            "scope": "fix-only" if reason is None else f"full ({reason})",
+            "flag": "fix" if reason is None else "full", "previous": last["report"], "spec": spec,
+            "name": f"{args.fix_of}-{args.agent}-fix-r{len(group) + 1}"}
+
+
 def review(args):
+    fix = None
+    if args.fix_of:
+        if not args.agent:
+            sys.exit("--fix-of needs --agent (the reviewer to re-run)")
+        fix = fix_package(args)
+        args.base, args.head = fix["base"], fix["head"]
+        args.name = args.name or fix["name"]
+    elif not args.base:
+        sys.exit("--base is required (or --fix-of <task> --agent <agent>)")
     for name, rev in (("base", args.base), ("head", args.head)):
         if git("rev-parse", "--verify", "--quiet", rev)[0] != 0:
             sys.exit(f"bad {name}: {rev}")
@@ -163,13 +210,14 @@ def review(args):
     if int(count.strip() or 0) == 0:
         sys.exit(f"empty commit range: {args.base}..{args.head}")
     span = f"{args.base}..{args.head}"
-    changed = git("diff", "--name-only", span)[1].splitlines()
-    locks = [] if args.include_lockfiles else [p for p in changed if os.path.basename(p) in LOCKFILES]
-    excludes = ["--", ":/", *(f":(top,exclude,literal){p}" for p in locks)] if locks else []
-    _, commits, _ = git("log", "--oneline", span)
-    _, stat, _ = git("diff", "--stat", span)
+    only = ["--", f":(top,literal){fix['spec']}"] if fix and fix["spec"] else []
+    changed = git("diff", "--name-only", span, *only)[1].splitlines()
+    locks = [] if args.include_lockfiles or only else [p for p in changed if os.path.basename(p) in LOCKFILES]
+    excludes = ["--", ":/", *(f":(top,exclude,literal){p}" for p in locks)] if locks else only
+    _, commits, _ = git("log", "--oneline", span, *only)
+    _, stat, _ = git("diff", "--stat", span, *only)
     _, diff, _ = git("diff", "-U10", span, *excludes)
-    _, history, _ = git("log", "-p", "-m", "--format=commit %h %s", span)
+    _, history, _ = git("log", "-p", "-m", "--format=commit %h %s", span, *only)
     short = lambda rev: git("rev-parse", "--short", rev)[1].strip()
     name = args.name or f"{short(args.base)}..{short(args.head)}"
     package = os.path.join(args.out_dir, f"review-{name}.diff")
@@ -178,12 +226,21 @@ def review(args):
                f"{', '.join(locks)}\n") if locks else ""
     checklists = checklists_section(args.checklists_dir, changed)
     dependencies = f"\n{dependency_section(span, locks)}" if locks else ""
-    write(package, f"# Review package: {span}\n\n{checklists}\n## Commits\n{commits}\n"
+    header = ""
+    if fix:
+        header = (f"Scope: {fix['scope']}\nPrevious report: {fix['previous']}\n"
+                  + (f"Spec: {fix['spec']}\n" if fix["spec"] else "")
+                  + f"Record with: append --task {args.fix_of} --from {args.base} --head {args.head} "
+                    f"--scope {fix['flag']}\n")
+    write(package, f"# Review package: {span}\n{header}\n{checklists}\n## Commits\n{commits}\n"
                    f"## Files changed\n{stat}{skipped}{dependencies}\n## Diff\n{diff}")
     write(patches, f"# Commit-by-commit patches: {span}\n\n{history}")
     print(f"package: {package}")
     print(f"history: {patches}")
     print(f"{count.strip()} commit(s)")
+    if fix:
+        print(f"scope: {fix['scope']}")
+        print(f"record with: --from {args.base} --head {args.head} --scope {fix['flag']}")
 
 
 def extract_task(plan, task_id):
@@ -375,9 +432,14 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
 
     review_cmd = commands.add_parser("review", help="write a review package and history patches for BASE..HEAD")
-    review_cmd.add_argument("--base", required=True)
-    review_cmd.add_argument("--head", required=True)
-    review_cmd.add_argument("--name", help="file name stem, default BASE..HEAD short SHAs")
+    review_cmd.add_argument("--base", help="required unless --fix-of")
+    review_cmd.add_argument("--head", default="HEAD")
+    review_cmd.add_argument("--fix-of", metavar="TASK",
+                            help="re-review after a fix: range, scope and previous report come from the ledger")
+    review_cmd.add_argument("--agent", help="the reviewer to re-run, with --fix-of")
+    review_cmd.add_argument("--ledger", default=".superpowers/ledger.jsonl")
+    review_cmd.add_argument("--name", help="file name stem; default BASE..HEAD short SHAs, "
+                                           "or <task>-<agent>-fix-r<round> with --fix-of")
     review_cmd.add_argument("--out-dir", default=".superpowers/reviews")
     review_cmd.add_argument("--include-lockfiles", action="store_true")
     review_cmd.add_argument("--checklists-dir", default=os.path.join(PLUGIN_ROOT, "checklists"))
