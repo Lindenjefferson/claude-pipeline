@@ -8,7 +8,8 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ledger import cited_paths
+from ledger import (FULL_SCOPE_AGENTS, LINE_SUFFIX, SPEC_TASK, cited_paths, coverage_start, read_ledger,
+                    read_report, role)
 
 PLUGIN_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 LOCKFILES = ("package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "Cargo.lock", "poetry.lock")
@@ -22,6 +23,9 @@ LESSON_ID = re.compile(r"^- .* \[([\w.-]+)\]$", re.MULTILINE)
 DEPENDENCY_FIELD = re.compile(r"\b(?:name|version|resolved|resolution|integrity|checksum)\b|node_modules/", re.IGNORECASE)
 DEPENDENCY_HEADER = re.compile(r"^(?:\S.*@.*|\s+/?\S+@\S+):\s*$")
 DEPENDENCY_LINES_MAX = 80
+FINDINGS_MARK = re.compile(r"^\s*(#*)\s*\**\s*(?:open\s+|new\s+|remaining\s+)?findings\b", re.IGNORECASE)
+SECTION_END = re.compile(r"^\s*(?:#+\s|LEDGER\s*\{|\*\*[^*]+\*\*\s*:?\s*$)")
+FILE_LINE = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)*[\w.-]+\.\w+):\d+")
 
 
 def git(*args):
@@ -153,7 +157,105 @@ def dependency_section(span, locks):
     return "\n".join(parts)
 
 
+def is_section_end(line, level):
+    heading = re.match(r"^\s*(#+)\s+(.*)$", line)
+    if heading:
+        if level:
+            return len(heading.group(1)) <= level
+        return not re.match(r"\W*(?:critical|important|minor)\b", heading.group(2), re.IGNORECASE)
+    if level or not SECTION_END.match(line):
+        return False
+    return line.lstrip().startswith("LEDGER") or not re.search(r"critical|important|minor", line, re.IGNORECASE)
+
+
+def findings_sections(text):
+    sections, current, level = [], None, 0
+    for line in text.splitlines():
+        if current is not None and is_section_end(line, level):
+            sections.append("\n".join(current))
+            current = None
+        if current is None:
+            mark = FINDINGS_MARK.match(line)
+            if mark and len(line.strip()) <= 80:
+                current, level = [line[mark.end():]], len(mark.group(1))
+            continue
+        current.append(line)
+    if current is not None:
+        sections.append("\n".join(current))
+    return sections
+
+
+def finding_paths(text):
+    sections = findings_sections(text)
+    if not sections:
+        return None
+    body = "\n".join(sections)
+    paths = set()
+    for candidate in cited_paths(body) | set(FILE_LINE.findall(body)):
+        path = LINE_SUFFIX.sub("", candidate.strip(" `*,;")).replace("\\", "/")
+        while path.startswith("./"):
+            path = path[2:]
+        if "/" in path or "." in path:
+            paths.add(path)
+    return paths
+
+
+def scope_reason(args, last, fixed, spec):
+    if args.agent in FULL_SCOPE_AGENTS:
+        return f"{args.agent} always re-reviews the task's full range"
+    if spec:
+        return None
+    text = read_report(last["report"])
+    if text is None:
+        return f"the previous report {last['report']} cannot be read"
+    cited = finding_paths(text)
+    if not cited:
+        return "the previous report's findings cite no file"
+    outside = [path for path in fixed if path not in cited]
+    if outside:
+        more = f" +{len(outside) - 5} more" if len(outside) > 5 else ""
+        return f"the fix touches files outside the open findings: {', '.join(outside[:5])}{more}"
+    return None
+
+
+def fix_package(args):
+    entries = read_ledger(args.ledger)[0]
+    group = [e for e in entries if e.get("agent") == args.agent and e.get("task") == args.fix_of
+             and role(e) == "review"]
+    if not group:
+        sys.exit(f"no {args.agent} review of task {args.fix_of} in {args.ledger}; build a full package with --base")
+    last = group[-1]
+    start = coverage_start(group, len(group) - 1)
+    if start is None:
+        sys.exit(f"the fix-scoped chain of {args.agent} on task {args.fix_of} is broken; "
+                 "build a full package with --base <task start>")
+    code, head, _ = git("rev-parse", "--verify", "--quiet", f"{args.head}^{{commit}}")
+    if code != 0:
+        sys.exit(f"bad head: {args.head}")
+    head = head.strip()
+    spec = last.get("spec") if args.fix_of == SPEC_TASK else None
+    only = ["--", f":(top,literal){spec}"] if spec else []
+    fixed = git("diff", "--name-only", f"{last['head']}..{head}", *only)[1].splitlines()
+    if not fixed:
+        sys.exit(f"nothing changed{f' in {spec}' if spec else ''} since {last['head'][:8]}, "
+                 f"the head of the last {args.agent} review of task {args.fix_of}")
+    reason = scope_reason(args, last, fixed, spec)
+    return {"base": last["head"] if reason is None else start, "head": head,
+            "scope": "fix-only" if reason is None else f"full ({reason})",
+            "flag": "fix" if reason is None else "full", "previous": last["report"], "spec": spec,
+            "name": f"{args.fix_of}-{args.agent}-fix-r{len(group) + 1}"}
+
+
 def review(args):
+    fix = None
+    if args.fix_of:
+        if not args.agent:
+            sys.exit("--fix-of needs --agent (the reviewer to re-run)")
+        fix = fix_package(args)
+        args.base, args.head = fix["base"], fix["head"]
+        args.name = args.name or fix["name"]
+    elif not args.base:
+        sys.exit("--base is required (or --fix-of <task> --agent <agent>)")
     for name, rev in (("base", args.base), ("head", args.head)):
         if git("rev-parse", "--verify", "--quiet", rev)[0] != 0:
             sys.exit(f"bad {name}: {rev}")
@@ -163,13 +265,14 @@ def review(args):
     if int(count.strip() or 0) == 0:
         sys.exit(f"empty commit range: {args.base}..{args.head}")
     span = f"{args.base}..{args.head}"
-    changed = git("diff", "--name-only", span)[1].splitlines()
-    locks = [] if args.include_lockfiles else [p for p in changed if os.path.basename(p) in LOCKFILES]
-    excludes = ["--", ":/", *(f":(top,exclude,literal){p}" for p in locks)] if locks else []
-    _, commits, _ = git("log", "--oneline", span)
-    _, stat, _ = git("diff", "--stat", span)
+    only = ["--", f":(top,literal){fix['spec']}"] if fix and fix["spec"] else []
+    changed = git("diff", "--name-only", span, *only)[1].splitlines()
+    locks = [] if args.include_lockfiles or only else [p for p in changed if os.path.basename(p) in LOCKFILES]
+    excludes = ["--", ":/", *(f":(top,exclude,literal){p}" for p in locks)] if locks else only
+    _, commits, _ = git("log", "--oneline", span, *only)
+    _, stat, _ = git("diff", "--stat", span, *only)
     _, diff, _ = git("diff", "-U10", span, *excludes)
-    _, history, _ = git("log", "-p", "-m", "--format=commit %h %s", span)
+    _, history, _ = git("log", "-p", "-m", "--format=commit %h %s", span, *only)
     short = lambda rev: git("rev-parse", "--short", rev)[1].strip()
     name = args.name or f"{short(args.base)}..{short(args.head)}"
     package = os.path.join(args.out_dir, f"review-{name}.diff")
@@ -178,12 +281,21 @@ def review(args):
                f"{', '.join(locks)}\n") if locks else ""
     checklists = checklists_section(args.checklists_dir, changed)
     dependencies = f"\n{dependency_section(span, locks)}" if locks else ""
-    write(package, f"# Review package: {span}\n\n{checklists}\n## Commits\n{commits}\n"
+    header = ""
+    if fix:
+        header = (f"Scope: {fix['scope']}\nPrevious report: {fix['previous']}\n"
+                  + (f"Spec: {fix['spec']}\n" if fix["spec"] else "")
+                  + f"Record with: append --task {args.fix_of} --from {args.base} --head {args.head} "
+                    f"--scope {fix['flag']}\n")
+    write(package, f"# Review package: {span}\n{header}\n{checklists}\n## Commits\n{commits}\n"
                    f"## Files changed\n{stat}{skipped}{dependencies}\n## Diff\n{diff}")
     write(patches, f"# Commit-by-commit patches: {span}\n\n{history}")
     print(f"package: {package}")
     print(f"history: {patches}")
     print(f"{count.strip()} commit(s)")
+    if fix:
+        print(f"scope: {fix['scope']}")
+        print(f"record with: --from {args.base} --head {args.head} --scope {fix['flag']}")
 
 
 def extract_task(plan, task_id):
@@ -375,9 +487,14 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
 
     review_cmd = commands.add_parser("review", help="write a review package and history patches for BASE..HEAD")
-    review_cmd.add_argument("--base", required=True)
-    review_cmd.add_argument("--head", required=True)
-    review_cmd.add_argument("--name", help="file name stem, default BASE..HEAD short SHAs")
+    review_cmd.add_argument("--base", help="required unless --fix-of")
+    review_cmd.add_argument("--head", default="HEAD")
+    review_cmd.add_argument("--fix-of", metavar="TASK",
+                            help="re-review after a fix: range, scope and previous report come from the ledger")
+    review_cmd.add_argument("--agent", help="the reviewer to re-run, with --fix-of")
+    review_cmd.add_argument("--ledger", default=".superpowers/ledger.jsonl")
+    review_cmd.add_argument("--name", help="file name stem; default BASE..HEAD short SHAs, "
+                                           "or <task>-<agent>-fix-r<round> with --fix-of")
     review_cmd.add_argument("--out-dir", default=".superpowers/reviews")
     review_cmd.add_argument("--include-lockfiles", action="store_true")
     review_cmd.add_argument("--checklists-dir", default=os.path.join(PLUGIN_ROOT, "checklists"))
