@@ -57,18 +57,18 @@ O spec responde, antes da revisão, às seções de [`skills/manager/templates/s
 
 Cada entrega tem um ledger em `.superpowers/ledger.jsonl`, escrito só pelo `ledger.py`. Ele registra, por tarefa e agente, o intervalo de commits revisado, o veredito, os problemas encontrados e em aberto e as decisões tomadas. Linhas inválidas são recusadas na entrada, e `status --head HEAD` aponta revisões que ficaram para trás de commits novos (para a tarefa `spec`, só quando o próprio spec mudou).
 
-- `save-report` grava o relatório do agente, sem transcrição à mão, em `.superpowers/reports/<tarefa>-<agente>-r<N>.md` (rodada automática, nunca sobrescreve) e imprime o caminho para o `append`.
+- `save-report` grava o relatório do agente, sem transcrição à mão, em `.superpowers/reports/<tarefa>-<agente>-r<N>.md` (rodada automática contada por tarefa, agente e papel, como no `append`; nunca sobrescreve) e imprime o caminho para o `append`. O `db` exige `--role implementer|reviewer`, e a revisão dele vai para `<tarefa>-db-review-r<N>.md`.
 - `--head`/`--from` aceitam qualquer ref (`HEAD`) e gravam o SHA.
-- O `append` valida o relatório de `dev`, `db` e `docs`: recusa relatório sem linha `LEDGER`, curto demais ou "placeholder", relatório de `dev`/`db` sem o SHA do commit, e arquivo citado que não está em `git diff FROM..HEAD` (`--allow-unlisted` com nota para exceções).
+- O `append` valida o relatório de `dev`, `db` e `docs`: recusa relatório sem linha `LEDGER`, curto demais (200 caracteres em `DONE`/`DONE_WITH_CONCERNS`; motivo de 40 nos demais vereditos) ou "placeholder", relatório de `dev`/`db` sem o SHA do commit, e arquivo citado que não está em `git diff FROM..HEAD` (`--allow-unlisted '<motivo>'` para exceções; o motivo é obrigatório e vira nota de decisão).
 
 ### Briefs, adendos e lições
 
 - `package.py brief` aceita ids como `T1.2`, `3` e `A-1`, e anexa ao texto da tarefa os adendos de `.superpowers/briefs/<tarefa>.addenda/*.md` e `.superpowers/briefs/all.addenda/*.md`. O manager nunca edita um brief gerado, então reextrair não perde nada.
-- **Lições**: regras atômicas (até 280 caracteres) que teriam evitado um achado. As globais ficam versionadas no plugin, em `plugins/pipeline/lessons/<stack>.jsonl` (`postgres-supabase`, `nextjs-react`, `auth`, `general`), e as da entrega em `.superpowers/lessons.jsonl`, escritas só por `ledger.py lesson add|mark|list|promote`. O `brief` injeta até 6 lições (8000 caracteres) cujos `paths` casam com os arquivos da tarefa, ordenadas por `held - 2*recurred` com bônus para as da entrega. Cada lição conta `injected`, `held` (preveniu) e `recurred` (reincidiu). No fechamento, o manager mostra cada lição da entrega e só promove para o global as que o usuário aprovar, uma a uma.
+- **Lições**: regras atômicas (até 280 caracteres) que teriam evitado um achado. As globais ficam versionadas no plugin, em `plugins/pipeline/lessons/<stack>.jsonl` (`postgres-supabase`, `nextjs-react`, `auth`, `general`), e as da entrega em `.superpowers/lessons.jsonl`, escritas só por `ledger.py lesson add|mark|list|promote|sync`. O `brief` injeta até 6 lições (8000 caracteres) cujos `paths` casam com os arquivos da tarefa, ordenadas por relevância (quantos arquivos da tarefa casam e quão específico é o glob), depois `priority` (opcional, nas lições centrais de RLS, `security definer` e `revoke`), depois `held - 2*recurred` com bônus para as da entrega. Cada lição conta `injected`, `held` (preveniu) e `recurred` (reincidiu); regerar um brief que já existe não reconta. Os contadores das lições globais ficam numa linha de override na entrega, e só vão para os arquivos globais com `lesson sync`. No fechamento, o manager mostra cada lição da entrega e só promove para o global as que o usuário aprovar, uma a uma, e só sincroniza os contadores se o usuário aprovar.
 
 ### Checklists por stack
 
-`plugins/pipeline/checklists/{postgres-supabase,nextjs-react,auth}.md`, cada um com frontmatter `stack`, `paths` e `agents`. O `package.py review` lista no cabeçalho do pacote os checklists cujos `paths` casam com os arquivos alterados (lockfiles ficam só no stat), e cada revisor abre os que citam o seu papel. Item não atendido é achado como outro qualquer.
+`plugins/pipeline/checklists/{postgres-supabase,nextjs-react,auth}.md`, cada um com frontmatter `stack`, `paths` e `agents`. O `package.py review` lista no cabeçalho do pacote os checklists cujos `paths` casam com os arquivos alterados (lockfiles ficam fora do diff, com as linhas de nome, versão, `resolved` e `integrity` alteradas numa seção `## Dependency changes`), e cada revisor abre os que citam o seu papel. Item não atendido é achado como outro qualquer.
 
 ### Revisores e implementadores
 
@@ -90,29 +90,30 @@ Se aquela linha **não** é um segredo, libere só ela:
    ```
    git diff --cached | python "<clone>/plugins/pipeline/hooks/pre-commit-secret-scan.py" --fingerprint
    ```
-   Para commits já feitos, use `git show <commit>`; para um arquivo inteiro, use `python ... --fingerprint < arquivo`.
-2. Acrescente uma linha em `.pipeline-secrets-allow` na raiz do repositório, com o motivo:
+   Para commits já feitos, use `git show <commit>`; para um arquivo inteiro, informe o caminho dele relativo à raiz do repositório: `python ... --fingerprint --path supabase/seed.sql < supabase/seed.sql`.
+2. Acrescente você mesmo uma linha em `.pipeline-secrets-allow` na raiz do repositório, com o motivo:
    ```
    ed29c450272198d3fe54a8f66fa145022361507670c0ce8f2e0cac0cad46ca03  # seed de teste, não é credencial
    ```
-3. Faça o commit de novo, incluindo o `.pipeline-secrets-allow`.
+3. Coloque o arquivo no stage: `git add .pipeline-secrets-allow`. Depois peça ao agente para fazer o commit de novo (o `.pipeline-secrets-allow` entra junto).
 
 Regras:
-- O fingerprint é o sha256 da linha com os espaços normalizados. Mudar o conteúdo da linha exige uma nova entrada; só reindentar não exige.
-- Cada entrada libera só aquela linha exata. As outras continuam sendo verificadas.
+- A entrada só vale depois de estar no stage: o commit lê o `.pipeline-secrets-allow` do índice, e o push lê o de cada commit enviado. Uma entrada que existe só no arquivo de trabalho é ignorada.
+- O fingerprint é o sha256 do caminho do arquivo mais a linha com os espaços normalizados. Mudar o conteúdo da linha, ou a mesma linha em outro arquivo, exige uma nova entrada; só reindentar não exige.
+- Cada entrada libera só aquela linha exata daquele arquivo. As outras continuam sendo verificadas.
 - Não existe supressão por comentário no código.
-- Quem adiciona entradas é você, não o agente. O arquivo é versionado e aparece no diff para os revisores e o `gate`.
+- Quem adiciona entradas é você, não o agente. O hook do plugin nega ao agente editar o arquivo (Write/Edit/MultiEdit/NotebookEdit) e qualquer comando Bash/PowerShell que o altere, coloque no stage, mova ou restaure (ler com `git diff`, `git show` ou `cat` continua permitido); o `kickoff` também põe `Edit(.pipeline-secrets-allow)` e `Write(.pipeline-secrets-allow)` em `permissions.deny`. O arquivo é versionado: mudanças nele exigem a revisão de `security`, e o `gate` lista cada entrada nova no relatório com a linha que ela cobre.
 - Um segredo de verdade nunca vai para a allowlist: remova-o e troque-o (rotacione).
 
-O scan já não sinaliza auto-atribuição de uma coluna a ela mesma, nomes qualificados (`t.col`, `excluded.col`), palavras-chave SQL, identificadores (`new_password`, `hashedPassword`) e referências a variáveis de ambiente (`process.env.X`, `${VAR}`, `$VAR`, `os.environ[...]`, `os.getenv(...)`, `import.meta.env.X`, `%VAR%`). Valores literais entre aspas com cara de segredo continuam bloqueando.
+O scan já não sinaliza auto-atribuição de uma coluna a ela mesma, nomes qualificados (`t.col`, `excluded.col`), palavras-chave SQL, identificadores escritos (`new_password_value`, `DEFAULT_API_KEY_NAME`, `hashedPasswordValue`: com `_`, ou camelCase em que cada parte tem ao menos duas minúsculas e uma vogal, até 40 caracteres) e referências a variáveis de ambiente (`process.env.X`, `${VAR}`, `$VAR`, `os.environ[...]`, `os.getenv(...)`, `import.meta.env.X`, `%VAR%`). Continuam bloqueando: valores literais entre aspas com cara de segredo (um placeholder só é aceito quando é o valor inteiro, como `changeme`, `example`, `xxxx...`, ou começa com `your_`, `your-` ou `<`); sequências sem `_` de 16 caracteres ou mais em uma só caixa ou com caixa alternada (`xKqPz...`); valores em que quase todo caractere aparece uma vez só (entropia de Shannon de 3,5 bits/caractere ou mais e perto do máximo para o tamanho); e, sob chaves `password`/`passwd`/`secret`, frases com `_` que não citam nenhuma palavra de código (`correct_horse_battery_staple` bloqueia, `user_input_value` passa).
 
 ### Kickoff: complementos por stack e allowlist de comandos
 
 O `kickoff` sempre instala o núcleo (hooks, `.gitignore`, `docs/`, `CLAUDE.md`, grafo de conhecimento). Depois detecta o stack pelos arquivos do projeto e acrescenta convenções específicas só para o que encontrar, para o contexto dos agentes ficar pequeno:
 
-- **Allowlist de comandos.** Junta os comandos do próprio projeto (seção "Comandos" do `CLAUDE.md` e scripts do `package.json`) em `permissions.allow` do `.claude/settings.json`, para os agentes não serem barrados pelo classificador do auto mode em lint, testes, build ou comandos de banco. Nunca sobrescreve nem remove permissões existentes, mostra o diff antes e nunca libera comandos remotos ou destrutivos (`db push`, deploys, `git push`).
+- **Allowlist de comandos.** Junta os comandos do próprio projeto (seção "Comandos" do `CLAUDE.md` e scripts do `package.json`) em `permissions.allow` do `.claude/settings.json`, para os agentes não serem barrados pelo classificador do auto mode em lint, testes, build ou comandos de banco. Cada script vira uma entrada exata (`Bash(npm run db:types)`), nunca um curinga como `Bash(npm run db:*)`, que liberaria scripts futuros e qualquer argumento. Antes de liberar um script, o kickoff lê o corpo dele (e dos scripts que ele chama) e recusa se aparecer um termo proibido: `db push`, `db dump`, `--linked`, `--db-url`, `link`, `migration repair`, `secrets set`, `deploy`, `vercel`, `git push`, `rm -rf`. Rode o kickoff de novo sempre que os scripts mudarem. Também põe `Edit(.pipeline-secrets-allow)` e `Write(.pipeline-secrets-allow)` em `permissions.deny`. Nunca sobrescreve nem remove permissões existentes e mostra o diff antes.
 - **Next.js 16 ou superior.** Põe `agentRules: false` para o `next dev` não reescrever o `CLAUDE.md`, registra que a interceptação vive em `proxy.ts` e, em projetos mobile-first, dá aos primitivos do shadcn alvos de toque de 44px no mobile (`h-11 md:h-N`).
-- **Supabase.** Acrescenta uma migration base de privilégios (`anon` sem acesso a tabelas; `authenticated` sem truncate, references, trigger e maintain; sem privilégios em sequências; `EXECUTE` de funções revogado por padrão, inclusive para objetos futuros) e uma varredura pgTAP que falha se `anon` ou `authenticated` puderem executar função fora de uma allowlist por assinatura exata, ou se alguma tabela do `public` estiver sem RLS.
+- **Supabase.** Acrescenta uma migration base de privilégios (`anon` sem acesso a tabelas; `authenticated` sem truncate, references, trigger e maintain; sem privilégios em sequências; `EXECUTE` de funções revogado por padrão, inclusive para objetos futuros) e uma varredura pgTAP que falha se `anon` ou `authenticated` puderem executar função fora de uma allowlist por assinatura exata, se alguma tabela estiver sem RLS, se alguma view não tiver `security_invoker=true`, ou se `anon`/`authenticated` tiverem qualquer privilégio em materialized views ou foreign tables (o RLS não vale nelas). Os schemas verificados ficam no topo do arquivo, junto do marcador `ALLOWLIST` (padrão `public`; acrescente todo schema exposto pela API).
 - **Versões atuais.** Antes de escrever comandos de scaffold, o kickoff e os planos conferem as versões e flags atuais (`npm view`, documentação) em vez de confiar na memória.
 
 O kickoff é idempotente: rode de novo depois do scaffold de um projeto novo para aplicar os complementos.

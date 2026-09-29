@@ -15,3 +15,6 @@ alter default privileges in schema public revoke execute on functions from anon,
 -- why: default privileges cannot tell views from tables, so each view is made read-only where it is created (and runs RLS as the caller)
 -- create view public.<name> with (security_invoker = true) as ...;
 -- revoke insert, update, delete, truncate, references, trigger, maintain on public.<name> from authenticated;
+
+-- why: RLS does not apply to materialized views or foreign tables, so clients get no privilege on them at all
+-- revoke all on public.<name> from anon, authenticated;

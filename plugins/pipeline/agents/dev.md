@@ -34,10 +34,13 @@ End every turn with one of:
 - **NEEDS_CONTEXT** — you need information before continuing. State exactly what's missing.
 - **BLOCKED** — you cannot complete this as specified. State why.
 
+The manager's ledger rejects a placeholder report: DONE / DONE_WITH_CONCERNS needs at least 200 non-space characters besides the `LEDGER` line; NEEDS_CONTEXT / BLOCKED need the `LEDGER` line and a concrete reason of at least 40 non-space characters (never just "placeholder" or "TODO").
+
 On DONE / DONE_WITH_CONCERNS, include this block, filled from git, never from memory (the manager's ledger rejects a report that cites files outside the task's commits or lacks the SHA):
 ```
 Commit: <full SHA from `git rev-parse HEAD`>
-Files changed (from `git show --stat HEAD`, or `git diff --stat <task start>..HEAD` for several commits):
+List under Files changed every path from `git show --stat HEAD` (or `git diff --stat <task start>..HEAD` for several commits), one per line:
+Files changed:
 - <path>
 Tests run: <exact command> -> <passed/failed counts>
 Tests added/changed: <paths, or "none">

@@ -13,6 +13,12 @@ must_flag = {
     "unquoted high-digit snake value": "+secret = " + "a8f3e9_1c2d4b" "5e6f7a8b9c",
     "second assignment on the line": "+const a = { password: foo, token: " + q("Zx9Qw8Er7T" "y6Ui5Op4") + " }",
     "SQL literal password": "+update auth.users set encrypted_password = " + q("S3cr3tP4ss" "w0rd!2026") + ";",
+    "unquoted alternating-case run": "+to" "ken: " + "xKqPzLmNvB" "rTwYaSdFgH",
+    "unquoted upper-case run": "+API_TO" "KEN=" + "QWERTYUIOPAS" "DFGHJKLZXCVB",
+    "unquoted lower-case run": "+api_k" "ey: " + "abcdefghijklmn" "opqrstuvwxyzab",
+    "underscored passphrase under a password key": "+pass" "word: " + "correct_horse_" "battery_staple",
+    "quoted value that only starts with a placeholder word": "+sec" "ret: " + q("example-real-" "QnX8m2Kp9Lz"),
+    "random snake-shaped value": "+api_k" "ey = " + "xkqpzl_mnvbrt_" "wyasdf",
 }
 must_pass = {
     "A9 SQL self-assignment": "+update auth.users set encrypted_pass" "word = encrypted_password where id = '00000000-0000-0000-0000-000000000001';",
@@ -36,6 +42,10 @@ must_pass = {
     "templated quoted": "+token: " + q("{{ secrets.DEPLOY_TOKEN_VALUE }}"),
     "placeholder": "+API_KEY=" + q("your-api-key-goes-here"),
     "short quoted": "+password: " + q("changeme"),
+    "angle-bracket placeholder": "+api_k" "ey: " + q("<your-api-key-here>"),
+    "all-x placeholder": "+to" "ken: " + q("xxxxxxxxxxxx" "xxxxxxxx"),
+    "camelCase value under a key": "+api_k" "ey: " + "publishableKey" "FromSettings",
+    "snake value under a password key naming a code word": "+pass" "word = " + "user_input_" "value",
     "quoted prose": "+password: " + q("Senha incorreta, tente de novo"),
 }
 results = []
@@ -50,17 +60,17 @@ for name, line in must_pass.items():
     print("PASS" if ok else "FAIL", "allows:", name, "" if ok else findings)
 
 flagged = "+password = " + q("S3cr3tP4ss" "w0rd!2026")
-mark = m.fingerprint(flagged[1:])
+mark = m.fingerprint(None, flagged[1:])
 findings = m.scan(flagged, [])
 ok = len(findings) == 1 and f"fingerprint {mark}" in findings[0]
 results.append(ok)
 print("PASS" if ok else "FAIL", "finding carries the line fingerprint", findings)
-ok = m.fingerprint("  password  =\t" + q("S3cr3tP4ss" "w0rd!2026") + "  ") == mark
+ok = m.fingerprint(None, "  password  =\t" + q("S3cr3tP4ss" "w0rd!2026") + "  ") == mark
 results.append(ok)
 print("PASS" if ok else "FAIL", "fingerprint ignores whitespace differences")
 other = "+token = " + q("abcdefghijkl" "mnopqrstuv1234")
 findings = m.scan(flagged + "\n" + other, [], {mark})
-ok = len(findings) == 1 and m.fingerprint(other[1:]) in findings[0]
+ok = len(findings) == 1 and m.fingerprint(None, other[1:]) in findings[0]
 results.append(ok)
 print("PASS" if ok else "FAIL", "allowlist suppresses only the matching line", findings)
 diff = "+++ b/src/db.sql\n" + flagged
@@ -68,4 +78,12 @@ findings = m.scan(diff, [])
 ok = len(findings) == 1 and " in src/db.sql " in findings[0]
 results.append(ok)
 print("PASS" if ok else "FAIL", "finding names the file", findings)
+ok = m.fingerprint("src/a.sql", flagged[1:]) != m.fingerprint("src/b.sql", flagged[1:])
+results.append(ok)
+print("PASS" if ok else "FAIL", "fingerprint depends on the file path")
+two = "+++ b/src/a.sql\n" + flagged + "\n+++ b/src/b.sql\n" + flagged
+findings = m.scan(two, [], {m.fingerprint("src/a.sql", flagged[1:])})
+ok = len(findings) == 1 and " in src/b.sql " in findings[0]
+results.append(ok)
+print("PASS" if ok else "FAIL", "an entry for one file does not cover the same line in another", findings)
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

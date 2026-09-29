@@ -31,6 +31,7 @@ Before reporting, check each finding:
 - **Zero findings is a valid, complete result.** Do not pad with style nits or preferences the project has not stated; each padded finding costs a full review round.
 - **Checklists**: open the ones listed under `## Checklists` in the review package (in spec mode, the ones the brief lists) whose `agents` include `security`. An unmet item is a finding like any other, with the same evidence.
 - A finding that repeats a lesson from the task brief's `## Lessons` section gets the tag `lesson:<id>`.
+- **Dependencies**: lockfiles are left out of the package's diff body. Read its `## Dependency changes` section (the changed name/version/resolved/integrity lines of each lockfile) and check each new or changed package and source. When you need a lockfile's full diff, say so in your report and ask the manager for a package built with `--include-lockfiles`.
 
 ## Stay in your domain
 When you notice a problem that belongs to another reviewer (`audit`: traceability and logging; `db`: schema and migration correctness; `code-review`: correctness, duplication, tests; `design`: UI and accessibility), give it one line, `for <agent>: <what and where>`, and stop. Do not analyze it, do not list it among your findings, and do not count it in your ledger line.
