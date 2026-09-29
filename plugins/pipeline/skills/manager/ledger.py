@@ -44,9 +44,7 @@ ROLES = {"implementer": "implement", "reviewer": "review"}
 NAME_PATTERN = re.compile(r"^[\w.-]+$")
 LEDGER_LINE = re.compile(r"^[\s`>*-]*LEDGER\s*\{", re.MULTILINE)
 SHA_TOKEN = re.compile(r"\b[0-9a-f]{7,40}\b")
-SHA_LINE = re.compile(r"^[\s>*_`-]*(?:commit(?:\s+sha)?|sha|head)[\s*_`]*[:=][\s*_`]*(.*)$", re.IGNORECASE)
-PLACEHOLDER_SHA = re.compile(r"<[^<>]*\b(?:sha|commit|hash)\b[^<>]*>|\bsee\s+`?git\b|`git rev-parse[^`]*`",
-                             re.IGNORECASE)
+SHA_LINE = re.compile(r"^[\s>*_`+-]*(?:commit(?:\s+sha)?|sha|head)[\s*_`]*[:=][\s*_`]*(.*)$", re.IGNORECASE)
 BACKTICKED = re.compile(r"`([^`\s]+)`")
 PARENTHETICAL = r"(?:\s*\((?:[^()]|\([^()]*\))*\))?"
 FILES_LABEL = re.compile(r"^\s*(?:#+\s*)?\**\s*(?:changed\s+|modified\s+)?files"
@@ -59,6 +57,16 @@ LIST_GAP = re.compile(r"^\s*(?:\([^()]*\)\s*)?(?:,\s*(?:and\s+)?|and\s+|&\s*)$",
 SCOPES = ("fix", "full")
 LAYOUTS = ("task", "per-file")
 FULL_SCOPE_AGENTS = ("security", "db")
+CHECKLISTS_DIR_DEFAULT = os.path.join(PLUGIN_ROOT, "checklists")
+CODE_REVIEWERS = ("code-review", "qa")
+REQUIRED_RULES = [
+    (["**/*.sql", "**/migrations/**"], {"db", "security"}),
+    (["**/env.ts", ".env*", "**/.env*", "**/*permiss*", "**/*permiss*/**", "**/navegacao*", "**/navegacao*/**"],
+     {"security"}),
+    (["**/actions.ts", "**/actions/**", "**/*actions*.ts"], {"audit"}),
+    (["**/*.tsx", "components/**"], {"design"}),
+]
+SQL_FUNCTION = re.compile(r"^\+.*\bcreate\s+(?:or\s+replace\s+)?function\b", re.IGNORECASE | re.MULTILINE)
 ANCHOR_MARK = '<a id="{}"></a>'
 SECTION_RANGE = re.compile(r"^## .* ([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})\s*$", re.MULTILINE)
 LOCK_WAIT_SECONDS = 10.0
@@ -398,14 +406,10 @@ def cited_paths(text, files_section_only=False):
 
 
 def sha_placeholder(body):
-    for line in body.splitlines():
-        labelled = SHA_LINE.match(line)
-        value = labelled.group(1).strip() if labelled else ""
-        if labelled and value and not SHA_TOKEN.search(value.lower()):
-            return line.strip()[:80]
-        if PLACEHOLDER_SHA.search(line) and not SHA_TOKEN.search(line.lower()):
-            return line.strip()[:80]
-    return None
+    labelled = [line.strip() for line in body.splitlines() if SHA_LINE.match(line)]
+    if not labelled or any(SHA_TOKEN.search(SHA_LINE.match(line).group(1).lower()) for line in labelled):
+        return None
+    return labelled[0][:80]
 
 
 def implementer_problems(entry, text, from_sha, head, allow_unlisted):
@@ -508,7 +512,7 @@ def append(args):
     problem = report_ref_problem(args.report)
     if problem:
         sys.exit(problem)
-    for field in ("spec", "scope", "covers_from", "report_sha256"):
+    for field in ("spec", "scope", "covers_from", "report_sha256", "report_group"):
         entry.pop(field, None)
     if args.scope and role(entry) != "review":
         sys.exit("--scope is only for reviewer lines")
@@ -522,7 +526,12 @@ def append(args):
         if git("cat-file", "-e", f"{head}:./{spec}")[0] != 0:
             sys.exit(f"--spec {args.spec} is not in --head {args.head} (commit the spec first)")
         entry["spec"] = spec
-    entry["task"] = args.task
+    tasks = list(dict.fromkeys(task.strip() for task in args.task.split(",") if task.strip()))
+    if not tasks:
+        sys.exit("--task is empty")
+    if len(tasks) > 1 and (SPEC_TASK in tasks or args.scope == "fix"):
+        sys.exit("a report shared by several tasks cannot be on the spec task or --scope fix")
+    entry["task"] = tasks[0]
     problem = spec_problem(entry)
     if problem:
         sys.exit(f"agent line rejected: {problem}")
@@ -536,30 +545,38 @@ def append(args):
             sys.exit("report rejected:\n- " + "\n- ".join(problems))
     entries, invalid = read_ledger(args.ledger)
     warn_invalid(args.ledger, invalid)
-    earlier = [e for e in entries if e.get("agent") == entry["agent"] and e.get("task") == args.task
-               and role(e) == role(entry)]
-    entry.update({"ts": now(), "from": from_sha, "head": head,
-                  "round": len(earlier) + 1, "report": args.report,
-                  "report_sha256": hashlib.sha256(report_bytes(args.report) or b"").hexdigest()})
-    if role(entry) == "review":
-        scope = args.scope or "full"
-        entry["scope"] = scope
-        entry["covers_from"] = fix_coverage(earlier, from_sha, args.task) if scope == "fix" else from_sha
-        problem = (fix_scope_problem(entries, earlier, entry["covers_from"], head, args.task)
-                   if scope == "fix" else None)
-        if problem:
-            sys.exit(problem)
-    if unlisted:
-        entry["unlisted"] = unlisted
-    write_line(args.ledger, entry)
-    print(f"{entry['agent']} {entry['verdict']} task={args.task} round={entry['round']}")
-    if unlisted:
-        reason = f" ({args.allow_unlisted.strip()})"
-        write_line(args.ledger, {"event": "note", "ts": now(), "kind": "ruling", "task": args.task,
-                                 "text": f"{entry['agent']} r{entry['round']} report cites files outside "
-                                         f"its diff, accepted with --allow-unlisted: "
-                                         f"{', '.join(unlisted)}{reason}"})
-        print(f"unlisted files accepted, ruling note recorded: {', '.join(unlisted)}")
+    stamp = now()
+    group = hashlib.sha256(f"{args.report}|{stamp}|{','.join(tasks)}".encode()).hexdigest()[:12]
+    lines = []
+    for task in tasks:
+        earlier = [e for e in entries if e.get("agent") == entry["agent"] and e.get("task") == task
+                   and role(e) == role(entry)]
+        line = {**entry, "task": task, "ts": stamp, "from": from_sha, "head": head,
+                "round": len(earlier) + 1, "report": args.report,
+                "report_sha256": hashlib.sha256(report_bytes(args.report) or b"").hexdigest()}
+        if len(tasks) > 1:
+            line["report_group"] = group
+        if role(line) == "review":
+            scope = args.scope or "full"
+            line["scope"] = scope
+            line["covers_from"] = fix_coverage(earlier, from_sha, task) if scope == "fix" else from_sha
+            problem = (fix_scope_problem(entries, earlier, line["covers_from"], head, task)
+                       if scope == "fix" else None)
+            if problem:
+                sys.exit(problem)
+        if unlisted:
+            line["unlisted"] = unlisted
+        lines.append(line)
+    for line in lines:
+        write_line(args.ledger, line)
+        print(f"{line['agent']} {line['verdict']} task={line['task']} round={line['round']}")
+        if unlisted:
+            reason = f" ({args.allow_unlisted.strip()})"
+            write_line(args.ledger, {"event": "note", "ts": stamp, "kind": "ruling", "task": line["task"],
+                                     "text": f"{line['agent']} r{line['round']} report cites files outside "
+                                             f"its diff, accepted with --allow-unlisted: "
+                                             f"{', '.join(unlisted)}{reason}"})
+            print(f"unlisted files accepted, ruling note recorded: {', '.join(unlisted)}")
 
 
 def agent_roles(agent):
@@ -1091,6 +1108,7 @@ def summarize(entries):
     latest = {}
     totals = {}
     spec_totals = {}
+    counted = set()
     for entry in entries:
         agent = entry.get("agent")
         if not agent:
@@ -1098,8 +1116,10 @@ def summarize(entries):
         latest[(entry["task"], agent, role(entry))] = entry
         scope = spec_totals if entry["task"] == SPEC_TASK else totals
         bucket = scope.setdefault(agent, {**{s: 0 for s in SEVERITIES}, "rounds": 0})
+        key = (agent, role(entry), entry.get("report_group") or id(entry))
         for severity in SEVERITIES:
-            bucket[severity] += (entry.get("new") or {}).get(severity, 0)
+            bucket[severity] += 0 if key in counted else (entry.get("new") or {}).get(severity, 0)
+        counted.add(key)
         bucket["rounds"] = max(bucket["rounds"], entry.get("round", 1))
     return list(latest.values()), totals, spec_totals
 
@@ -1169,12 +1189,16 @@ def code_stale(entry, start, head, history, reviewed):
     if not after:
         return None
     files = set(names("diff", "--name-only", f"{start}..{entry['head']}"))
+    if entry["agent"] != "docs":
+        files = {path for path in files if not path.startswith("docs/")}
     touched, uncovered = [], []
     for sha in after:
         hit = sorted(files & history.touched(sha))
-        if hit:
+        if hit and not any(agent == entry["agent"] and verdict == "PASS" and sha in commits
+                           for _, agent, verdict, commits in reviewed):
             touched.append({"commit": sha, "files": hit})
-        elif not any(task != entry["task"] and sha in commits for task, commits in reviewed):
+        elif not hit and not gate_report_only(history.touched(sha)) and not any(
+                task != entry["task"] and sha in commits for task, _, _, commits in reviewed):
             uncovered.append(sha)
     if not touched and not uncovered:
         return None
@@ -1183,8 +1207,8 @@ def code_stale(entry, start, head, history, reviewed):
 
 def stale_entries(entries, latest, head):
     history, starts = History(), review_starts(entries, latest)
-    reviewed = [(entry["task"], history.commits(starts[id(entry)], entry["head"])) for entry in latest
-                if starts.get(id(entry)) and entry["task"] != SPEC_TASK]
+    reviewed = [(entry["task"], entry["agent"], entry["verdict"], history.commits(starts[id(entry)], entry["head"]))
+                for entry in latest if starts.get(id(entry)) and entry["task"] != SPEC_TASK]
     stale = []
     for entry in latest:
         if id(entry) not in starts:
@@ -1196,6 +1220,86 @@ def stale_entries(entries, latest, head):
         if item:
             stale.append(item)
     return stale
+
+
+def gate_report_only(files):
+    return bool(files) and all(path.startswith("docs/quality-reports/") for path in files)
+
+
+def checklist_rules(directory):
+    from package import read_frontmatter
+    rules = []
+    for path in sorted(glob.glob(os.path.join(directory, "*.md"))):
+        fields = read_frontmatter(path)
+        paths, agents = fields.get("paths") or [], fields.get("agents") or []
+        paths = [paths] if isinstance(paths, str) else paths
+        agents = [agents] if isinstance(agents, str) else agents
+        # design is required by the UI rule only; checklist globs like app/** would demand it on server code
+        agents = set(agents) - {"design"}
+        if paths and agents:
+            rules.append((paths, agents))
+    return rules + REQUIRED_RULES
+
+
+def sql_defines_function(sha):
+    code, diff = git("show", "--format=", sha, "--", "*.sql")
+    return code == 0 and bool(SQL_FUNCTION.search(diff))
+
+
+def required_agents(sha, files, rules):
+    from package import matches_any
+    code = [path for path in files if not path.startswith("docs/") and not path.endswith(".md")]
+    agents = set(CODE_REVIEWERS) if code else set()
+    for globs, names in rules:
+        agents |= names if matches_any(globs, code) else set()
+    if any(path.endswith(".sql") for path in code) and sql_defines_function(sha):
+        agents.add("audit")
+    return agents
+
+
+def missing_reviewers(latest, starts, directory):
+    history, rules = History(), checklist_rules(directory)
+    passed = [(entry["agent"], history.commits(starts[id(entry)], entry["head"])) for entry in latest
+              if starts.get(id(entry)) and entry["task"] != SPEC_TASK and entry["verdict"] == "PASS"]
+    ranges = {}
+    for entry in latest:
+        start = starts.get(id(entry), entry.get("from"))
+        if entry["task"] != SPEC_TASK and start:
+            ranges.setdefault(entry["task"], set()).update(history.commits(start, entry["head"]))
+    missing, seen = [], set()
+    for task, commits in ranges.items():
+        gaps = {}
+        for sha in sorted(commits - seen):
+            seen.add(sha)
+            files = sorted(history.touched(sha))
+            for agent in required_agents(sha, files, rules):
+                if not any(name == agent and sha in covered for name, covered in passed):
+                    gaps.setdefault(agent, []).append({"commit": sha, "files": files})
+        missing.extend({"task": task, "agent": agent, "commits": gaps[agent]} for agent in sorted(gaps))
+    return missing
+
+
+def undeferred_minors(latest, notes):
+    deferred = {note["task"] for note in notes if note["kind"] in ("deferred", "parked")}
+    found = {}
+    for entry in latest:
+        minors = (entry.get("open") or {}).get("minor", 0)
+        if role(entry) == "review" and minors and entry["task"] not in deferred:
+            found.setdefault(entry["task"], {})[entry["agent"]] = minors
+    return [{"task": task, "agents": agents} for task, agents in found.items()]
+
+
+def open_totals(latest):
+    totals, seen = {}, set()
+    for entry in latest:
+        key = (entry["agent"], entry.get("report_group") or id(entry))
+        if role(entry) != "review" or entry["task"] == SPEC_TASK or key in seen:
+            continue
+        seen.add(key)
+        bucket = totals.setdefault(entry["agent"], {s: 0 for s in SEVERITIES})
+        for severity in SEVERITIES:
+            bucket[severity] += (entry.get("open") or {}).get(severity, 0)
+    return totals
 
 
 def short_list(items, limit=3):
@@ -1220,10 +1324,12 @@ def status(args):
     starts = review_starts(entries, latest)
     stale = stale_entries(entries, latest, args.head) if args.head else []
     flagged = {(s["task"], s["agent"]): s for s in stale}
+    missing = missing_reviewers(latest, starts, args.checklists_dir)
+    minors = undeferred_minors(latest, notes)
     if args.json:
         shown = [{**e, "covers_from": starts[id(e)]} if id(e) in starts else e for e in latest]
-        report = {"latest": shown, "totals": totals, "spec_totals": spec_totals,
-                  "notes": notes, "invalid": invalid}
+        report = {"latest": shown, "totals": totals, "open_totals": open_totals(latest), "spec_totals": spec_totals,
+                  "notes": notes, "invalid": invalid, "missing_reviewers": missing, "undeferred_minors": minors}
         if args.head:
             report["stale"] = stale
         print(json.dumps(report, indent=2))
@@ -1246,6 +1352,12 @@ def status(args):
         for agent, bucket in buckets.items():
             raised = ", ".join(f"{bucket[s]} {s}" for s in SEVERITIES)
             print(f"{scope} {agent:<12} raised: {raised}; rounds: {bucket['rounds']}")
+    for item in missing:
+        commits = short_list([f"{c['commit'][:8]} ({short_list(c['files'], 2)})" for c in item["commits"]], 2)
+        print(f"MISSING {item['agent']:<12} task {item['task']:<8} no PASS covers {commits} (advisory)")
+    for item in minors:
+        agents = ", ".join(f"{agent} {count}" for agent, count in item["agents"].items())
+        print(f"WARN task {item['task']:<8} open minors without a deferred note ({agents})")
     for item in notes:
         print(f"note {item['kind']:<10} {item['task']:<10} {item['text']}")
 
@@ -1385,6 +1497,8 @@ def main():
     status_cmd = commands.add_parser("status")
     status_cmd.add_argument("--json", action="store_true")
     status_cmd.add_argument("--head", help="mark reviewer entries whose range ends before this commit")
+    status_cmd.add_argument("--checklists-dir", default=CHECKLISTS_DIR_DEFAULT,
+                            help="checklists whose frontmatter paths/agents add required reviewers")
     status_cmd.set_defaults(run=status)
 
     verify_cmd = commands.add_parser("verify-reports", help="check every report the ledger cites: per-task files "
