@@ -50,6 +50,10 @@ FILES_HEADING = re.compile(r"^\s*#+\s*(?:changed\s+)?files(?:\s+changed)?" + PAR
 LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*)$")
 LINE_SUFFIX = re.compile(r":\d+(?:-\d+)?$")
 LIST_GAP = re.compile(r"^\s*(?:\([^()]*\)\s*)?(?:,\s*(?:and\s+)?|and\s+|&\s*)$", re.IGNORECASE)
+SCOPES = ("fix", "full")
+LAYOUTS = ("task", "per-file")
+FULL_SCOPE_AGENTS = ("security", "db")
+ANCHOR_MARK = '<a id="{}"></a>'
 ITEM_LABELS = {"add", "added", "change", "changed", "create", "created", "delete", "deleted", "modify",
                "modified", "new", "remove", "removed", "rename", "renamed", "update", "updated", "test", "tests"}
 
@@ -124,7 +128,19 @@ def entry_problem(entry):
     for field in ("task", "from", "head", "round", "report"):
         if not entry.get(field):
             return f"agent entry lacks '{field}'"
-    return verdict_problem(entry) or spec_problem(entry)
+    return verdict_problem(entry) or spec_problem(entry) or scope_problem(entry)
+
+
+def scope_problem(entry):
+    if "scope" not in entry:
+        return None
+    if entry["scope"] not in SCOPES:
+        return f"'scope' must be one of: {', '.join(SCOPES)}"
+    if role(entry) != "review":
+        return "'scope' is only valid on reviewer entries"
+    if entry["scope"] == "fix" and not entry.get("covers_from"):
+        return "a fix-scoped entry lacks 'covers_from'"
+    return None
 
 
 def spec_problem(entry):
@@ -167,6 +183,100 @@ def write_line(path, entry):
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(entry, separators=(",", ":")) + "\n")
+
+
+def split_ref(ref):
+    path, _, anchor = str(ref).partition("#")
+    return path, anchor or None
+
+
+def sums_path(path):
+    return path + ".sums"
+
+
+def read_sums(path):
+    sidecar = sums_path(path)
+    if not os.path.isfile(sidecar):
+        return None
+    try:
+        with open(sidecar, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except ValueError:
+        return None
+    sections = data.get("sections") if isinstance(data, dict) else None
+    if not isinstance(sections, list) or not all(isinstance(s, dict) and isinstance(s.get("start"), int)
+                                                 and isinstance(s.get("end"), int) for s in sections):
+        return None
+    return sections
+
+
+def write_sums(path, sections):
+    temporary = sums_path(path) + ".tmp"
+    with open(temporary, "w", encoding="utf-8", newline="\n") as handle:
+        json.dump({"version": 1, "sections": sections}, handle, indent=1)
+    os.replace(temporary, sums_path(path))
+
+
+def report_file_problems(path):
+    if not os.path.isfile(path):
+        return [f"{path} does not exist"]
+    sections = read_sums(path)
+    if sections is None:
+        return [f"{sums_path(path)} is missing or unreadable, so {path} cannot be verified"]
+    with open(path, "rb") as handle:
+        raw = handle.read()
+    for section in sections:
+        end = section["end"]
+        if end > len(raw) or hashlib.sha256(raw[:end]).hexdigest() != section.get("sha256"):
+            return [f"{path}: section #{section.get('anchor')} or an earlier one changed after it was saved "
+                    "(prefix hash mismatch)"]
+    recorded = sections[-1]["end"] if sections else 0
+    if len(raw) != recorded:
+        return [f"{path}: {len(raw) - recorded} bytes after the last saved section were not written by save-report"]
+    return []
+
+
+def section_bounds(path, anchor):
+    for section in read_sums(path) or []:
+        if section.get("anchor") == anchor:
+            return section["start"], section["end"]
+    return None
+
+
+def read_report(ref):
+    path, anchor = split_ref(ref)
+    if not os.path.isfile(path):
+        return None
+    with open(path, "rb") as handle:
+        raw = handle.read()
+    if anchor:
+        bounds = section_bounds(path, anchor)
+        if bounds is None:
+            return None
+        raw = raw[bounds[0]:bounds[1]]
+    return raw.decode("utf-8", errors="replace")
+
+
+def report_ref_problem(ref):
+    path, anchor = split_ref(ref)
+    if not anchor:
+        return None if os.path.isfile(path) else f"--report does not exist: {path} (save the agent's report first)"
+    problems = report_file_problems(path)
+    if problems:
+        return problems[0]
+    if section_bounds(path, anchor) is None:
+        return f"--report anchor #{anchor} is not a saved section of {path}"
+    return None
+
+
+def coverage_start(group, index):
+    entry = group[index]
+    while entry.get("scope") == "fix":
+        if index == 0 or group[index - 1].get("head") != entry.get("from"):
+            return None
+        index -= 1
+        entry = group[index]
+    return entry.get("from")
 
 
 def item_paths(body):
@@ -270,7 +380,21 @@ def start(args):
     base = resolve_commit(args.base)
     if not base:
         sys.exit(f"--base is not a commit: {args.base}")
-    write_line(args.ledger, {"event": "start", "ts": now(), "slug": args.slug, "base": base})
+    write_line(args.ledger, {"event": "start", "ts": now(), "slug": args.slug, "base": base,
+                             "report_layout": args.layout})
+
+
+def fix_coverage(earlier, from_sha, task):
+    if not earlier:
+        sys.exit(f"--scope fix needs an earlier entry of this agent on task {task}; record a first review "
+                 "with --scope full")
+    if earlier[-1].get("head") != from_sha:
+        sys.exit(f"--scope fix needs --from = the head of this agent's previous entry on task {task} "
+                 f"({str(earlier[-1].get('head'))[:8]}), so the fix range continues it")
+    covers = coverage_start(earlier, len(earlier) - 1)
+    if covers is None:
+        sys.exit("the previous entry's fix chain is broken; re-review the task's full range with --scope full")
+    return covers
 
 
 def append(args):
@@ -293,9 +417,13 @@ def append(args):
         sys.exit(f"--head is not a commit: {args.head}")
     if git("merge-base", "--is-ancestor", from_sha, head)[0] != 0:
         sys.exit(f"--from {args.from_sha} is not an ancestor of --head {args.head}")
-    if not os.path.isfile(args.report):
-        sys.exit(f"--report does not exist: {args.report} (save the agent's report first)")
-    entry.pop("spec", None)
+    problem = report_ref_problem(args.report)
+    if problem:
+        sys.exit(problem)
+    for field in ("spec", "scope", "covers_from"):
+        entry.pop(field, None)
+    if args.scope and role(entry) != "review":
+        sys.exit("--scope is only for reviewer lines")
     if args.spec:
         spec = os.path.normpath(args.spec).replace("\\", "/")
         if git("cat-file", "-e", f"{head}:./{spec}")[0] != 0:
@@ -309,9 +437,8 @@ def append(args):
         sys.exit("--allow-unlisted needs a non-empty reason (it goes into the ruling note)")
     unlisted = []
     if entry["agent"] in VALIDATED_IMPLEMENTERS and role(entry) == "implement":
-        with open(args.report, encoding="utf-8", errors="replace") as handle:
-            text = handle.read()
-        problems, unlisted = implementer_problems(entry, text, from_sha, head, args.allow_unlisted)
+        problems, unlisted = implementer_problems(entry, read_report(args.report), from_sha, head,
+                                                  args.allow_unlisted)
         if problems:
             sys.exit("report rejected:\n- " + "\n- ".join(problems))
     entries, invalid = read_ledger(args.ledger)
@@ -320,6 +447,10 @@ def append(args):
                and role(e) == role(entry)]
     entry.update({"ts": now(), "from": from_sha, "head": head,
                   "round": len(earlier) + 1, "report": args.report})
+    if role(entry) == "review":
+        scope = args.scope or "full"
+        entry["scope"] = scope
+        entry["covers_from"] = fix_coverage(earlier, from_sha, args.task) if scope == "fix" else from_sha
     if unlisted:
         entry["unlisted"] = unlisted
     write_line(args.ledger, entry)
@@ -369,28 +500,75 @@ def save_report(args):
     if not text.strip():
         sys.exit("the report is empty; nothing saved")
     kind = report_role(args)
-    directory = args.reports_dir or os.path.join(os.path.dirname(args.ledger) or ".", "reports")
-    both = len(agent_roles(args.agent)) == 2
-    suffix = "-review" if both and kind == "review" else ""
-    stem = os.path.join(directory, f"{args.task}-{args.agent}{suffix}-r")
-    if args.round == "auto":
-        entries = read_ledger(args.ledger)[0] if os.path.exists(args.ledger) else []
-        number = 1 + sum(1 for e in entries if e.get("agent") == args.agent and e.get("task") == args.task
-                         and role(e) == kind)
-        while os.path.exists(f"{stem}{number}.md"):
-            number += 1
-    elif args.round.isdigit() and int(args.round) > 0:
-        number = int(args.round)
-    else:
+    if args.round != "auto" and not (args.round.isdigit() and int(args.round) > 0):
         sys.exit(f"--round must be 'auto' or a positive integer: {args.round}")
+    entries = read_ledger(args.ledger)[0] if os.path.exists(args.ledger) else []
+    directory = args.reports_dir or os.path.join(os.path.dirname(args.ledger) or ".", "reports")
+    suffix = "-review" if len(agent_roles(args.agent)) == 2 and kind == "review" else ""
+    first = 1 + sum(1 for e in entries if e.get("agent") == args.agent and e.get("task") == args.task
+                    and role(e) == kind)
+    text = text if text.endswith("\n") else text + "\n"
+    if (args.layout or ledger_layout(entries)) == "task":
+        save_task_section(args, text, directory, suffix, first)
+    else:
+        save_report_file(args, text, directory, suffix, first)
+
+
+def ledger_layout(entries):
+    for entry in entries:
+        if entry.get("event") == "start":
+            return entry.get("report_layout") if entry.get("report_layout") in LAYOUTS else "per-file"
+    return "task"
+
+
+def save_report_file(args, text, directory, suffix, first):
+    stem = os.path.join(directory, f"{args.task}-{args.agent}{suffix}-r")
+    number = first if args.round == "auto" else int(args.round)
+    while args.round == "auto" and os.path.exists(f"{stem}{number}.md"):
+        number += 1
     path = f"{stem}{number}.md"
     os.makedirs(directory, exist_ok=True)
     try:
         with open(path, "x", encoding="utf-8", newline="\n") as handle:
-            handle.write(text if text.endswith("\n") else text + "\n")
+            handle.write(text)
     except FileExistsError:
         sys.exit(f"report already exists, not overwriting: {path}")
     print(path.replace("\\", "/"))
+
+
+def save_task_section(args, text, directory, suffix, first):
+    if not args.from_sha:
+        sys.exit("--from is required with the per-task report layout (the section heading names the range)")
+    from_sha, head = resolve_commit(args.from_sha), resolve_commit(args.head)
+    if not from_sha or not head:
+        sys.exit(f"--from/--head must be commits: {args.from_sha}, {args.head}")
+    path = os.path.join(directory, f"{args.task}.md")
+    sections = []
+    if os.path.exists(path):
+        problems = report_file_problems(path)
+        if problems:
+            sys.exit(f"refusing to append: {problems[0]}")
+        sections = read_sums(path)
+    anchors = {section.get("anchor") for section in sections}
+    stem = f"{args.agent}{suffix}-r"
+    number = first if args.round == "auto" else int(args.round)
+    while args.round == "auto" and f"{stem}{number}" in anchors:
+        number += 1
+    anchor = f"{stem}{number}"
+    if anchor in anchors:
+        sys.exit(f"section #{anchor} already exists in {path}, not overwriting")
+    title = f"{args.agent}{' review' if suffix else ''} r{number} — {from_sha[:7]}..{head[:7]}"
+    start = sections[-1]["end"] if sections else 0
+    block = (("\n" if start else "") + ANCHOR_MARK.format(anchor) + f"\n## {title}\n\n{text}").encode("utf-8")
+    os.makedirs(directory, exist_ok=True)
+    with open(path, "ab") as handle:
+        handle.write(block)
+    with open(path, "rb") as handle:
+        prefix = handle.read(start + len(block))
+    sections.append({"anchor": anchor, "title": title, "start": start, "end": start + len(block),
+                     "sha256": hashlib.sha256(prefix).hexdigest()})
+    write_sums(path, sections)
+    print(f"{path.replace(chr(92), '/')}#{anchor}")
 
 
 def read_lessons(path):
@@ -672,20 +850,105 @@ def commits_after(entry_head, head, path=None):
     return int(count or 0) if code == 0 else None
 
 
-def stale_entries(latest, head):
+def groups_of(entries):
+    groups = {}
+    for entry in entries:
+        if entry.get("agent"):
+            groups.setdefault((entry["task"], entry["agent"], role(entry)), []).append(entry)
+    return groups
+
+
+def review_starts(entries, latest):
+    groups, starts = groups_of(entries), {}
+    for entry in latest:
+        if entry.get("verdict") in REVIEWER_VERDICTS:
+            group = groups[(entry["task"], entry["agent"], "review")]
+            starts[id(entry)] = coverage_start(group, len(group) - 1)
+    return starts
+
+
+def names(*args):
+    code, out = git("-c", "core.quotepath=off", *args)
+    return out.splitlines() if code == 0 else []
+
+
+class History:
+    def __init__(self):
+        self.ranges, self.files = {}, {}
+
+    def commits(self, start, end):
+        if (start, end) not in self.ranges:
+            code, out = git("rev-list", f"{start}..{end}")
+            self.ranges[(start, end)] = set(out.split()) if code == 0 else set()
+        return self.ranges[(start, end)]
+
+    def touched(self, sha):
+        if sha not in self.files:
+            self.files[sha] = set(names("diff-tree", "--no-commit-id", "--name-only", "-r", "-m", "--first-parent",
+                                        "--root", sha))
+        return self.files[sha]
+
+
+def spec_stale(entry, head):
+    behind = commits_after(entry.get("head"), head, entry["spec"])
+    if behind == 0:
+        return None
+    return {"task": entry["task"], "agent": entry["agent"], "head": entry.get("head"),
+            "commits_after": behind, "spec": entry["spec"]}
+
+
+def code_stale(entry, start, head, history, reviewed):
+    item = {"task": entry["task"], "agent": entry["agent"], "head": entry.get("head"), "covers_from": start}
+    code, out = git("rev-list", "--reverse", f"{entry.get('head')}..{head}")
+    if code != 0:
+        return {**item, "commits_after": None}
+    after = out.split()
+    if start is None:
+        return {**item, "commits_after": len(after), "chain_broken": True}
+    if not after:
+        return None
+    files = set(names("diff", "--name-only", f"{start}..{entry['head']}"))
+    touched, uncovered = [], []
+    for sha in after:
+        hit = sorted(files & history.touched(sha))
+        if hit:
+            touched.append({"commit": sha, "files": hit})
+        elif not any(task != entry["task"] and sha in commits for task, commits in reviewed):
+            uncovered.append(sha)
+    if not touched and not uncovered:
+        return None
+    return {**item, "commits_after": len(after), "touched": touched, "uncovered": uncovered}
+
+
+def stale_entries(entries, latest, head):
+    history, starts = History(), review_starts(entries, latest)
+    reviewed = [(entry["task"], history.commits(starts[id(entry)], entry["head"])) for entry in latest
+                if starts.get(id(entry)) and entry["task"] != SPEC_TASK]
     stale = []
     for entry in latest:
-        if entry.get("verdict") not in REVIEWER_VERDICTS:
+        if id(entry) not in starts:
             continue
-        spec = entry.get("spec") if entry["task"] == SPEC_TASK else None
-        behind = commits_after(entry.get("head"), head, spec)
-        if behind != 0:
-            item = {"task": entry["task"], "agent": entry["agent"],
-                    "head": entry.get("head"), "commits_after": behind}
-            if spec:
-                item["spec"] = spec
+        if entry["task"] == SPEC_TASK and entry.get("spec"):
+            item = spec_stale(entry, head)
+        else:
+            item = code_stale(entry, starts[id(entry)], head, history, reviewed)
+        if item:
             stale.append(item)
     return stale
+
+
+def short_list(items, limit=3):
+    return ", ".join(items[:limit]) + (f" +{len(items) - limit} more" if len(items) > limit else "")
+
+
+def stale_lines(item):
+    if item.get("chain_broken"):
+        return "  STALE (fix-scoped chain broken: re-review the full range)", []
+    if item.get("commits_after") is None:
+        return "  STALE (unknown range)", []
+    details = [f"{touch['commit'][:8]} touches {short_list(touch['files'])}" for touch in item.get("touched", [])]
+    details += [f"{sha[:8]} is reviewed by no other task" for sha in item.get("uncovered", [])]
+    return f"  STALE (+{item['commits_after']} commits)", details
 
 
 def status(args):
@@ -693,10 +956,12 @@ def status(args):
     latest, totals, spec_totals = summarize(entries)
     notes = [{k: e[k] for k in ("kind", "task", "text", "ts")} for e in entries
              if e.get("event") == "note"]
-    stale = stale_entries(latest, args.head) if args.head else []
-    behind = {(s["task"], s["agent"]): s["commits_after"] for s in stale}
+    starts = review_starts(entries, latest)
+    stale = stale_entries(entries, latest, args.head) if args.head else []
+    flagged = {(s["task"], s["agent"]): s for s in stale}
     if args.json:
-        report = {"latest": latest, "totals": totals, "spec_totals": spec_totals,
+        shown = [{**e, "covers_from": starts[id(e)]} if id(e) in starts else e for e in latest]
+        report = {"latest": shown, "totals": totals, "spec_totals": spec_totals,
                   "notes": notes, "invalid": invalid}
         if args.head:
             report["stale"] = stale
@@ -706,19 +971,64 @@ def status(args):
         print(f"INVALID line {item['line']}: {item['reason']} (ignored)")
     for entry in latest:
         key = (entry["task"], entry["agent"])
-        flag = ""
-        if role(entry) == "review" and key in behind:
-            count = behind[key]
-            flag = "  STALE (unknown range)" if count is None else f"  STALE (+{count} commits)"
+        flag, details = "", []
+        if role(entry) == "review" and key in flagged:
+            flag, details = stale_lines(flagged[key])
+        start = starts.get(id(entry), entry.get("from"))
+        chain = f"  (fix-scoped from {str(entry.get('from'))[:8]})" if entry.get("scope") == "fix" else ""
         print(f"{entry['task']:<10} {label(entry):<16} {entry['verdict']:<20} "
-              f"{str(entry.get('from'))[:8]}..{str(entry.get('head'))[:8]}  round {entry.get('round')}"
-              f"{flag}")
+              f"{str(start)[:8]}..{str(entry.get('head'))[:8]}  round {entry.get('round')}"
+              f"{chain}{flag}")
+        for detail in details:
+            print(f"{'':<12}{detail}")
     for scope, buckets in (("total", totals), ("spec ", spec_totals)):
         for agent, bucket in buckets.items():
             raised = ", ".join(f"{bucket[s]} {s}" for s in SEVERITIES)
             print(f"{scope} {agent:<12} raised: {raised}; rounds: {bucket['rounds']}")
     for item in notes:
         print(f"note {item['kind']:<10} {item['task']:<10} {item['text']}")
+
+
+def verify_reports(args):
+    entries, invalid = read_ledger(args.ledger)
+    warn_invalid(args.ledger, invalid)
+    problems, checked, count = [], {}, 0
+    for entry in entries:
+        if not entry.get("agent"):
+            continue
+        count += 1
+        who = f"task {entry['task']} {label(entry)} r{entry.get('round')}"
+        path, anchor = split_ref(entry["report"])
+        if not anchor:
+            if not os.path.isfile(path):
+                problems.append(f"{who}: report {path} does not exist")
+            continue
+        if path not in checked:
+            checked[path] = report_file_problems(path)
+            problems.extend(checked[path])
+        if not checked[path] and section_bounds(path, anchor) is None:
+            problems.append(f"{who}: section #{anchor} is not in {path}")
+    if args.json:
+        print(json.dumps({"entries": count, "files": sorted(checked), "problems": problems}, indent=2))
+    else:
+        for problem in problems:
+            print(f"PROBLEM {problem}")
+        verdict = "OK" if not problems else f"{len(problems)} problem(s)"
+        print(f"{count} report reference(s), {len(checked)} per-task file(s): {verdict}")
+    if problems:
+        sys.exit(1)
+
+
+def show_report(args):
+    path, anchor = split_ref(args.ref)
+    if anchor:
+        for problem in report_file_problems(path):
+            sys.stderr.write(f"warning: {problem}\n")
+    text = read_report(args.ref)
+    if text is None:
+        sys.exit(f"no saved report at {args.ref}")
+    sys.stdout.flush()
+    sys.stdout.buffer.write(text.encode("utf-8"))
 
 
 def main():
@@ -729,6 +1039,8 @@ def main():
     start_cmd = commands.add_parser("start")
     start_cmd.add_argument("--slug", required=True)
     start_cmd.add_argument("--base", required=True)
+    start_cmd.add_argument("--layout", choices=LAYOUTS, default="task",
+                           help="reports: one append-only file per task (default) or one file per report (1.4.0)")
     start_cmd.set_defaults(run=start)
 
     append_cmd = commands.add_parser("append")
@@ -741,15 +1053,23 @@ def main():
     append_cmd.add_argument("--allow-unlisted", metavar="REASON",
                             help="accept an implementer report citing files outside FROM..HEAD; "
                                  "the reason goes into the ruling note it records")
+    append_cmd.add_argument("--scope", choices=SCOPES,
+                            help="reviewer lines: 'fix' when --from is this agent's previous head on the task "
+                                 "(a fix-only re-review), 'full' otherwise (default)")
     append_cmd.set_defaults(run=append)
 
-    save_cmd = commands.add_parser("save-report", help="save an agent report as <task>-<agent>-r<round>.md")
+    save_cmd = commands.add_parser("save-report", help="append an agent report to reports/<task>.md "
+                                                        "(or <task>-<agent>-r<round>.md in the per-file layout)")
     save_cmd.add_argument("--task", required=True)
     save_cmd.add_argument("--agent", required=True)
     save_cmd.add_argument("--round", default="auto", help="'auto' (next free round) or a number")
     save_cmd.add_argument("--role", choices=sorted(ROLES),
                           help="required for db outside the spec task; inferred for the other agents")
     save_cmd.add_argument("--reports-dir", help="default: 'reports' next to the ledger")
+    save_cmd.add_argument("--from", dest="from_sha", help="the range start; required in the per-task layout")
+    save_cmd.add_argument("--head", default="HEAD")
+    save_cmd.add_argument("--layout", choices=LAYOUTS, help="default: the ledger's (per-file for ledgers "
+                                                            "started before 1.5.0)")
     source = save_cmd.add_mutually_exclusive_group(required=True)
     source.add_argument("--stdin", action="store_true")
     source.add_argument("--file")
@@ -794,6 +1114,15 @@ def main():
     status_cmd.add_argument("--json", action="store_true")
     status_cmd.add_argument("--head", help="mark reviewer entries whose range ends before this commit")
     status_cmd.set_defaults(run=status)
+
+    verify_cmd = commands.add_parser("verify-reports", help="check every report the ledger cites: per-task files "
+                                                            "only grew and every anchor exists")
+    verify_cmd.add_argument("--json", action="store_true")
+    verify_cmd.set_defaults(run=verify_reports)
+
+    show_cmd = commands.add_parser("show-report", help="print one saved report (path or path#anchor)")
+    show_cmd.add_argument("ref")
+    show_cmd.set_defaults(run=show_report)
 
     args = parser.parse_args()
     args.run(args)

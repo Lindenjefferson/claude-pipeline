@@ -59,7 +59,7 @@ base = sh("git", "rev-parse", "HEAD")
 open(os.path.join(repo, "src", "a.py"), "w").write("a = 2\n")
 sh("git", "commit", "-q", "-am", "task 1")
 c1 = sh("git", "rev-parse", "HEAD")
-ledger("start", "--slug", "x", "--base", base)
+ledger("start", "--slug", "x", "--base", base, "--layout", "per-file")
 
 good = report("good.md", f"Committed {c1[:8]}.\n\n**Files:**\n- Modify: `src/a.py:1-2`\n\n{PAD}\n{DEV}\n")
 r = append(DEV, good, frm="HEAD~1")
