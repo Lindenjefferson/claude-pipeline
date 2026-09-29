@@ -14,6 +14,7 @@ from collections import namedtuple
 Token = namedtuple("Token", "kind text start end")
 
 OP_CHARS = set("+-*/<>=~!@#%^&|`?")
+OP_KEEPS_TRAILING_SIGN = set("~!@#%^&|`?")
 IDENT_RE = re.compile(r"[A-Za-z_\u0080-\uffff][A-Za-z0-9_$\u0080-\uffff]*")
 NUM_RE = re.compile(r"(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
 DOLLAR_RE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)?\$")
@@ -38,27 +39,32 @@ DEFAULT_ROLE_COLUMNS = ("role", "papel", "is_admin", "admin", "permission", "per
 DEFAULT_AUDIT_PATTERN = r"audit|auditoria|log"
 BOUNDARY_SWAP = {">=": ">", ">": ">=", "<=": "<", "<": "<="}
 RAISE_NON_ERROR_LEVELS = {"debug", "log", "info", "notice", "warning"}
-TRANSACTION_WORDS = {"begin", "start", "commit", "end", "rollback", "abort"}
-FORBIDDEN_META = {"i", "ir", "include", "include_relative", "c", "connect", "!", "o", "out", "w", "write",
-                  "copy", "gexec"}
 DDL_MARKER = "PGMUTATE_DDL_OK"
 FAIL_LINE_RE = re.compile(r"^\s*not ok\b|\bERROR:|^\s*#\s*Looks like you (?:planned|failed)|\bFATAL:")
+NUMERIC_HOST_RE = re.compile(r"0x[0-9a-f]*|[0-9]+")
+PSQL_SCRIPT_ERROR = 3
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "host.docker.internal", ""}
 
 HELP_EPILOG = """\
 How a mutant is run:
-  Each pgTAP file is sent to psql on stdin (the same as `psql -f -`), rewritten as
+  Each pgTAP file is sent to `psql -X -v ON_ERROR_STOP=1` on stdin (no psqlrc), rewritten as
     begin; set local statement_timeout = ...;
     <create or replace function ... (mutated)>;
     select 'PGMUTATE_DDL_OK';
     <test file without its own top-level begin/commit/rollback>
     rollback;
   so the mutated function and everything the test does are rolled back together, and
-  nothing is left in the database. A leading `begin;`/`start transaction;` and a trailing
-  `rollback;`/`commit;`/`end;` in the test file are stripped. A test file with any other
-  top-level transaction control (commit/rollback/begin in the middle) or with psql
-  meta-commands that include files, reconnect, write files or run shell commands
-  (\\i \\ir \\c \\! \\o \\w \\copy \\gexec) is refused: it could commit the mutant or escape the transaction.
+  nothing is left in the database (an ERROR stops psql and the open transaction dies with
+  the connection). A leading `begin;`/`start transaction;` and a trailing
+  `rollback;`/`commit;`/`end;`/`abort;` in the test file are stripped. A test file is refused
+  when it has:
+    - any other top-level transaction control: begin, start transaction, commit, end,
+      abort, rollback (except `rollback to [savepoint]`), prepare transaction,
+      commit/rollback prepared;
+    - any backslash outside string literals, quoted identifiers, comments and
+      dollar-quoted bodies: psql runs meta-commands anywhere on a line (\\! \\c \\g \\gexec
+      \\i \\o \\s \\setenv \\lo_export ...), so none is allowed, \\set included. The file is
+      checked with and without standard_conforming_strings.
   The function definitions are fingerprinted (md5 of pg_get_functiondef) before and after
   the run; any difference aborts with exit code 3.
 
@@ -70,8 +76,14 @@ Verdicts:
 
 Connection (local only):
   --db-url URL      psql on PATH; the host must be localhost, 127.0.0.1, ::1,
-                    host.docker.internal or a dotless docker service name
-  --container NAME  `docker exec -i NAME psql -U postgres -d postgres`
+                    host.docker.internal or a dotless docker service name (not an
+                    all-numeric or 0x... name, which resolvers read as an IP address);
+                    service= is refused. Put the password in the URL: every PG* variable
+                    (PGHOST, PGPORT, PGSERVICE, PGPASSFILE, PGSSL*, PGOPTIONS ...) and
+                    PSQLRC are removed from psql's environment.
+  --container NAME  `docker exec -i NAME psql -U postgres -d postgres`; DOCKER_HOST, or else
+                    the endpoint of the current docker context (DOCKER_CONTEXT or
+                    `docker context use`), must be a local socket/pipe or a local host
   default           DB_URL from `supabase status -o env` when psql is on PATH, otherwise
                     the running container supabase_db_<project_id> (supabase/config.toml)
 
@@ -88,23 +100,18 @@ class IntegrityError(Exception):
     pass
 
 
-def lex(text, base=0, psql_meta=False):
+def lex(text, base=0, psql_meta=False, backslash_quotes=False):
     tokens = []
     i, n = 0, len(text)
-    line_start = True
     while i < n:
         c = text[i]
         start = i
         if c in " \t\r\n\f":
             while i < n and text[i] in " \t\r\n\f":
-                if text[i] == "\n":
-                    line_start = True
                 i += 1
             tokens.append(Token("ws", text[start:i], base + start, base + i))
             continue
-        at_line_start = line_start
-        line_start = False
-        if psql_meta and c == "\\" and at_line_start:
+        if psql_meta and c == "\\":
             j = text.find("\n", i)
             i = n if j < 0 else j
             tokens.append(Token("meta", text[start:i], base + start, base + i))
@@ -143,7 +150,9 @@ def lex(text, base=0, psql_meta=False):
         if c == "'":
             i += 1
             while i < n:
-                if text[i] == "'":
+                if backslash_quotes and text[i] == "\\":
+                    i += 2
+                elif text[i] == "'":
                     if i + 1 < n and text[i + 1] == "'":
                         i += 2
                     else:
@@ -194,6 +203,9 @@ def lex(text, base=0, psql_meta=False):
                 i += 1
             if i == start:
                 i += 1
+            if i - start > 1 and not any(ch in OP_KEEPS_TRAILING_SIGN for ch in text[start:i]):
+                while i - start > 1 and text[i - 1] in "+-":
+                    i -= 1
             tokens.append(Token("op", text[start:i], base + start, base + i))
             continue
         if c == ":" and i + 1 < n and text[i + 1] in ":=":
@@ -689,46 +701,47 @@ class UnsupportedTest(ToolError):
     pass
 
 
+def refuse_psql_meta(sql, name):
+    for backslash_quotes in (False, True):
+        meta = next((t for t in lex(sql, psql_meta=True, backslash_quotes=backslash_quotes) if t.kind == "meta"), None)
+        if meta is not None:
+            shown = meta.text.split(None, 1)[0] if meta.text.strip() else "\\"
+            raise UnsupportedTest(f"{name}:{line_of(sql, meta.start)}: psql meta-command {shown} is not allowed "
+                                  "inside a mutation run (no backslash outside string literals, comments and "
+                                  "dollar-quoted bodies)")
+
+
+def transaction_control(sig):
+    w0 = word(sig[0])
+    w1 = word(sig[1]) if len(sig) > 1 else None
+    if w0 in ("begin", "commit", "end", "abort"):
+        return w0
+    if w0 in ("start", "prepare") and w1 == "transaction":
+        return f"{w0} transaction"
+    if w0 == "rollback":
+        k = 2 if w1 in ("work", "transaction") else 1
+        return None if k < len(sig) and word(sig[k]) == "to" else "rollback"
+    return None
+
+
 def prepare_test(sql, name="test"):
-    tokens = lex(sql, psql_meta=True)
-    stmts = split_statements(tokens)
-    for stmt in stmts:
-        if len(stmt) == 1 and stmt[0].kind == "meta":
-            cmd = stmt[0].text[1:].split(None, 1)[0] if stmt[0].text[1:].strip() else ""
-            if cmd.lower() in FORBIDDEN_META or cmd.startswith("!"):
-                raise UnsupportedTest(f"{name}: psql meta-command \\{cmd} is not allowed inside a mutation run")
+    refuse_psql_meta(sql, name)
+    stmts = split_statements(lex(sql))
     starts = [i for i, s in enumerate(stmts) if significant(s)]
-    removed = []
-
-    def is_tx(stmt, words):
-        sig = significant(stmt)
-        return sig and word(sig[0]) in words
-
-    if starts:
-        first = stmts[starts[0]]
-        sig = significant(first)
-        if word(sig[0]) == "begin" or (word(sig[0]) == "start" and len(sig) > 1 and word(sig[1]) == "transaction"):
-            removed.append(starts[0])
-    if starts:
-        last = stmts[starts[-1]]
-        sig = significant(last)
-        if word(sig[0]) in ("rollback", "commit", "end", "abort") and not any(word(t) == "to" for t in sig):
-            if starts[-1] not in removed:
-                removed.append(starts[-1])
+    removed = set()
+    if starts and transaction_control(significant(stmts[starts[0]])) in ("begin", "start transaction"):
+        removed.add(starts[0])
+    if starts and transaction_control(significant(stmts[starts[-1]])) in ("rollback", "commit", "end", "abort"):
+        removed.add(starts[-1])
     for i in starts:
         if i in removed:
             continue
         sig = significant(stmts[i])
-        w0 = word(sig[0])
-        if w0 in TRANSACTION_WORDS:
-            if w0 == "rollback" and any(word(t) == "to" for t in sig):
-                continue
-            if w0 == "start" and not (len(sig) > 1 and word(sig[1]) == "transaction"):
-                continue
-            if w0 == "end" and len(sig) > 1 and sig[1].text != ";" and word(sig[1]) not in ("work", "transaction"):
-                continue
+        control = transaction_control(sig)
+        if control:
             line = line_of(sql, sig[0].start)
-            raise UnsupportedTest(f"{name}:{line}: top-level `{w0}` would break the mutation transaction")
+            raise UnsupportedTest(f"{name}:{line}: top-level `{control}` would break the mutation transaction")
+        w0 = word(sig[0])
         if w0 in ("set",) and len(sig) > 2 and word(sig[1]) == "session" and word(sig[2]) == "characteristics":
             raise UnsupportedTest(f"{name}: `set session characteristics` is not supported")
     keep = []
@@ -740,12 +753,14 @@ def prepare_test(sql, name="test"):
 
 
 def build_script(ddl, test_body, statement_timeout):
-    return ("begin;\n"
-            f"set local statement_timeout = '{int(statement_timeout)}s';\n"
-            f"{ddl}\n"
-            f"select '{DDL_MARKER}';\n"
-            f"{test_body}\n"
-            ";\nrollback;\n")
+    script = ("begin;\n"
+              f"set local statement_timeout = '{int(statement_timeout)}s';\n"
+              f"{ddl}\n"
+              f"select '{DDL_MARKER}';\n"
+              f"{test_body}\n"
+              ";\nrollback;\n")
+    refuse_psql_meta(script, "mutation script")
+    return script
 
 
 def classify(output):
@@ -769,6 +784,8 @@ def host_is_local(host):
         return ipaddress.ip_address(h).is_loopback
     except ValueError:
         pass
+    if NUMERIC_HOST_RE.fullmatch(h):
+        return False
     return "." not in h and bool(re.fullmatch(r"[a-z0-9][a-z0-9_-]*", h))
 
 
@@ -780,7 +797,7 @@ def db_url_hosts(url):
         hosts = fields.get("host", "").strip("'")
         hostaddr = fields.get("hostaddr", "").strip("'")
         result = [h for h in hosts.split(",")] + ([hostaddr] if hostaddr else [])
-        return result if (hosts or hostaddr) else [os.environ.get("PGHOST", "")]
+        return result if (hosts or hostaddr) else [""]
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme not in ("postgres", "postgresql"):
         raise ToolError(f"unsupported URL scheme {parsed.scheme!r}")
@@ -797,8 +814,6 @@ def db_url_hosts(url):
     for key in ("host", "hostaddr"):
         for value in query.get(key, []):
             hosts.extend(value.split(","))
-    if all(not h for h in hosts):
-        hosts.append(os.environ.get("PGHOST", ""))
     return hosts
 
 
@@ -808,21 +823,58 @@ def check_local_url(url):
         raise ToolError(f"refusing non-local database host(s): {', '.join(bad)}; pgmutate only runs against a local DB")
 
 
-def check_local_docker():
+def docker_endpoint_is_local(endpoint):
+    if endpoint.startswith(("unix://", "npipe://")):
+        return True
+    parsed = urllib.parse.urlsplit(endpoint)
+    if parsed.scheme not in ("tcp", "http", "https", "ssh") or not parsed.hostname:
+        return False
+    return host_is_local(parsed.hostname)
+
+
+def docker_context_endpoints(run=subprocess.run):
+    try:
+        p = run(["docker", "context", "inspect"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise ToolError(f"could not read the docker context ({e}); pass --db-url with a local host")
+    if p.returncode != 0:
+        raise ToolError(f"could not read the docker context: {(p.stderr or p.stdout).strip()[:300]}; "
+                        "pass --db-url with a local host")
+    try:
+        contexts = json.loads(p.stdout)
+        return [c["Endpoints"]["docker"]["Host"] for c in contexts]
+    except (ValueError, KeyError, TypeError):
+        raise ToolError("could not parse `docker context inspect`; pass --db-url with a local host")
+
+
+def check_local_docker(run=subprocess.run):
     docker_host = os.environ.get("DOCKER_HOST", "")
-    if not docker_host or docker_host.startswith(("unix://", "npipe://")):
+    if docker_host:
+        if not docker_endpoint_is_local(docker_host):
+            raise ToolError(f"refusing DOCKER_HOST={docker_host}: pgmutate only runs against a local DB")
         return
-    host = urllib.parse.urlsplit(docker_host).hostname or ""
-    if not host_is_local(host):
-        raise ToolError(f"refusing DOCKER_HOST={docker_host}: pgmutate only runs against a local DB")
+    context = os.environ.get("DOCKER_CONTEXT", "")
+    endpoints = docker_context_endpoints(run)
+    bad = [e for e in endpoints if not docker_endpoint_is_local(e)]
+    if bad or not endpoints:
+        shown = f" (DOCKER_CONTEXT={context})" if context else ""
+        raise ToolError(f"refusing docker endpoint {', '.join(bad) or '(none)'}{shown}: "
+                        "pgmutate only runs against a local DB")
+
+
+def psql_env(base=None):
+    env = {k: v for k, v in (os.environ if base is None else base).items()
+           if not k.upper().startswith("PG") and k.upper() not in ("PSQLRC", "PSQL_HISTORY")}
+    env["PGCLIENTENCODING"] = "UTF8"
+    return env
 
 
 def psql_command_for_url(url, psql):
-    return [psql, "-X", "-q", "-At", "-v", "ON_ERROR_STOP=0", "-d", url, "-f", "-"]
+    return [psql, "-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", "-d", url, "-f", "-"]
 
 
 def psql_command_for_container(container):
-    return ["docker", "exec", "-i", "-e", "PGCLIENTENCODING=UTF8", container, "psql", "-X", "-q", "-At", "-v", "ON_ERROR_STOP=0",
+    return ["docker", "exec", "-i", "-e", "PGCLIENTENCODING=UTF8", container, "psql", "-X", "-q", "-At", "-v", "ON_ERROR_STOP=1",
             "-U", "postgres", "-d", "postgres", "-f", "-"]
 
 
@@ -873,13 +925,13 @@ def make_runner(command, timeout):
     def run(script):
         try:
             p = subprocess.run(command, input=script.encode("utf-8"), capture_output=True, timeout=timeout,
-                               env=dict(os.environ, PGCLIENTENCODING="UTF8"))
+                               env=psql_env())
         except subprocess.TimeoutExpired:
             return None
         except OSError as e:
             raise ToolError(f"could not run {command[0]}: {e}")
         out = p.stdout.decode("utf-8", "replace") + "\n" + p.stderr.decode("utf-8", "replace")
-        if p.returncode != 0:
+        if p.returncode not in (0, PSQL_SCRIPT_ERROR):
             raise ToolError(f"psql exited {p.returncode}: {out.strip()[:500]}")
         return out
     return run
@@ -1035,7 +1087,7 @@ def load_sources_git(root, rev, sql_dir_rel):
 
 
 def changed_functions(root, rev_from, rev_to, sql_dir_rel):
-    changed = git(root, "diff", "--name-only", "--diff-filter=AM", rev_from, rev_to, "--",
+    changed = git(root, "diff", "--name-only", "--diff-filter=AMR", "-M", rev_from, rev_to, "--",
                   sql_dir_rel.rstrip("/") + "/").split()
     names = set()
     for path in changed:

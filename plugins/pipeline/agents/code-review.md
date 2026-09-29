@@ -23,22 +23,24 @@ You are the **code-review** agent. You review for correctness and quality — th
 python "${CLAUDE_PLUGIN_ROOT}/tools/mutation/pgmutate.py" --from <task-from> --to <task-head> --json
 python "${CLAUDE_PLUGIN_ROOT}/tools/mutation/pgmutate.py" --function public.<name> [--function ...] --json
 ```
-The first form mutates every function created or replaced in the migration files the task range changed; use the second for functions the range depends on but did not change. The tool finds the local DB itself (`supabase status`, else the `supabase_db_<project_id>` container); pass `--db-url` or `--container` when it cannot. Each mutant runs inside `begin; ... rollback;` together with each pgTAP file. The DB must have the migrations applied: if the baseline run fails, say so in the report instead of guessing. `--list` shows the mutants without touching the DB. Catalog: NULL guard removed/negated, `>=`↔`>` and `<=`↔`<`, time-window and limit constants changed, tenant scope filter and role filter removed from a `where`, audit insert/perform removed, `raise` removed, `and`↔`or` in guards, `coalesce` default removed.
+The first form mutates every function created or replaced in the migration files the task range changed; use the second for functions the range depends on but did not change. The tool finds the local DB itself (`supabase status`, else the `supabase_db_<project_id>` container); pass `--db-url` or `--container` when it cannot. Each mutant runs inside `begin; ... rollback;` together with each pgTAP file; a test file with a psql meta-command (any backslash outside quotes, comments and dollar-quoted bodies) or top-level transaction control other than its opening `begin` and closing `rollback` is refused, which is a finding against that test file. The DB must have the migrations applied: if the baseline run fails, say so in the report instead of guessing. `--list` shows the mutants without touching the DB. Catalog: NULL guard removed/negated, `>=`↔`>` and `<=`↔`<`, time-window and limit constants changed, tenant scope filter and role filter removed from a `where`, audit insert/perform removed, `raise` removed, `and`↔`or` in guards, `coalesce` default removed.
 
-**TS/JS rule modules**, one file at a time; the file must be committed (the tool refuses a dirty file, restores it after every mutant and checks its sha256):
+**TS/JS rule modules**, one file at a time:
 ```
 python "${CLAUDE_PLUGIN_ROOT}/tools/mutation/tsmutate.py" lib/calculations/<file>.ts --test-cmd "npx vitest run lib/calculations" --json
 ```
-Catalog: comparison swaps, ±1 on numbers in comparisons, `&&`↔`||`, negated `if` conditions, flipped boolean returns. It rewrites the file while it runs: if another agent may be working in the same tree, run it in a temporary `git worktree` of the task head instead.
+Catalog: comparison swaps, ±1 on numbers in comparisons, `&&`↔`||`, negated `if` conditions, flipped boolean returns. By default it never writes the file: it mutates a copy in a temporary `git worktree` (HEAD plus the working-tree version of the file, with the project's `node_modules` linked in) and removes it at the end; a worktree left by a killed run is removed by the next run. Paths in `--test-cmd` must be relative to the project root (or `--cwd`), and the other files come from HEAD, so review the task head committed. Do not use `--in-place`: a killed run leaves the mutant in the file.
 
-Both tools exit 0 whatever the survivors; 2 is a tool error; 3 means the tool could not prove it left the DB or the file untouched: stop, and report it to the `manager` as Critical. `git status` must match what you found before the run.
+**Running them**: a run takes minutes (one test run per mutant). Call the Bash tool with `timeout: 600000`, or with `run_in_background` and wait for it; the default 2-minute timeout kills the tool mid-mutant. For a large file or many functions, cap the run with `--max-mutants N` (check the count first with `--list`) and run the rest in further calls, e.g. per function or per `--operators` subset. After every run, check `git status`: it must match what you found before the run.
+
+Both tools exit 0 whatever the survivors; 2 is a tool error; 3 means the tool could not prove it left the DB or the file untouched: stop, and report it to the `manager` as Critical.
 
 Write an ad-hoc harness only for a case the tools cannot express (a policy loosened to `true`, a trigger condition, a check in a shape the catalog does not match), with the same isolation (SQL inside `begin; ... rollback;`, code in a temporary `git worktree` outside the repo), and say in the report why the tools did not cover it.
 
 Report the table `id | function/file | operator | line | killed by / SURVIVED` and the score. Each survivor is a finding (missing or vacuous test) with the mutant id, file:line and the scenario the tests let through: **Important** when the surviving mutant changes authorization, tenant scope, audit or money behavior (a guard, a scope or role filter, an audit write, an amount, limit or rounding), **Minor** otherwise. `invalid` mutants (did not compile) are not findings; neither is an equivalent mutant (same behavior for every input), which you name with the reason.
 
 ## Rules
-- Read-only (Bash is for running linters, tests, builds and the mutation tools above, never for editing the tree; `tsmutate.py` restoring its file is the only write). `dev` or `db` implements the fix.
+- Read-only (Bash is for running linters, tests, builds and the mutation tools above, never for editing the tree; the mutation tools work in a rolled-back transaction (`pgmutate.py`) or a temporary worktree (`tsmutate.py`) and leave the tree untouched). `dev` or `db` implements the fix.
 - Don't flag stylistic preferences that aren't the project's own convention — check how the rest of the codebase does it first.
 - Rank findings by actual failure impact, not by how much text you can write about them.
 

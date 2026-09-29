@@ -123,7 +123,15 @@ open(fake_test, "w", encoding="utf-8").write(
     "    open(sys.argv[1], 'w').write('garbage')\n"
     "if len(sys.argv) > 2 and sys.argv[2] == 'slow' and '&&' not in src:\n"
     "    import time; time.sleep(30)\n"
+    "if len(sys.argv) > 3 and sys.argv[2] == 'hang' and '&&' not in src:\n"
+    "    import os, time; open(sys.argv[3], 'w').write(os.getcwd()); time.sleep(120)\n"
+    "import os\n"
+    "if not os.path.exists(os.path.join('node_modules', 'pkg', 'index.js')):\n"
+    "    print('FAIL node_modules missing'); sys.exit(1)\n"
     "print('Tests 1 passed')\n")
+os.makedirs(os.path.join(root, "node_modules", "pkg"))
+open(os.path.join(root, "node_modules", "pkg", "index.js"), "w").write("module.exports = 1;\n")
+open(os.path.join(root, ".gitignore"), "w").write("node_modules/\n")
 sh("git", "init", "-q")
 sh("git", "config", "user.email", "t@example.com")
 sh("git", "config", "user.name", "t")
@@ -134,13 +142,19 @@ original_hash = sha(calc)
 
 
 def cmd(*extra):
-    return " ".join([f'"{sys.executable}"', f'"{fake_test}"', f'"{calc}"', *extra])
+    return " ".join([f'"{sys.executable}"', f'"{fake_test}"', "calc.js", *extra])
 
 
 def tool(*args):
     return subprocess.run([sys.executable, TOOL, *args], cwd=root, capture_output=True, text=True, encoding="utf-8")
 
 
+def tsmutate_worktrees():
+    return [line for line in sh("git", "worktree", "list", "--porcelain").splitlines()
+            if line.startswith("worktree ") and ts.WORKTREE_PREFIX in line]
+
+
+pkg_index = os.path.join(root, "node_modules", "pkg", "index.js")
 r = tool(calc, "--test-cmd", cmd(), "--json")
 check("CLI run exits 0 with survivors", r.returncode == 0, r.stdout + r.stderr)
 import json  # noqa: E402
@@ -151,6 +165,9 @@ check("mutants touching n >= 10 are killed and name the failing test",
 check("other mutants survive", any(m["status"] == "survived" for m in data["mutants"]), data["summary"])
 check("file restored byte-for-byte (CRLF and UTF-8 kept)", sha(calc) == original_hash)
 check("git status clean after the run", sh("git", "status", "--porcelain") == "")
+check("the temporary worktree is removed and pruned after the run", tsmutate_worktrees() == [], tsmutate_worktrees())
+check("the project's node_modules survives the worktree removal (link removed, target kept)", os.path.exists(pkg_index))
+check("stderr says the run used a temporary git worktree", "temporary git worktree" in tool(calc, "--test-cmd", cmd()).stderr)
 
 r = tool(calc, "--test-cmd", cmd(), "--fail-on-survivors")
 check("--fail-on-survivors exits 1 and prints the table", r.returncode == 1 and "survived" in r.stdout, r.stdout + r.stderr)
@@ -158,20 +175,88 @@ check("--fail-on-survivors exits 1 and prints the table", r.returncode == 1 and 
 r = tool(calc, "--test-cmd", cmd("vandal"))
 check("a test command that overwrites the file still ends with the original", r.returncode == 0 and sha(calc) == original_hash,
       r.stderr)
+r = tool(calc, "--test-cmd", cmd("vandal"), "--in-place")
+check("--in-place: a test command that overwrites the file still ends with the original",
+      r.returncode == 0 and sha(calc) == original_hash, r.stderr)
 
 open(calc, "ab").write(b"// dirty\n")
-r = tool(calc, "--test-cmd", cmd())
-check("refuses a file with uncommitted changes", r.returncode == 2 and "dirty" in r.stderr, r.stderr)
 dirty_hash = sha(calc)
-r = tool(calc, "--test-cmd", cmd(), "--allow-dirty")
-check("--allow-dirty runs and restores the dirty content", r.returncode == 0 and sha(calc) == dirty_hash, r.stderr)
+r = tool(calc, "--test-cmd", cmd(), "--json")
+dirty_data = json.loads(r.stdout) if r.returncode == 0 else {"mutants": []}
+check("worktree mode mutates the uncommitted working-tree content and leaves it as it was",
+      r.returncode == 0 and sha(calc) == dirty_hash and any(m["status"] == "killed" for m in dirty_data["mutants"]),
+      r.stdout + r.stderr)
+r = tool(calc, "--test-cmd", cmd(), "--in-place")
+check("--in-place refuses a file with uncommitted changes", r.returncode == 2 and "dirty" in r.stderr, r.stderr)
+r = tool(calc, "--test-cmd", cmd(), "--in-place", "--allow-dirty")
+check("--in-place --allow-dirty runs and restores the dirty content", r.returncode == 0 and sha(calc) == dirty_hash, r.stderr)
 sh("git", "checkout", "--", "calc.js")
+
+open(os.path.join(root, "fake_test.py"), "a").write("# local edit\n")
+r = tool(calc, "--test-cmd", cmd())
+check("worktree mode notes other local changes that are not in the worktree",
+      r.returncode == 0 and "fake_test.py" in r.stderr and "not in it" in r.stderr, r.stderr)
+sh("git", "checkout", "--", "fake_test.py")
 
 other = os.path.join(root, "novo.js")
 open(other, "w").write("export const f = (n) => n > 1;\n")
+r = tool(other, "--test-cmd", cmd(), "--in-place")
+check("--in-place refuses an untracked file", r.returncode == 2 and "untracked" in r.stderr, r.stderr)
 r = tool(other, "--test-cmd", cmd())
-check("refuses an untracked file", r.returncode == 2 and "untracked" in r.stderr, r.stderr)
+check("worktree mode copies an untracked file into the worktree", r.returncode == 0 and os.path.exists(other), r.stderr)
 os.remove(other)
+
+outside = os.path.join(tempfile.gettempdir(), f"tsmutate_outside_{int(time.time() * 1000)}.js")
+open(outside, "w").write("export const f = (n) => n > 1;\n")
+r = subprocess.run([sys.executable, TOOL, outside, "--test-cmd", "exit 0"], cwd=tempfile.gettempdir(), capture_output=True,
+                   text=True, encoding="utf-8")
+check("worktree mode outside a git repository is a tool error pointing at --in-place",
+      r.returncode == 2 and "--in-place" in r.stderr, r.stderr)
+os.remove(outside)
+
+
+def kill_process_tree(proc):
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+    else:
+        os.killpg(proc.pid, 9)
+    proc.wait(timeout=30)
+
+
+flag = os.path.join(tempfile.gettempdir(), f"tsmutate_flag_{int(time.time() * 1000)}")
+popen_kwargs = {} if os.name == "nt" else {"start_new_session": True}
+proc = subprocess.Popen([sys.executable, TOOL, calc, "--test-cmd", cmd("hang", f'"{flag}"'), "--operators", "and-or-swap"],
+                        cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **popen_kwargs)
+deadline = time.time() + 60
+while not os.path.exists(flag) and time.time() < deadline and proc.poll() is None:
+    time.sleep(0.2)
+mutant_seen = os.path.exists(flag)
+hung_cwd = open(flag).read() if mutant_seen else ""
+kill_process_tree(proc)
+check("hard-kill simulation reached a running mutant inside the temporary worktree",
+      mutant_seen and ts.WORKTREE_PREFIX in hung_cwd, hung_cwd)
+check("hard kill mid-mutant leaves the project file unchanged", sha(calc) == original_hash)
+check("hard kill mid-mutant leaves git status clean", sh("git", "status", "--porcelain") == "",
+      sh("git", "status", "--porcelain"))
+check("the killed run leaves its worktree behind (the next run cleans it)", len(tsmutate_worktrees()) == 1,
+      tsmutate_worktrees())
+r = tool(calc, "--list")
+check("--list does not touch worktrees", len(tsmutate_worktrees()) == 1)
+r = tool(calc, "--test-cmd", cmd(), "--operators", "and-or-swap")
+check("the next run removes the stale worktree and its folder", r.returncode == 0 and tsmutate_worktrees() == []
+      and not os.path.exists(hung_cwd), r.stderr + str(tsmutate_worktrees()))
+check("stale cleanup keeps the project's node_modules", os.path.exists(pkg_index))
+os.remove(flag)
+
+proc = subprocess.Popen([sys.executable, TOOL, calc, "--test-cmd", cmd("hang", f'"{flag}"'), "--operators", "and-or-swap",
+                         "--in-place"], cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **popen_kwargs)
+deadline = time.time() + 60
+while not os.path.exists(flag) and time.time() < deadline and proc.poll() is None:
+    time.sleep(0.2)
+kill_process_tree(proc)
+check("--in-place hard kill leaves the mutant in the file (why the worktree is the default)", sha(calc) != original_hash)
+sh("git", "checkout", "--", "calc.js")
+os.remove(flag)
 
 r = tool(calc, "--list")
 check("--list prints mutants without running anything", r.returncode == 0 and "comparison" in r.stdout and sha(calc) == original_hash,
@@ -228,7 +313,8 @@ check("fixture restored for cleanup", sha(calc) == original_hash)
 
 r = subprocess.run([sys.executable, TOOL, "--help"], capture_output=True, text=True, encoding="utf-8")
 check("--help documents restore, dirty check and exit codes",
-      r.returncode == 0 and "sha256" in r.stdout and "--allow-dirty" in r.stdout and "Exit codes" in r.stdout)
+      r.returncode == 0 and "sha256" in r.stdout and "--allow-dirty" in r.stdout and "Exit codes" in r.stdout
+      and "--in-place" in r.stdout and "mklink /J" in r.stdout and "worktree prune" in r.stdout)
 
 print(f"\n{'ALL PASS' if all(results) else 'FAILURES'} ({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)
