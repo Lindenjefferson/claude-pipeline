@@ -23,8 +23,12 @@ def run_hook(name, tool_input):
     return "DENY" if ALLOW in json.loads(r.stdout)["hookSpecificOutput"]["permissionDecisionReason"] else "OTHER"
 
 
-def bash(command):
-    return run_hook("Bash", {"command": command})
+def bash(command, cwd=None):
+    if cwd is None:
+        return run_hook("Bash", {"command": command})
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd})
+    r = subprocess.run([sys.executable, HOOK], input=payload, capture_output=True, text=True, encoding="utf-8")
+    return "ALLOW" if not r.stdout.strip() else "DENY"
 
 
 def check(name, ok, detail=""):
@@ -43,6 +47,10 @@ for k, v in (("user.email", "t@t.com"), ("user.name", "t"), ("core.autocrlf", "f
     sh(repo, "git", "config", k, v)
 sh(repo, "git", "remote", "add", "origin", remote)
 write("a.txt", "base\n")
+os.makedirs(os.path.join(repo, "sub"))
+write(os.path.join("sub", "b.txt"), "base\n")
+FP = "ab" * 32
+FP2 = "cd" * 32
 write(ALLOW, "# user entries\n")
 sh(repo, "git", "add", "-A")
 sh(repo, "git", "commit", "-q", "-m", "base")
@@ -63,20 +71,42 @@ denied = ["git commit -m x .pipeline-secrets-allow", "git commit -o .pipeline-se
           "cp /tmp/x .pipeline-secrets-*", "rm .pipeline-*", "mv x '*secrets*'", "cp x .pipeline-secrets-a?low",
           "cp x .pipeline-secrets-[a]llow", "rm .*", "git add '.pipeline-secrets-*'", "git commit -m x -- '*secrets*'",
           "git checkout -- '.pipeline-*'", "bash -c 'cp x .pipeline-s*'"]
+denied += ['echo abc | git -c "alias.r=!tee -a .pipeline-secrets-allow" r',
+           "git -c alias.r='!cp /tmp/x .pipeline-secrets-allow' r",
+           "git -c 'alias.c=!git add .pipeline-secrets-allow && git commit -m x' c",
+           "git --config-env=alias.r=X r .pipeline-secrets-allow",
+           "git -c diff.external=x diff -- .pipeline-secrets-allow",
+           "GIT_EXTERNAL_DIFF=x git diff -- .pipeline-secrets-allow",
+           "GIT_CONFIG_PARAMETERS=x git log -- .pipeline-secrets-allow",
+           "git grep -Ocat x -- .pipeline-secrets-allow",
+           "git grep --open-files-in-pager=vi x -- .pipeline-secrets-allow",
+           "git r .pipeline-secrets-allow"]
 for command in denied:
     check(f"denied: {command}", bash(command) == "DENY")
 
 allowed = ['git commit -m "mention .pipeline-secrets-allow"', "git commit -m 'update *secrets* docs'",
            "git log -p -- .pipeline-secrets-allow", "git diff -- '.pipeline-*'", "cat .pipeline-*",
            "ls *", "rm *.tmp", "git add src/*.py", "git log --output=out.txt", "git -c core.pager=cat log",
-           "git diff --ext-diff", "git show HEAD:.pipeline-secrets-allow"]
+           "git diff --ext-diff", "git show HEAD:.pipeline-secrets-allow",
+           "git grep x -- .pipeline-secrets-allow", "git -C sub log -- ../.pipeline-secrets-allow"]
 for command in allowed:
     check(f"allowed: {command}", bash(command) == "ALLOW")
 
-write(ALLOW, "# user entries\nabc  # pending\n")
+write(ALLOW, f"# user entries\n{FP}  # pending\n")
 for command in ("git commit -a -m x", "git commit -am x", "git commit --all -m x", "git add -A", "git add .",
-                "git add -u", "git add -A && git commit -m x", "powershell -Command \"git add --all\""):
+                "git add -u", "git add -A && git commit -m x", "powershell -Command \"git add --all\"",
+                "git add '*.*'", 'git add "?*"', 'git add ":/**"', "git add ./.", "git add -f '*'",
+                'git commit -m x -- "*.*"', "git commit -m x -- .", "cd sub && git add ..", "git -C sub add ..",
+                "git -C sub add :/", "git add --pathspec-from-file=list.txt", 'git add "$X"'):
     check(f"unstaged allowlist edit: {command} denied", bash(command) == "DENY")
+for command in ("cd sub && git add .", "git -C sub add .", "git -C sub add -A .", "git add sub",
+                "git add '*.txt'", "cd sub && git add -u ."):
+    check(f"unstaged allowlist edit: {command} allowed (the pathspec cannot reach the root file)",
+          bash(command) == "ALLOW")
+check("unstaged allowlist edit: git add . from a subdirectory (tool cwd) allowed",
+      bash("git add .", cwd=os.path.join(repo, "sub")) == "ALLOW")
+check("unstaged allowlist edit: git add .. from a subdirectory (tool cwd) denied",
+      bash("git add ..", cwd=os.path.join(repo, "sub")) == "DENY")
 check("unstaged allowlist edit: git add of another file allowed", bash("git add a.txt") == "ALLOW")
 check("unstaged allowlist edit: plain git commit allowed", bash("git commit -m x") != "DENY")
 sh(repo, "git", "add", ALLOW)
@@ -110,11 +140,27 @@ for token, expected in ((".pipeline-secrets-*", True), (".pipeline-*", True), ("
 sh(repo, sys.executable, HOOK, "--install-pre-push")
 r = sh(repo, "git", "push", "origin", "HEAD:refs/heads/main", check=False)
 check("pre-push warns about allowlist lines the remote lacks, without blocking",
-      r.returncode == 0 and "Warning" in r.stderr and "abc  # pending" in r.stderr
+      r.returncode == 0 and "Warning" in r.stderr and f"{FP}  # pending" in r.stderr
       and "# user entries" not in r.stderr.split("Warning", 1)[1], r.stderr)
 write("a.txt", "again\n")
 sh(repo, "git", "commit", "-q", "-am", "no allowlist change")
 r = sh(repo, "git", "push", "origin", "HEAD:refs/heads/main", check=False)
 check("pre-push is silent when the allowlist did not change", r.returncode == 0 and "Warning" not in r.stderr, r.stderr)
+write(".gitattributes", "/.pipeline-secrets-allow binary\n")
+write(ALLOW, f"# user entries\n{FP}  # pending\n{FP2}  # hidden from diffs\n")
+sh(repo, "git", "add", ".gitattributes", ALLOW)
+sh(repo, "git", "commit", "-q", "-m", "binary allowlist")
+r = sh(repo, "git", "push", "origin", "HEAD:refs/heads/main", check=False)
+check("pre-push lists a new entry even when the allowlist is marked binary",
+      r.returncode == 0 and f"{FP2}  # hidden from diffs" in r.stderr and f"{FP}  # pending" not in r.stderr, r.stderr)
+head = sh(repo, "git", "rev-parse", "HEAD").stdout.strip()
+r = subprocess.run([sys.executable, HOOK, "--pre-push"], cwd=repo, capture_output=True, text=True, encoding="utf-8",
+                   input=f"refs/heads/main {head} refs/heads/main {'1' * 40}\n")
+check("pre-push says so when the remote state is unknown, and lists every entry",
+      r.returncode == 0 and "remote state unknown" in r.stderr and FP in r.stderr and FP2 in r.stderr, r.stderr)
+r = subprocess.run([sys.executable, HOOK, "--pre-push"], cwd=repo, capture_output=True, text=True, encoding="utf-8",
+                   input=f"refs/heads/new {head} refs/heads/new {'0' * 40}\n")
+check("pre-push to a new remote branch compares with the remote-tracking branches",
+      r.returncode == 0 and "Warning" not in r.stderr, r.stderr)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

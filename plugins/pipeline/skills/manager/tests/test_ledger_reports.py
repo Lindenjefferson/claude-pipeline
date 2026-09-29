@@ -196,7 +196,12 @@ for item, expected in (("- `app/page.tsx`: now calls `lib/format.ts`", {"app/pag
                        ("- Modify: `src/f.ts`, `src/g.ts:4` and `lib/h.ts`", {"src/f.ts", "src/g.ts", "lib/h.ts"}),
                        ("- `src/i.ts` (new), `src/j.ts`: both export `k.ts`", {"src/i.ts", "src/j.ts"}),
                        ("- `src/l.ts` now uses `lib/m.ts`", {"src/l.ts"}),
-                       ("- `src/n.ts`, `true`", {"src/n.ts"})):
+                       ("- `src/n.ts`, `true`", {"src/n.ts"}),
+                       ("- src/o.ts, src/p.ts", {"src/o.ts", "src/p.ts"}),
+                       ("- Create: src/q.ts, src/r.ts", {"src/q.ts", "src/r.ts"}),
+                       ("- Modify: src/s.ts, lib/t.ts and README.md: renamed", {"src/s.ts", "lib/t.ts", "README.md"}),
+                       ("- src/u.ts, then run tests", {"src/u.ts"}),
+                       ("- Makefile, src/v.ts: targets", {"Makefile", "src/v.ts"})):
     found = cited_paths(f"Files:\n{item}\n", files_section_only=True)
     check(f"a Files item yields its leading paths: {item}", found == expected, str(found))
 r = append(DEV, report("multi.md", f"Committed {c1[:8]}.\n\nFiles changed:\n- `src/a.py`, `README.md`\n\n{PAD}\n{DEV}\n"))
