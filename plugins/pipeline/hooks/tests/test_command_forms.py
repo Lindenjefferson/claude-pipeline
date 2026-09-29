@@ -66,10 +66,20 @@ bash_allowed = [
     ("echo of a git command", 'echo "git commit -m x"'),
     ("grep for a git command", "grep -rn 'git commit' ."),
     ("git status", "git status"),
-    ("not a repo", "git commit -m x"),
+    ("not a repo: git status", "git status"),
+    ("not a repo: git log", "git log --oneline"),
+    ("not a repo: git init", "git init -q x"),
+    ("not a repo: non-git command", "ls"),
 ]
 for name, command in bash_allowed:
-    check(name, command, "ALLOW", cwd=elsewhere if name == "not a repo" else repo)
+    check(name, command, "ALLOW", cwd=elsewhere if name.startswith("not a repo") else repo)
+
+check("not a repo: git commit denied (the hook cannot see which repository it lands in)",
+      "git commit -m x", "DENY", cwd=elsewhere)
+check("not a repo: git push denied", "git push", "DENY", cwd=elsewhere)
+check("not a repo: git add denied", "git add -A", "DENY", cwd=elsewhere)
+check("a cd the parser does not follow (eval) cannot skip the scan", f'eval "cd {repo}" && git commit -m x',
+      "DENY", cwd=elsewhere)
 
 check("${VAR} path is resolved, not split", 'cd "${HOOKFORMS_REPO}" && git commit -m x', "DENY", cwd=elsewhere) \
     if os.environ.setdefault("HOOKFORMS_REPO", repo) else None
