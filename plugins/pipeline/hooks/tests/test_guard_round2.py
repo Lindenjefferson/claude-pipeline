@@ -70,7 +70,7 @@ for command in ("rm .gi?/hooks/pre-push", "rm .git/hook*/pre-push", "rm ./.git/.
                 "rm $SOME_UNSET_DIR_X/hooks/pre-push", "find . -name pre-push -delete",
                 "find . -name pre-push -exec rm {} +", "find .git -name pre-push -delete",
                 "bash -c 'cd .git && rm hooks/pre-push'", "cp /dev/null .git/config*",
-                "find . -name '*.tmp' -delete -not -path './.git/*'",
+                "find . -name 'pre-*' -delete -not -path './.git/*'",
                 "find . -not -path './.git/*' -o -name pre-push -delete",
                 "find . -path ./src -prune -o -name pre-push -delete",
                 "find . -not -path './src/*' -name pre-push -delete",
@@ -157,8 +157,13 @@ check("PreToolUse warns naming the rewrite",
       "URL rewrite" in stderr and ".insteadof" in stderr.lower(), stderr)
 sh(repo, sys.executable, HOOK, "--install-pre-push")
 r = sh(repo, "git", "push", "origin", "main", check=False)
-check("native pre-push blocks while URL rewrites apply",
-      r.returncode != 0 and "push target cannot be verified" in r.stderr, r.stderr)
+check("native pre-push falls back to tracking refs under a split rewrite and finds the secret",
+      r.returncode != 0 and "Secret scan blocked this push" in r.stderr and "URL rewrite" in r.stderr
+      and "from a terminal" not in r.stderr, r.stderr)
+sh(repo, "git", "branch", "clean0", "HEAD~1")
+r = sh(repo, "git", "push", "origin", "clean0", check=False)
+check("native pre-push lets a clean push through a split rewrite, with a warning",
+      r.returncode == 0 and "URL rewrite" in r.stderr, r.stderr)
 check("the real remote did not receive the secret commit",
       leak not in sh(base, "git", "--git-dir", real, "rev-parse", "main").stdout)
 
