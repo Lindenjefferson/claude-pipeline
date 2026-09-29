@@ -2,7 +2,16 @@
 
 Backlog vivo do plugin. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin ou ideia adaptada do ECC) e o esforço estimado (P, M, G). Ao entregar um item, mover para a seção da versão correspondente com o PR.
 
-## 1.5.1 — em andamento (branch `fix/hook-false-denials-and-report-capture`)
+## 1.6.0 — em andamento (branch `refactor/simplify-hook-guard`)
+
+O hook volta ao objetivo original: não deixar passar o óbvio (`.env`, segredos e tokens explícitos) no commit.
+
+- [x] **Só o `pre-commit` nativo**: `pre-commit-secret-scan.py` de 3.022 para 353 linhas; testes do hook de 3.298 para ~550. Ficam o scanner, a allowlist por fingerprint e o `--fingerprint`.
+- [x] **Sai o `PreToolUse`** (parser e guard de desvios) e o `pre-push` (estado do remoto, `insteadOf`). Um `pre-push` de versão antiga vira no-op e a reinstalação o remove.
+- [x] **Gate sem bloqueio**: o `gate` continua como etapa do `manager` (verificação e relatório), mas nada bloqueia o push; sai o `gate-approved` e o `pipeline.gate`.
+- [x] **Kickoff**: instala só o `pre-commit`; `permissions.deny` ganha `git commit --no-verify`/`-n`.
+
+## 1.5.1 — pronta (commit `63b9f03`, branch `fix/hook-false-denials-and-report-capture`, sem PR)
 
 Minors aceitos nas revisões finais da 1.5.0:
 
@@ -16,14 +25,14 @@ Minors aceitos nas revisões finais da 1.5.0:
 - [x] Relatório do agente gravado sem transcrição manual (hook `SubagentStop` para uma caixa de entrada, ou `save-report --inbox` pelos revisores com Bash).
 - [x] Kickoff (Next): propor `@playwright/test` e `npm run e2e:smoke`; `dev`/`qa` usam o script do projeto quando existe.
 
-Candidatos baratos para entrar ainda na 1.5.1:
+Candidatos baratos que ficaram de fora da 1.5.1:
 
 - [ ] **Retomada depois de compactação** (ECC `session-start`/`pre-compact`): hook `SessionStart` com matcher `compact|resume` injeta um resumo curto do `ledger.py status --head HEAD` quando existe ledger (teto de ~3000 caracteres). P.
 - [ ] **Bloquear servidor de dev solto** (ECC `pre-bash-dev-server-block`): negar `npm|pnpm|yarn run dev`, `next dev` sem `run_in_background`/`timeout`, com a forma certa na mensagem. Custou uma rodada de QA e um processo órfão no Módulo 1. P.
 - [ ] **Encoding no commit**: o hook recusa linhas adicionadas que não decodificam como UTF-8 (Latin-1 misturado em testes no Módulo 1). P.
 - [ ] **`ledger.py metrics`**: rodadas por tarefa e revisor, reprovações por causa, rerrevisões escopadas × completas, para comparar entregas. P.
 
-## 1.6 — próximos
+## Próximos
 
 - [ ] **Revisores exigidos já no plano**: `package.py plan-check` lê os `Files` de cada tarefa do plano e completa os revisores exigidos (mesmas regras do aviso de revisor faltando do `status`). O gate do Módulo 1 bloqueou por revisores marcados errado à mão. M.
 - [ ] **Worktree com base e seed** (ECC `tmux-worktree-orchestrator`): `package.py worktree --name <n> --branch <b> --base <branch-do-módulo> --seed .superpowers` cria o worktree a partir da branch do módulo e copia ledger, relatórios, briefs e lições. P.
@@ -35,7 +44,6 @@ Candidatos baratos para entrar ainda na 1.5.1:
 ## Decisões pendentes do usuário
 
 - [ ] **Ruído do graphify**: o plugin graphify injeta "MANDATORY: run graphify" em quase todo Bash/Read, gastando contexto em toda chamada. Opção: o kickoff instala o hook do graphify só para `Read|Grep|Glob`. Mexe em outro plugin.
-- [ ] **Camada de texto do hook menor**: com o `pre-commit`/`pre-push` nativo como proteção de fato, reduzir o `PreToolUse` a bloqueios simples (`--no-verify`, config protegida, escrita literal em `.git/hooks`), trocando cobertura de formas raras por manutenção menor.
 - [ ] **Lições novas do Módulo 1**: montar a lista (contraste do destrutivo, foco depois de desmontar linha, `rev-parse` em worktree, revisor por domínio no plano…) e promover item a item com aprovação.
 
 ## Entregues

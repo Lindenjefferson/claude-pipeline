@@ -29,7 +29,7 @@ discovery → brainstorming → revisão do spec → plano → dev/db → docs +
 
 - A skill `manager` orquestra a entrega e mantém o ledger (`.superpowers/ledger.jsonl`) que sincroniza os agentes; o agente `gate` é a checagem final.
 - Commits ficam locais, no branch do worktree. Merge na branch principal e push só depois do veredito APROVADO do `gate`, e só quando o usuário pedir. Correções voltam ao agente dono do arquivo (`dev` ou `db`).
-- O plugin `pipeline` está habilitado neste repo (`--scope local`), o que liga o fluxo pessoal aqui. Os hooks `pre-commit` e `pre-push` do git (instalados pelo `kickoff`) e o hook do plugin escaneiam segredos em todo `git commit` e nos commits de todo `git push`; com o gate ligado (`git config pipeline.gate true` ou `docs/quality-reports/`), o push sem aprovação do `gate` para a árvore de cada ref enviada é bloqueado. Nunca usar `--no-verify` nem mexer em `core.hooksPath`, `pipeline.*` ou `.git/hooks`: o hook do plugin nega.
+- O plugin `pipeline` está habilitado neste repo (`--scope local`), o que liga o fluxo pessoal aqui. O hook `pre-commit` do git (instalado pelo `kickoff`) bloqueia commits com arquivos `.env` ou linhas com cara de segredo. Nunca usar `--no-verify` nem mexer em `.git/hooks`: um segredo commitado fica no histórico.
 - Cada entrega aprovada gera um relatório em `docs/quality-reports/` e uma linha em `history.jsonl`.
 
 ## Regras que valem sempre
