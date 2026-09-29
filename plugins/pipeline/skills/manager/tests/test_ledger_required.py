@@ -130,4 +130,42 @@ ledger("note", "--kind", "deferred", "--task", "7", "--text", "design minor goes
 check("a deferred note on the task clears the warning",
       not any(item["task"] == "7" for item in status()["undeferred_minors"]), status()["undeferred_minors"])
 
+r = append(reviewer("code-review"), c4, c5, "8,bad/name")
+check("--task checks every task name", r.returncode != 0 and "bad/name" in r.stderr, r.stderr)
+before = status()
+lines = open(LEDGER).read().splitlines()
+grouped = [json.loads(line) for line in lines if json.loads(line).get("report_group")]
+forged = dict(grouped[-1], open={"critical": 0, "important": 3, "minor": 0})
+with open(LEDGER, "a") as handle:
+    handle.write(json.dumps(forged) + "\n")
+data = status()
+check("a report_group whose lines disagree is counted per line",
+      data["open_totals"]["code-review"]["important"] == before["open_totals"]["code-review"]["important"] + 3
+      and data["totals"]["code-review"]["important"] == before["totals"]["code-review"]["important"] + 2,
+      (before["open_totals"], data["open_totals"], data["totals"]))
+check("an inconsistent report_group is listed in invalid",
+      any(item.get("report_group") == forged["report_group"] for item in data["invalid"]), data["invalid"])
+text = ledger("status", "--checklists-dir", empty).stdout
+check("text status names the inconsistent report_group", f"INVALID report_group {forged['report_group']}" in text,
+      text)
+with open(LEDGER, "w") as handle:
+    handle.write("\n".join(lines) + "\n")
+
+c8 = commit({"app/view.tsx": "export const v = 1", "lib/calc.ts": "export const k = 1"}, "task 8")
+for agent in ("design", "code-review"):
+    append(reviewer(agent), c5, c8, "8")
+commit({"lib/calc.ts": "export const k = 2"}, "server-only change")
+
+
+def stale_agents():
+    data = json.loads(ledger("status", "--json", "--head", "HEAD", "--checklists-dir", empty).stdout)
+    return {item["agent"] for item in data["stale"] if item["task"] == "8"}
+
+
+check("design is not STALE for a later change outside its paths", stale_agents() == {"code-review"},
+      stale_agents())
+commit({"app/view.tsx": "export const v = 2"}, "ui change")
+check("design is STALE for a later change to a UI path", stale_agents() == {"code-review", "design"},
+      stale_agents())
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

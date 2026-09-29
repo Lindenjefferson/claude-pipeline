@@ -174,13 +174,13 @@ def commit_paths(paths, message):
 
 
 d0 = sh("git", "rev-parse", "HEAD")
-d1 = commit_paths(["src/d.py", "docs/m.md"], "task 3 code and docs")
+d1 = commit_paths(["src/d.tsx", "docs/m.md"], "task 3 code and docs")
 append(reviewer("design"), d0, d1, task="3")
 d2 = commit_paths(["docs/m.md"], "task 4 docs only")
 append(reviewer("code-review"), d1, d2, task="4")
 table, _ = stale()
 check("a later docs/ change does not make a non-docs reviewer stale", ("3", "design") not in table, str(table))
-d3 = commit_paths(["src/d.py"], "task 4 code")
+d3 = commit_paths(["src/d.tsx"], "task 4 code")
 append(reviewer("code-review"), d1, d3, task="4")
 table, _ = stale()
 check("a later code change reviewed only by another agent still makes it stale",

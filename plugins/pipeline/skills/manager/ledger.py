@@ -531,10 +531,13 @@ def append(args):
         sys.exit("--task is empty")
     if len(tasks) > 1 and (SPEC_TASK in tasks or args.scope == "fix"):
         sys.exit("a report shared by several tasks cannot be on the spec task or --scope fix")
+    for task in tasks:
+        if not NAME_PATTERN.match(task):
+            sys.exit(f"--task must match {NAME_PATTERN.pattern}: {task}")
+        problem = spec_problem({**entry, "task": task})
+        if problem:
+            sys.exit(f"agent line rejected: {problem} (task {task})")
     entry["task"] = tasks[0]
-    problem = spec_problem(entry)
-    if problem:
-        sys.exit(f"agent line rejected: {problem}")
     if args.allow_unlisted is not None and not args.allow_unlisted.strip():
         sys.exit("--allow-unlisted needs a non-empty reason (it goes into the ruling note)")
     unlisted = []
@@ -1104,7 +1107,30 @@ def note(args):
     print(f"note {args.kind} task={args.task}")
 
 
+def group_key(entry):
+    return entry["agent"], role(entry), entry["report_group"]
+
+
+def inconsistent_groups(entries):
+    signatures, digests = {}, {}
+    for entry in entries:
+        if entry.get("agent") and entry.get("report_group"):
+            signatures.setdefault(group_key(entry), set()).add(
+                (entry.get("report"), entry.get("verdict"), json.dumps(entry.get("open") or {}, sort_keys=True),
+                 json.dumps(entry.get("new") or {}, sort_keys=True)))
+            if entry.get("report_sha256"):
+                digests.setdefault(group_key(entry), set()).add(entry["report_sha256"])
+    return {key for key, found in signatures.items() if len(found) > 1 or len(digests.get(key, ())) > 1}
+
+
+def count_key(entry, inconsistent):
+    if entry.get("report_group") and group_key(entry) not in inconsistent:
+        return group_key(entry)
+    return id(entry)
+
+
 def summarize(entries):
+    inconsistent = inconsistent_groups(entries)
     latest = {}
     totals = {}
     spec_totals = {}
@@ -1116,7 +1142,7 @@ def summarize(entries):
         latest[(entry["task"], agent, role(entry))] = entry
         scope = spec_totals if entry["task"] == SPEC_TASK else totals
         bucket = scope.setdefault(agent, {**{s: 0 for s in SEVERITIES}, "rounds": 0})
-        key = (agent, role(entry), entry.get("report_group") or id(entry))
+        key = count_key(entry, inconsistent)
         for severity in SEVERITIES:
             bucket[severity] += 0 if key in counted else (entry.get("new") or {}).get(severity, 0)
         counted.add(key)
@@ -1178,7 +1204,13 @@ def spec_stale(entry, start, head):
     return None if behind == 0 else item
 
 
-def code_stale(entry, start, head, history, reviewed):
+def in_domain(agent, sha, paths, rules):
+    if agent in CODE_REVIEWERS:
+        return list(paths)
+    return [path for path in paths if agent in required_agents(sha, [path], rules)]
+
+
+def code_stale(entry, start, head, history, reviewed, rules):
     item = {"task": entry["task"], "agent": entry["agent"], "head": entry.get("head"), "covers_from": start}
     code, out = git("rev-list", "--reverse", f"{entry.get('head')}..{head}")
     if code != 0:
@@ -1193,11 +1225,12 @@ def code_stale(entry, start, head, history, reviewed):
         files = {path for path in files if not path.startswith("docs/")}
     touched, uncovered = [], []
     for sha in after:
-        hit = sorted(files & history.touched(sha))
+        shared = files & history.touched(sha)
+        hit = sorted(in_domain(entry["agent"], sha, shared, rules))
         if hit and not any(agent == entry["agent"] and verdict == "PASS" and sha in commits
                            for _, agent, verdict, commits in reviewed):
             touched.append({"commit": sha, "files": hit})
-        elif not hit and not gate_report_only(history.touched(sha)) and not any(
+        elif not shared and not gate_report_only(history.touched(sha)) and not any(
                 task != entry["task"] and sha in commits for task, _, _, commits in reviewed):
             uncovered.append(sha)
     if not touched and not uncovered:
@@ -1205,8 +1238,8 @@ def code_stale(entry, start, head, history, reviewed):
     return {**item, "commits_after": len(after), "touched": touched, "uncovered": uncovered}
 
 
-def stale_entries(entries, latest, head):
-    history, starts = History(), review_starts(entries, latest)
+def stale_entries(entries, latest, head, directory=CHECKLISTS_DIR_DEFAULT):
+    history, starts, rules = History(), review_starts(entries, latest), checklist_rules(directory)
     reviewed = [(entry["task"], entry["agent"], entry["verdict"], history.commits(starts[id(entry)], entry["head"]))
                 for entry in latest if starts.get(id(entry)) and entry["task"] != SPEC_TASK]
     stale = []
@@ -1216,7 +1249,7 @@ def stale_entries(entries, latest, head):
         if entry["task"] == SPEC_TASK and entry.get("spec"):
             item = spec_stale(entry, starts[id(entry)], head)
         else:
-            item = code_stale(entry, starts[id(entry)], head, history, reviewed)
+            item = code_stale(entry, starts[id(entry)], head, history, reviewed, rules)
         if item:
             stale.append(item)
     return stale
@@ -1289,10 +1322,10 @@ def undeferred_minors(latest, notes):
     return [{"task": task, "agents": agents} for task, agents in found.items()]
 
 
-def open_totals(latest):
+def open_totals(latest, inconsistent):
     totals, seen = {}, set()
     for entry in latest:
-        key = (entry["agent"], entry.get("report_group") or id(entry))
+        key = count_key(entry, inconsistent)
         if role(entry) != "review" or entry["task"] == SPEC_TASK or key in seen:
             continue
         seen.add(key)
@@ -1319,23 +1352,31 @@ def stale_lines(item):
 def status(args):
     entries, invalid = read_ledger(args.ledger)
     latest, totals, spec_totals = summarize(entries)
+    inconsistent = inconsistent_groups(entries)
+    invalid = invalid + [{"report_group": group, "agent": agent,
+                          "reason": "lines of one report_group disagree on report, report_sha256, verdict or "
+                                    "findings counts; each line is counted on its own"}
+                         for agent, _, group in sorted(inconsistent)]
     notes = [{k: e[k] for k in ("kind", "task", "text", "ts")} for e in entries
              if e.get("event") == "note"]
     starts = review_starts(entries, latest)
-    stale = stale_entries(entries, latest, args.head) if args.head else []
+    stale = stale_entries(entries, latest, args.head, args.checklists_dir) if args.head else []
     flagged = {(s["task"], s["agent"]): s for s in stale}
     missing = missing_reviewers(latest, starts, args.checklists_dir)
     minors = undeferred_minors(latest, notes)
     if args.json:
         shown = [{**e, "covers_from": starts[id(e)]} if id(e) in starts else e for e in latest]
-        report = {"latest": shown, "totals": totals, "open_totals": open_totals(latest), "spec_totals": spec_totals,
+        report = {"latest": shown, "totals": totals, "open_totals": open_totals(latest, inconsistent), "spec_totals": spec_totals,
                   "notes": notes, "invalid": invalid, "missing_reviewers": missing, "undeferred_minors": minors}
         if args.head:
             report["stale"] = stale
         print(json.dumps(report, indent=2))
         return
     for item in invalid:
-        print(f"INVALID line {item['line']}: {item['reason']} (ignored)")
+        if "line" in item:
+            print(f"INVALID line {item['line']}: {item['reason']} (ignored)")
+        else:
+            print(f"INVALID report_group {item['report_group']} ({item['agent']}): {item['reason']}")
     for entry in latest:
         key = (entry["task"], entry["agent"])
         flag, details = "", []

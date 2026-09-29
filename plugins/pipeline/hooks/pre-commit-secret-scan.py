@@ -714,6 +714,9 @@ def split_segments(command, powershell):
         elif char in "'\"":
             quote = char
             current.append(char)
+        elif char == "{" and command[index + 1:index + 2] == "}":
+            current.append("{}")
+            index += 1
         elif char == "{" and current and current[-1] == "$":
             current.append(char)
             braces += 1
@@ -1252,9 +1255,13 @@ def push_urls(cwd, remote):
     return urls or [remote]
 
 
+GATE_OFF = {"false", "no", "off", "0"}
+
+
 def gate_enabled(cwd, top, shas):
-    code, value = git(["config", "--bool", "--get", "pipeline.gate"], cwd)
-    if code == 0 and value.strip() == "true":
+    code, values = git(["config", "--get-all", "pipeline.gate"], cwd)
+    if code != 1 and (code != 0 or any(value.strip().lower() not in GATE_OFF
+                                       for value in values.splitlines() or [""])):
         return True
     if top and os.path.isdir(os.path.join(top, "docs", "quality-reports")):
         return True
@@ -1512,6 +1519,7 @@ VARIABLE_MARK = re.compile(r"\$|`")
 GENERIC_PROTECTED = (([".git", "hooks"], "hooks"), ([".git", "config"], "config"),
                      ([".git", "config.worktree"], "config"))
 HOOK_CANDIDATES = ("pre-commit", "pre-push", "pre-commit.pipeline-chained")
+SUBSTITUTION_MARK = "$__substitution__"
 COPY_PROGRAMS = {"cp", "copy", "copy-item", "cpi", "rsync", "xcopy"}
 MOVE_PROGRAMS = {"mv", "move", "move-item", "mi"}
 PS_COPY_VALUE_PARAMS = ("-path", "-literalpath", "-pspath", "-filter", "-include", "-exclude", "-credential",
@@ -1715,6 +1723,8 @@ def unresolved_tail_reaches(text, state, powershell):
         return False
     pieces = re.split(r"[\\/]", text[marks[-1]:], maxsplit=1)
     tail = lexical_parts(pieces[1]) if len(pieces) == 2 else []
+    if not tail or (len(tail) == 1 and any(part_matches(name, tail[0], powershell) for name in HOOK_CANDIDATES)):
+        return True
     targets = list(GENERIC_PROTECTED) + [item for item in protected_git_dirs(state) if item[1] != "gitdir"]
     for target, kind in targets:
         for size in range(1, min(len(tail), len(target)) + 1):
@@ -1746,21 +1756,33 @@ def enters_git_dir(token, state, powershell):
                                      for target, kind in protected_git_dirs(state) if kind != "config")
 
 
-def find_write_action(expression):
-    index = 0
+def find_writing_actions(expression):
+    actions, index = [], 0
     while index < len(expression):
         text = expression[index]
         if text == "-delete":
-            return index
-        if text in FIND_ACTIONS:
+            actions.append((index, text, [], True))
+        elif text in FIND_ACTIONS:
             end = next((position for position in range(index + 1, len(expression))
-                        if expression[position] in (";", "+")), len(expression))
-            args = expression[index + 1:end]
-            if not args or program(args[0]) not in FILE_READERS or any(">" in arg for arg in args):
-                return index
-            index = end
+                        if expression[position] in (";", "+")), None)
+            args = expression[index + 1:len(expression) if end is None else end]
+            if (end is None or not args or program(args[0]) not in FILE_READERS
+                    or any(">" in arg for arg in args)):
+                actions.append((index, text, args, end is not None))
+            index = len(expression) if end is None else end
         index += 1
-    return None
+    return actions
+
+
+def find_write_action(expression):
+    actions = find_writing_actions(expression)
+    return actions[0][0] if actions else None
+
+
+def find_escapes_match(actions):
+    return any(action in ("-execdir", "-okdir")
+               or any("{}" in arg and ".." in re.split(r"[\\/]", arg) for arg in args)
+               for _, action, args, _ in actions)
 
 
 def find_reaches_git(targets, state, powershell):
@@ -1770,8 +1792,11 @@ def find_reaches_git(targets, state, powershell):
             break
         roots.append(token)
     expression = [text for text, _ in targets[len(roots):]]
-    if find_write_action(expression) is None:
+    actions = find_writing_actions(expression)
+    if not actions:
         return False
+    split = not all(terminated for _, _, _, terminated in actions)
+    tests_apply = not find_escapes_match(actions)
     for token in roots or [(".", True)]:
         if any(part_matches(".git", part, powershell) for part in lexical_parts(token[0])):
             return True
@@ -1790,7 +1815,7 @@ def find_reaches_git(targets, state, powershell):
             path = "/".join([prefix] + target[len(parts):])
             names = HOOK_CANDIDATES if kind != "config" else ("",)
             candidates.extend(((path + "/" + name).rstrip("/"), prefix) for name in names)
-        if candidates and not find_excludes(expression, candidates):
+        if candidates and (split or not find_excludes(expression, candidates, tests_apply)):
             return True
     return False
 
@@ -1811,7 +1836,7 @@ def find_ancestors(path, prefix):
     return ["/".join([prefix] + parts[:depth]) for depth in range(1, len(parts) + 1)]
 
 
-def branch_excludes(branch, path, prefix):
+def branch_excludes(branch, path, prefix, tests_apply):
     end = find_write_action(branch)
     tests = branch[:len(branch) if end is None else end]
     for index in range(len(tests) - 1):
@@ -1821,26 +1846,64 @@ def branch_excludes(branch, path, prefix):
         negated = index > 0 and tests[index - 1] in ("-not", "!")
         if negated and test in FIND_PATH_TESTS and find_pattern_matches(test, pattern, path):
             return True
-        if not negated and not any(find_pattern_matches(test, pattern, ancestor)
+        if tests_apply and not negated and not any(find_pattern_matches(test, pattern, ancestor)
                                    for ancestor in find_ancestors(path, prefix)):
             return True
     return False
 
 
-def find_excludes(expression, candidates):
+def find_excludes(expression, candidates, tests_apply):
     expression = [text for text in expression if text not in ("(", ")")]
     ors = [index for index, text in enumerate(expression) if text in ("-o", "-or", ",")]
     if not ors:
-        return all(branch_excludes(expression, path, prefix) for path, prefix in candidates)
+        return all(branch_excludes(expression, path, prefix, tests_apply) for path, prefix in candidates)
     if ors != [3] or expression[0] not in FIND_TESTS or expression[2] != "-prune":
         return False
     test, pattern = expression[0], expression[1]
     return all(any(find_pattern_matches(test, pattern, ancestor) for ancestor in find_ancestors(path, prefix))
-               or branch_excludes(expression[4:], path, prefix)
+               or branch_excludes(expression[4:], path, prefix, tests_apply)
                for path, prefix in candidates)
 
 
+def command_substitutions(command, powershell):
+    collapsed, inner, quote, index = [], [], None, 0
+    while index < len(command):
+        char = command[index]
+        if quote == "'":
+            quote = None if char == "'" else quote
+        elif is_escape(command, index, powershell, quote is not None):
+            collapsed.append(command[index:index + 2])
+            index += 2
+            continue
+        elif char in "'\"" and quote in (None, char):
+            quote = None if quote else char
+        elif command.startswith("$(", index) and not command.startswith("$((", index):
+            depth, end, inner_quote = 1, index + 2, None
+            while end < len(command) and depth:
+                if inner_quote:
+                    inner_quote = None if command[end] == inner_quote else inner_quote
+                elif command[end] in "'\"":
+                    inner_quote = command[end]
+                elif command[end] == "(":
+                    depth += 1
+                elif command[end] == ")":
+                    depth -= 1
+                end += 1
+            inner.append(command[index + 2:end - 1 if depth == 0 else end])
+            collapsed.append(SUBSTITUTION_MARK)
+            index = end
+            continue
+        collapsed.append(char)
+        index += 1
+    return "".join(collapsed), inner
+
+
 def tampers_with_hooks(command, powershell, state):
+    command, substitutions = command_substitutions(command, powershell)
+    for script in substitutions:
+        reason = tampers_with_hooks(script, powershell, dict(state, variables=dict(state["variables"])))
+        if reason:
+            return reason
     for segment in split_segments(command, powershell):
         if segment in ("(", ")"):
             continue
@@ -1918,8 +1981,8 @@ PROTECTED_KEY = re.compile(r"(?i)^(?:pipeline\..+|core\.hookspath|include\..+|in
                            r"url\..+\.(?:push)?insteadof|remote\..+\.(?:url|pushurl|fetch|mirror))$")
 PROTECTED_SECTION = re.compile(r"(?i)^(?:pipeline|core|include|includeif(?:\..+)?|url\..+|remote\..+)$")
 PROTECTED_CONFIG_VALUE = re.compile(r"(?i)pipeline\.|hookspath|insteadof|pushurl|include|remote\.[^\s=]*\.(?:url|fetch)")
-CONFIG_READS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--get-color", "--get-colorbool", "-l",
-                "--list"}
+CONFIG_VALUE_OPTIONS = {"-f", "--file", "--blob", "--type", "--default", "--comment", "--value", "--url"}
+CONFIG_READ_SUBCOMMANDS = {"get", "list", "get-color", "get-colorbool"}
 CONFIG_WRITE_FLAGS = {"--unset", "--unset-all", "--add", "--replace-all"}
 CONFIG_SECTION_EDITS = {"--remove-section", "--rename-section", "remove-section", "rename-section"}
 REMOTE_REF_FILES = re.compile(r"(?i)\.git[\\/]+(?:refs[\\/]+remotes(?![\w.-])|packed-refs(?![\w.-]))")
@@ -2036,24 +2099,35 @@ def skips_hooks(op, tokens):
     return False
 
 
+def config_arguments(texts):
+    options, index = [], 0
+    while index < len(texts):
+        text = texts[index]
+        if text == "--":
+            index += 1
+            break
+        if not text.startswith("-") or text == "-":
+            break
+        options.append(text.split("=", 1)[0])
+        index += 2 if text in CONFIG_VALUE_OPTIONS else 1
+    return set(options), texts[index:]
+
+
 def config_writes_protected(tokens):
-    texts = [text for text, _ in tokens]
-    words = [text for text in texts if not text.startswith("-")]
-    if set(texts) & CONFIG_READS or words[:1] in (["get"], ["list"]):
+    options, words = config_arguments([text for text, _ in tokens])
+    first = words[0] if words else ""
+    if options & {"-e", "--edit"} or first == "edit":
+        return True
+    if first in CONFIG_READ_SUBCOMMANDS:
         return False
-    if set(texts) & {"-e", "--edit"} or words[:1] == ["edit"]:
-        return True
-    if set(texts) & CONFIG_SECTION_EDITS and any(PROTECTED_SECTION.match(word) for word in words):
-        return True
-    writes = bool(set(texts) & CONFIG_WRITE_FLAGS) or words[:1] in (["set"], ["unset"])
-    for index, text in enumerate(texts):
-        key, equals, _ = text.partition("=")
-        if not PROTECTED_KEY.match(key):
-            continue
-        valued = equals or any(not later.startswith("-") for later in texts[index + 1:])
-        if writes or valued:
-            return True
-    return False
+    if options & CONFIG_SECTION_EDITS or first in CONFIG_SECTION_EDITS:
+        return any(PROTECTED_SECTION.match(word) for word in words)
+    if first in ("set", "unset"):
+        return any(PROTECTED_KEY.match(word.partition("=")[0]) for word in words[1:])
+    key, equals, _ = first.partition("=")
+    if not PROTECTED_KEY.match(key):
+        return False
+    return bool(equals) or len(words) > 1 or bool(options & CONFIG_WRITE_FLAGS)
 
 
 def writes_path(command, powershell, pattern):
