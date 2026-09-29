@@ -1516,6 +1516,10 @@ GLOB_CHARS = re.compile(r"[*?\[]")
 REDIRECT_TOKEN = re.compile(r"^\d*>>?\|?")
 HARMLESS_TARGET = re.compile(r"(?i)^(?:&\d|/dev/null|\$null|nul)$")
 VARIABLE_MARK = re.compile(r"\$|`")
+UNRESOLVED_REACH = "unresolved"
+UNRESOLVED_HINT = (" The path goes through a variable or $(...) this check cannot resolve, so it may end under "
+                   ".git/hooks, the core.hooksPath folder or .git/config: write the literal path instead "
+                   "(rm -rf build/tmp, not rm -rf \"$dir\"/tmp or rm -rf $(pwd)/tmp).")
 GENERIC_PROTECTED = (([".git", "hooks"], "hooks"), ([".git", "config"], "config"),
                      ([".git", "config.worktree"], "config"))
 HOOK_CANDIDATES = ("pre-commit", "pre-push", "pre-commit.pipeline-chained")
@@ -1722,6 +1726,8 @@ def unresolved_tail_reaches(text, state, powershell):
     if not marks:
         return False
     pieces = re.split(r"[\\/]", text[marks[-1]:], maxsplit=1)
+    if len(pieces) == 2 and ".." in re.split(r"[\\/]", pieces[1]):
+        return True
     tail = lexical_parts(pieces[1]) if len(pieces) == 2 else []
     if not tail or (len(tail) == 1 and any(part_matches(name, tail[0], powershell) for name in HOOK_CANDIDATES)):
         return True
@@ -1735,6 +1741,15 @@ def unresolved_tail_reaches(text, state, powershell):
     return False
 
 
+def first_reach(tokens, state, powershell, variable_rule):
+    return next((reach for reach in (reaches_hooks(token, state, powershell, variable_rule) for token in tokens)
+                 if reach), False)
+
+
+def reach_reason(reach, reason):
+    return reason + UNRESOLVED_HINT if reach == UNRESOLVED_REACH else reason
+
+
 def reaches_hooks(token, state, powershell, variable_rule):
     text, literal = token
     if text.startswith("-"):
@@ -1743,7 +1758,8 @@ def reaches_hooks(token, state, powershell, variable_rule):
         return True
     parts = resolved_parts(token, state, powershell)
     if parts is None:
-        return variable_rule and not literal and unresolved_tail_reaches(text, state, powershell)
+        unresolved = variable_rule and not literal and unresolved_tail_reaches(text, state, powershell)
+        return UNRESOLVED_REACH if unresolved else False
     return any(parts_cover(target, parts, powershell, inside=kind == "hooks")
                for target, kind in protected_git_dirs(state) if kind != "gitdir")
 
@@ -1932,19 +1948,29 @@ def tampers_with_hooks(command, powershell, state):
             if find_reaches_git(targets, state, powershell):
                 return FIND_DENY
             action = find_write_action([text for text, _ in targets])
-            if (action is not None and targets[action][0] != "-delete"
-                    and any(reaches_hooks(token, state, powershell, True) for token in targets[action:])):
-                return FIND_DENY
+            reach = (first_reach(targets[action:], state, powershell, True)
+                     if action is not None and targets[action][0] != "-delete" else False)
+            if reach:
+                return reach_reason(reach, FIND_DENY)
+            for index, _, args, _ in find_writing_actions([text for text, _ in targets]):
+                shell = program(args[0]) if args else ""
+                if shell in SHELLS or shell in POWERSHELLS:
+                    inner_powershell = shell in POWERSHELLS
+                    script = inline_script(targets[index + 2:index + 1 + len(args)],
+                                           {"-c", "-command"} if inner_powershell else {"-c"})
+                    reason = script and tampers_with_hooks(script, inner_powershell,
+                                                           dict(state, variables=dict(state["variables"])))
+                    if reason:
+                        return reason
         command_writes = name not in FILE_READERS and name not in ("git", "find")
         if not (redirected or command_writes):
             continue
         if state["in_git"]:
             return HOOKS_DENY
-        if any(reaches_hooks(token, state, powershell, True) for token in redirected):
-            return HOOKS_DENY
-        if command_writes and any(reaches_hooks(token, state, powershell, name in DELETE_WRITE_PROGRAMS)
-                                  for token in targets):
-            return HOOKS_DENY
+        reach = (first_reach(redirected, state, powershell, True)
+                 or (command_writes and first_reach(targets, state, powershell, name in DELETE_WRITE_PROGRAMS)))
+        if reach:
+            return reach_reason(reach, HOOKS_DENY)
     return None
 
 
@@ -1977,14 +2003,18 @@ REMOTE_REF_REDIRECT = re.compile(r"(?i)>\s*[\"']?[^\s;|&]*(?:refs[\\/]+remotes[\
 
 REF_VALUE_OPTIONS = {"-m"}
 FETCH_OPS = {"fetch", "pull"}
-PROTECTED_KEY = re.compile(r"(?i)^(?:pipeline\..+|core\.hookspath|include\..+|includeif\..+|"
+PROTECTED_KEY = re.compile(r"(?i)^(?:pipeline\..+|core\.hookspath|core\.worktree|include\..+|includeif\..+|"
                            r"url\..+\.(?:push)?insteadof|remote\..+\.(?:url|pushurl|fetch|mirror))$")
-PROTECTED_SECTION = re.compile(r"(?i)^(?:pipeline|core|include|includeif(?:\..+)?|url\..+|remote\..+)$")
+PROTECTED_SECTION = re.compile(r"(?i)^(?:pipeline|core|include|includeif(?:\..+)?|url(?:\..+)?|remote(?:\..+)?)$")
 PROTECTED_CONFIG_VALUE = re.compile(r"(?i)pipeline\.|hookspath|insteadof|pushurl|include|remote\.[^\s=]*\.(?:url|fetch)")
-CONFIG_VALUE_OPTIONS = {"-f", "--file", "--blob", "--type", "--default", "--comment", "--value", "--url"}
-CONFIG_READ_SUBCOMMANDS = {"get", "list", "get-color", "get-colorbool"}
-CONFIG_WRITE_FLAGS = {"--unset", "--unset-all", "--add", "--replace-all"}
-CONFIG_SECTION_EDITS = {"--remove-section", "--rename-section", "remove-section", "rename-section"}
+CONFIG_READ_FLAGS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "-l", "--list", "--show-origin",
+                     "--show-scope", "--name-only", "-z", "--null", "--includes", "--no-includes", "--global",
+                     "--system", "--local", "--worktree", "--bool", "--int", "--bool-or-int", "--path",
+                     "--expiry-date", "--all", "--regexp", "--fixed-value"}
+CONFIG_READ_VALUE_FLAGS = {"--type", "-t", "--default", "--file", "-f", "--blob", "--value"}
+CONFIG_READ_ATTACHED = ("--type=", "--default=", "--file=", "--blob=", "--value=")
+CONFIG_GET_FLAGS = {"--get", "--get-all", "--get-regexp"}
+CONFIG_READ_SUBCOMMANDS = {"get", "list"}
 REMOTE_REF_FILES = re.compile(r"(?i)\.git[\\/]+(?:refs[\\/]+remotes(?![\w.-])|packed-refs(?![\w.-]))")
 GIT_INTERNALS = re.compile(r"(?i)\.git[\\/]+(?:hooks(?![\w.-])|config(?:\.worktree)?(?![\w.-])|"
                            r"worktrees[\\/]+[^\\/\s]+[\\/]+config\.worktree(?![\w.-]))")
@@ -2099,35 +2129,80 @@ def skips_hooks(op, tokens):
     return False
 
 
-def config_arguments(texts):
-    options, index = [], 0
+def config_read_option(texts, index):
+    text = texts[index]
+    if text in CONFIG_READ_FLAGS or text.startswith(CONFIG_READ_ATTACHED):
+        return 1
+    if text in CONFIG_READ_VALUE_FLAGS:
+        return 2 if index + 1 < len(texts) else 0
+    return 1 if text[:2] in ("-t", "-f") and len(text) > 2 else 0
+
+
+def is_edit_option(text):
+    if text.startswith("--"):
+        name = text.split("=", 1)[0]
+        return len(name) >= 3 and "--edit".startswith(name)
+    if not text.startswith("-"):
+        return False
+    for letter in text[1:]:
+        if letter == "e":
+            return True
+        if letter in "tf":
+            return False
+    return False
+
+
+def mentions_protected(text):
+    return any(PROTECTED_KEY.match(part) or PROTECTED_SECTION.match(part) for part in [text, *text.split("=", 1)])
+
+
+def config_first_word(texts):
+    index = 0
     while index < len(texts):
         text = texts[index]
         if text == "--":
-            index += 1
-            break
+            return texts[index + 1] if index + 1 < len(texts) else ""
         if not text.startswith("-") or text == "-":
-            break
-        options.append(text.split("=", 1)[0])
-        index += 2 if text in CONFIG_VALUE_OPTIONS else 1
-    return set(options), texts[index:]
+            return text
+        index += 2 if text in CONFIG_READ_VALUE_FLAGS else 1
+    return ""
+
+
+def config_is_plain_read(texts):
+    words, reads_value, subcommand, stopped, index = [], False, None, False, 0
+    while index < len(texts):
+        text = texts[index]
+        if stopped:
+            words.append(text)
+        elif text == "--":
+            stopped = True
+        elif text.startswith("-") and text != "-":
+            consumed = config_read_option(texts, index)
+            if not consumed:
+                return False
+            reads_value = reads_value or text in CONFIG_GET_FLAGS
+            index += consumed
+            continue
+        elif subcommand is None and not words and text in CONFIG_READ_SUBCOMMANDS:
+            subcommand = text
+            reads_value = reads_value or text == "get"
+        else:
+            words.append(text)
+            stopped = subcommand is None
+        index += 1
+    if words and "=" in words[0]:
+        return False
+    return len(words) <= (2 if reads_value else 1)
 
 
 def config_writes_protected(tokens):
-    options, words = config_arguments([text for text, _ in tokens])
-    first = words[0] if words else ""
-    if options & {"-e", "--edit"} or first == "edit":
+    texts = [text for text, _ in tokens]
+    options = texts[:texts.index("--")] if "--" in texts else texts
+    if any(is_edit_option(text) for text in options) or config_first_word(texts) == "edit":
         return True
-    if first in CONFIG_READ_SUBCOMMANDS:
+    if not any(mentions_protected(text) for text in texts):
         return False
-    if options & CONFIG_SECTION_EDITS or first in CONFIG_SECTION_EDITS:
-        return any(PROTECTED_SECTION.match(word) for word in words)
-    if first in ("set", "unset"):
-        return any(PROTECTED_KEY.match(word.partition("=")[0]) for word in words[1:])
-    key, equals, _ = first.partition("=")
-    if not PROTECTED_KEY.match(key):
-        return False
-    return bool(equals) or len(words) > 1 or bool(options & CONFIG_WRITE_FLAGS)
+    return not config_is_plain_read(texts)
 
 
 def writes_path(command, powershell, pattern):

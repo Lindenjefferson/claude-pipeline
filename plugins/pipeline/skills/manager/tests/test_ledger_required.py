@@ -168,4 +168,21 @@ commit({"app/view.tsx": "export const v = 2"}, "ui change")
 check("design is STALE for a later change to a UI path", stale_agents() == {"code-review", "design"},
       stale_agents())
 
+for number, path in enumerate(("package.json", "web/package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb",
+                                "requirements-dev.txt", "api/pyproject.toml", "poetry.lock", "Cargo.toml",
+                                "Cargo.lock", "go.mod", "go.sum", ".github/workflows/ci.yml", "vercel.json",
+                                "netlify.toml", "Dockerfile", "docker-compose.prod.yml", "next.config.mjs",
+                                "supabase/config.toml"), start=100):
+    head = sh("git", "rev-parse", "HEAD")
+    tip = commit({path: f"x{number}"}, f"manifest {path}")
+    append(reviewer("code-review"), head, tip, str(number))
+    append(reviewer("qa"), head, tip, str(number))
+    check(f"{path} requires security", "security" in missing(status(), str(number)), status()["missing_reviewers"])
+head = sh("git", "rev-parse", "HEAD")
+tip = commit({"lib/other.json": "{}"}, "plain json")
+append(reviewer("code-review"), head, tip, "130")
+append(reviewer("qa"), head, tip, "130")
+check("a plain json file does not require security", "security" not in missing(status(), "130"),
+      status()["missing_reviewers"])
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
