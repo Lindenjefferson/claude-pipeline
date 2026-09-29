@@ -1517,11 +1517,14 @@ REDIRECT_TOKEN = re.compile(r"^\d*>>?\|?")
 HARMLESS_TARGET = re.compile(r"(?i)^(?:&\d|/dev/null|\$null|nul)$")
 VARIABLE_MARK = re.compile(r"\$|`")
 UNRESOLVED_REACH = "unresolved"
-GIT_SOURCE_HINT = re.compile(r"(?i)--(?:absolute-)?git-(?:dir|path|common-dir)|(?<![\w.-])\.git(?![\w-])"
-                             r"|(?<![\w.-])hooks(?![\w.-])|hookspath")
+GIT_SOURCE_HINT = re.compile(r"(?i)--(?:absolute-)?git-(?:dir|path|common-dir)|(?<![\w.-])\.git(?![\w-])|hookspath")
 GIT_LOCATION_VARS = {"GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE"}
 VARIABLE_SOURCE = re.compile(r"(?i)\$(\{)?(?:env:)?([A-Za-z_]\w*|\d)?([^}]*\})?")
-POWERSHELL_ASSIGNMENT = re.compile(r"(?is)^\$(?:env:)?([A-Za-z_]\w*)\s*=\s*(?:\$?\(|@\(|&)?(.*)$")
+POWERSHELL_ASSIGNMENT = re.compile(r"(?is)^(?:\[[^\]]*\]\s*)*\$(env:)?([A-Za-z_]\w*)\s*=\s*(.*)$")
+POWERSHELL_LITERAL = re.compile(r"""^(?:'([^']*)'|"([^"$`]*)")$""")
+POWERSHELL_BLOCK_OPEN = re.compile(r"(?<!\$)\{")
+BASH_RESERVED = {"if", "then", "elif", "else", "while", "until", "do", "!", "{"}
+PARENT_PROGRAMS = {"dirname", "split-path"}
 BASH_DECLARERS = ("export", "declare", "typeset", "local", "readonly")
 POWERSHELL_BLOCK_KEYWORDS = {"if", "elseif", "while", "foreach", "for", "switch", "until", "catch", "function",
                              "filter", "param", "trap", "do"}
@@ -1530,6 +1533,7 @@ GENERIC_PROTECTED = (([".git", "hooks"], "hooks"), ([".git", "config"], "config"
 HOOK_CANDIDATES = ("pre-commit", "pre-push", "pre-commit.pipeline-chained")
 SUBSTITUTION_MARK = "$__substitution__"
 GIT_SUBSTITUTION_MARK = "$__git_substitution__"
+GIT_PARENT_MARK = "$__git_parent_substitution__"
 COPY_PROGRAMS = {"cp", "copy", "copy-item", "cpi", "rsync", "xcopy"}
 MOVE_PROGRAMS = {"mv", "move", "move-item", "mi"}
 PS_COPY_VALUE_PARAMS = ("-path", "-literalpath", "-pspath", "-filter", "-include", "-exclude", "-credential",
@@ -1686,9 +1690,9 @@ def segment_targets(tokens):
 
 def strip_prefix(tokens, powershell, variables):
     while tokens and (tokens[0][0].lower() in WRAPPERS
-                      or (not powershell and ASSIGNMENT.match(tokens[0][0]))):
+                      or (not powershell and (ASSIGNMENT.match(tokens[0][0]) or tokens[0][0] in BASH_RESERVED))):
         key, _, value = tokens[0][0].partition("=")
-        if ASSIGNMENT.match(tokens[0][0]):
+        if not powershell and ASSIGNMENT.match(tokens[0][0]):
             variables[key] = value
         tokens = tokens[1:]
     if tokens and not powershell and tokens[0][0] in ("export", "declare", "typeset", "local", "readonly"):
@@ -1703,8 +1707,8 @@ def substitute(token, variables, powershell):
     text, literal = token
     if literal or not variables:
         return token
-    pattern = r"(?i)\$\{?([A-Za-z_]\w*)\}?" if powershell else r"\$\{?([A-Za-z_]\w*)\}?"
-    return re.sub(pattern, lambda m: variables.get(m.group(1), m.group(0)), text), literal
+    key = str.lower if powershell else str
+    return re.sub(r"\$\{?([A-Za-z_]\w*)\}?", lambda m: variables.get(key(m.group(1)), m.group(0)), text), literal
 
 
 def protected_git_dirs(state):
@@ -1734,32 +1738,53 @@ def points_at_git_value(value, state):
     return any(name.upper() in GIT_LOCATION_VARS or name.lower() in state["git_vars"] for name in names)
 
 
-def reference_points_at_git(token, state):
+def cd_target_in_git(token, state):
     text, literal = token
-    return not literal and any(points_at_git(text[mark.start():], state) for mark in VARIABLE_MARK.finditer(text))
+    return not literal and any(points_at_git(text[mark.start():], state, entering=True)
+                               and not climbs_out(reference_tail(text, mark))
+                               for mark in VARIABLE_MARK.finditer(text))
 
 
-def points_at_git(reference, state):
-    if reference.startswith((GIT_SUBSTITUTION_MARK, SUBSTITUTION_MARK)):
-        return reference.startswith(GIT_SUBSTITUTION_MARK)
+def points_at_git(reference, state, entering=False):
+    if reference.startswith((GIT_SUBSTITUTION_MARK, GIT_PARENT_MARK, SUBSTITUTION_MARK)):
+        return (reference.startswith(GIT_SUBSTITUTION_MARK)
+                or (not entering and reference.startswith(GIT_PARENT_MARK)))
     if reference.startswith("`"):
         return bool(GIT_SOURCE_HINT.search(reference))
     match = VARIABLE_SOURCE.match(reference)
     name = (match.group(2) or "") if match else ""
-    return (name.upper() in GIT_LOCATION_VARS or name.lower() in state["git_vars"]
+    locations = GIT_LOCATION_VARS - {"GIT_WORK_TREE"} if entering else GIT_LOCATION_VARS
+    return (name.upper() in locations or name.lower() in state["git_vars"]
             or bool(match and match.group(3) and GIT_SOURCE_HINT.search(match.group(3))))
+
+
+def reference_tail(text, mark):
+    pieces = re.split(r"[\\/]", text[mark.end():], maxsplit=1)
+    return pieces[1] if len(pieces) == 2 else ""
+
+
+def climbs_out(tail):
+    depth = 0
+    for part in re.split(r"[\\/]", tail):
+        depth += -1 if part == ".." else 0 if part in ("", ".") else 1
+        if depth < 0:
+            return True
+    return False
 
 
 def unresolved_tail_reaches(text, state, powershell):
     marks = list(VARIABLE_MARK.finditer(text))
-    if not marks:
-        return False
-    pieces = re.split(r"[\\/]", text[marks[-1].end():], maxsplit=1)
-    if len(pieces) == 2 and ".." in re.split(r"[\\/]", pieces[1]):
+    return any(tail_reaches(reference_tail(text, mark), text[mark.start():], state, powershell)
+               for index, mark in enumerate(marks)
+               if index == len(marks) - 1 or points_at_git(text[mark.start():], state))
+
+
+def tail_reaches(rest, reference, state, powershell):
+    if ".." in re.split(r"[\\/]", rest):
         return True
-    tail = lexical_parts(pieces[1]) if len(pieces) == 2 else []
+    tail = ["*" if VARIABLE_MARK.search(part) else part for part in lexical_parts(rest)]
     if not tail or (len(tail) == 1 and any(part_matches(name, tail[0], powershell) for name in HOOK_CANDIDATES)):
-        return points_at_git(text[marks[-1].start():], state)
+        return points_at_git(reference, state)
     targets = list(GENERIC_PROTECTED) + [item for item in protected_git_dirs(state) if item[1] != "gitdir"]
     for target, kind in targets:
         for size in range(1, min(len(tail), len(target)) + 1):
@@ -1916,7 +1941,10 @@ def find_excludes(expression, candidates, tests_apply):
 
 
 def substitution_mark(script):
-    return GIT_SUBSTITUTION_MARK if GIT_SOURCE_HINT.search(script) else SUBSTITUTION_MARK
+    if not GIT_SOURCE_HINT.search(script):
+        return SUBSTITUTION_MARK
+    words = script.split()
+    return GIT_PARENT_MARK if words and program(words[0]) in PARENT_PROGRAMS else GIT_SUBSTITUTION_MARK
 
 
 def closing_paren(command, start):
@@ -1972,7 +2000,7 @@ def command_substitutions(command, powershell):
             script = command[index + 1:end - 1 if closed else end]
             if GIT_SOURCE_HINT.search(script):
                 inner.append(script)
-                collapsed.append(GIT_SUBSTITUTION_MARK)
+                collapsed.append(substitution_mark(script))
                 index = end
                 continue
         collapsed.append(char)
@@ -2003,11 +2031,22 @@ def split_statements(command, powershell):
     return [statement.strip() for statement in statements if statement.strip()]
 
 
+def powershell_assignments(statement):
+    assignments = []
+    for start in [0] + [match.end() for match in POWERSHELL_BLOCK_OPEN.finditer(statement)]:
+        match = POWERSHELL_ASSIGNMENT.match(statement[start:].strip())
+        if match:
+            env, name, value = match.groups()
+            assignments.append((name, value.rstrip().rstrip("}").rstrip() if start else value, bool(env)))
+    return assignments
+
+
 def statement_assignments(statement, powershell):
     if powershell:
-        match = POWERSHELL_ASSIGNMENT.match(statement)
-        return [match.groups()] if match else []
+        return [(name, value) for name, value, _ in powershell_assignments(statement)]
     tokens = tokenize(statement.lstrip("({ \t"), powershell)
+    while tokens and tokens[0][0] in BASH_RESERVED:
+        tokens = tokens[1:]
     if tokens and tokens[0][0] in BASH_DECLARERS:
         tokens = [token for token in tokens[1:] if not token[0].startswith("-")]
     assignments = []
@@ -2022,6 +2061,13 @@ def track_git_vars(statement, powershell, state):
     for name, value in statement_assignments(statement, powershell):
         if points_at_git_value(value, state):
             state["git_vars"].add(name.lower())
+    if powershell:
+        for name, value, env in powershell_assignments(statement):
+            literal = None if env else POWERSHELL_LITERAL.match(value.strip())
+            if literal:
+                state["variables"][name.lower()] = next(group for group in literal.groups() if group is not None)
+            elif not env:
+                state["variables"].pop(name.lower(), None)
 
 
 def tampers_with_hooks(command, powershell, state):
@@ -2060,7 +2106,7 @@ def segments_tamper(command, powershell, state):
             paths = [token for token in targets if not token[0].startswith("-")]
             if paths:
                 state["in_git"] = (state["in_git"] or enters_git_dir(paths[0], state, powershell)
-                                   or reference_points_at_git(paths[0], state))
+                                   or cd_target_in_git(paths[0], state))
                 state["cwd"] = (resolve_path(paths[0][0], paths[0][1], state["cwd"], powershell)
                                 if state["cwd"] is not None else None)
             continue

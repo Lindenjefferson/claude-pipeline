@@ -85,6 +85,37 @@ for command in ('$f = New-TemporaryFile; "x" | Out-File $f; Remove-Item $f', '"a
                 "if (Test-Path x.log) { Remove-Item x.log }"):
     expect(command, "ALLOW", tool="PowerShell")
 
+for command in ('h=$(git rev-parse --git-path hooks); if [ -d "$h" ]; then rm -rf "$h"; fi',
+                "if true; then rm -rf $(git rev-parse --git-path hooks); fi",
+                'd=$(git rev-parse --git-dir); for h in pre-push pre-commit; do rm -f "$d/hooks/$h"; done',
+                'if true; then cd "$(git rev-parse --git-dir)"; fi; rm -f hooks/pre-push',
+                'd=$(git rev-parse --git-dir); ! rm -rf "$d"', 'if true; then rm -rf "$UNDEF/hooks"; fi',
+                'if true; then d=$(git rev-parse --git-dir); fi; rm -rf "$d"',
+                'while true; do rm -rf "$(git rev-parse --git-dir)"; done',
+                'until false; do rm -rf "$GIT_DIR"; done', '{ rm -rf "$GIT_DIR"; }',
+                'if false; then :; else rm -rf "$GIT_DIR"; fi', 'if false; then :; elif rm -rf "$GIT_DIR"; then :; fi'):
+    expect(command, "DENY")
+for command in ('rm -rf "$(dirname "$(git rev-parse --git-path hooks/pre-push)")"',
+                'd=$(git rev-parse --git-dir); rm -f "$d/$f"', 'cd "$(git rev-parse --git-dir)/hooks/.." && rm -f config'):
+    expect(command, "DENY")
+for command in ("if ($true) { $d = git rev-parse --git-dir }; Remove-Item -Recurse $d",
+                '$dir = ".git/hooks"; Remove-Item -Recurse $dir',
+                "[string]$d = git rev-parse --git-dir; Remove-Item -Recurse $d"):
+    expect(command, "DENY", tool="PowerShell")
+for command in ('if [ -f "$f" ]; then rm -f "$f"; fi', 'for f in *.bak; do rm -f "$f"; done',
+                'cd "$(git rev-parse --git-common-dir)/.." && npm run build > out.log',
+                'cd "$(git rev-parse --git-dir)/.." && rm -rf dist', 'cd "$GIT_WORK_TREE" && rm -rf dist',
+                'd=$(realpath src/hooks); cd "$d" && rm -f useOld.ts',
+                'cd "$(dirname src/hooks/useX.ts)" && rm -f useOld.ts', "rm -f $(ls src/hooks/*.bak)",
+                'cd "$(dirname "$(git rev-parse --git-dir)")" && rm -rf dist'):
+    expect(command, "ALLOW")
+for command in ("Set-Location (Split-Path (git rev-parse --git-common-dir)); Remove-Item dist -Recurse",
+                r"Remove-Item (Get-ChildItem src\hooks\*.bak)",
+                "$f = (Get-ChildItem src/hooks -Filter *.bak); Remove-Item $f",
+                r"$d = (Resolve-Path src\hooks); Set-Location $d; Remove-Item useOld.ts",
+                "Remove-Item (Join-Path src hooks useX.ts)", '$dir = "src/hooks"; Remove-Item -Recurse $dir'):
+    expect(command, "ALLOW", tool="PowerShell")
+
 got, reason, _ = hook_run("rm -rf $(git rev-parse --git-path hooks)")
 check("the unresolved deny names the hooks dir, not --no-verify",
       got == "DENY" and "--no-verify" not in reason and "rewire" not in reason
