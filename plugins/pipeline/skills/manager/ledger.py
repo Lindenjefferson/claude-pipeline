@@ -182,7 +182,7 @@ def item_paths(body):
     before, colon, after = body.partition(":")
     if colon and before.strip(" *").lower() in ITEM_LABELS and after.split():
         body = after
-    return unticked_paths(body.split())
+    return unticked_paths(re.sub(r",(?=\S)", ", ", body).split())
 
 
 def unticked_paths(words):
@@ -190,7 +190,7 @@ def unticked_paths(words):
     while index < len(words):
         word = words[index]
         path = word.rstrip(",;:")
-        if paths and "/" not in path and "." not in path:
+        if paths and ("/" not in path and "." not in path or path.endswith(".")):
             break
         if path:
             paths.append(path)

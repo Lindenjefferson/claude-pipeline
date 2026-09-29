@@ -201,7 +201,9 @@ for item, expected in (("- `app/page.tsx`: now calls `lib/format.ts`", {"app/pag
                        ("- Create: src/q.ts, src/r.ts", {"src/q.ts", "src/r.ts"}),
                        ("- Modify: src/s.ts, lib/t.ts and README.md: renamed", {"src/s.ts", "lib/t.ts", "README.md"}),
                        ("- src/u.ts, then run tests", {"src/u.ts"}),
-                       ("- Makefile, src/v.ts: targets", {"Makefile", "src/v.ts"})):
+                       ("- Makefile, src/v.ts: targets", {"Makefile", "src/v.ts"}),
+                       ("- Create: app/a.ts,app/b.ts", {"app/a.ts", "app/b.ts"}),
+                       ("- src/w.ts, e.g. a helper", {"src/w.ts"})):
     found = cited_paths(f"Files:\n{item}\n", files_section_only=True)
     check(f"a Files item yields its leading paths: {item}", found == expected, str(found))
 r = append(DEV, report("multi.md", f"Committed {c1[:8]}.\n\nFiles changed:\n- `src/a.py`, `README.md`\n\n{PAD}\n{DEV}\n"))

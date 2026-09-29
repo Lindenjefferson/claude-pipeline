@@ -355,7 +355,7 @@ def warn_new_allowlist_entries(cwd, local_sha, remote_sha):
             known |= load_allowlist(cwd, ref)
         note = " (new remote branch; compared with the remote-tracking branches)"
     elif git(["cat-file", "-e", f"{remote_sha}^{{commit}}"], cwd)[0] != 0:
-        note = " (remote state unknown; listing all entries in pushed commits)"
+        note = " (remote state unknown; listing every entry in the pushed allowlist)"
     else:
         known = load_allowlist(cwd, remote_sha)
     new = [line for entry, line in pushed.items() if entry not in known]
