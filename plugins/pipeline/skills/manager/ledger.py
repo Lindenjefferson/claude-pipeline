@@ -63,6 +63,13 @@ REQUIRED_RULES = [
     (["**/*.sql", "**/migrations/**"], {"db", "security"}),
     (["**/env.ts", ".env*", "**/.env*", "**/*permiss*", "**/*permiss*/**", "**/navegacao*", "**/navegacao*/**"],
      {"security"}),
+    (["**/package.json", "**/package-lock.json", "**/npm-shrinkwrap.json", "**/pnpm-lock.yaml", "**/yarn.lock",
+      "**/bun.lockb", "**/bun.lock", "**/requirements*.txt", "**/pyproject.toml", "**/poetry.lock",
+      "**/Cargo.toml", "**/Cargo.lock", "**/go.mod", "**/go.sum", ".github/workflows/**", "**/vercel.json",
+      "**/netlify.toml", "**/Dockerfile", "**/Dockerfile.*", "**/*.Dockerfile", "**/docker-compose*.yml",
+      "**/docker-compose*.yaml", "**/compose.yml", "**/compose.yaml", "**/next.config.*",
+      "**/supabase/config.toml"],
+     {"security"}),
     (["**/actions.ts", "**/actions/**", "**/*actions*.ts"], {"audit"}),
     (["**/*.tsx", "components/**"], {"design"}),
 ]
