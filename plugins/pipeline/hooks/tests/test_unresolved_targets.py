@@ -104,10 +104,10 @@ for command in ("if ($true) { $d = git rev-parse --git-dir }; Remove-Item -Recur
     expect(command, "DENY", tool="PowerShell")
 for command in ('if [ -f "$f" ]; then rm -f "$f"; fi', 'for f in *.bak; do rm -f "$f"; done',
                 'cd "$(git rev-parse --git-common-dir)/.." && npm run build > out.log',
-                'cd "$(git rev-parse --git-dir)/.." && rm -rf dist', 'cd "$GIT_WORK_TREE" && rm -rf dist',
+                'cd "$(git rev-parse --git-common-dir)/.." && rm -rf dist', 'cd "$GIT_WORK_TREE" && rm -rf dist',
                 'd=$(realpath src/hooks); cd "$d" && rm -f useOld.ts',
                 'cd "$(dirname src/hooks/useX.ts)" && rm -f useOld.ts', "rm -f $(ls src/hooks/*.bak)",
-                'cd "$(dirname "$(git rev-parse --git-dir)")" && rm -rf dist'):
+                'cd "$(dirname "$(git rev-parse --git-common-dir)")" && rm -rf dist'):
     expect(command, "ALLOW")
 for command in ("Set-Location (Split-Path (git rev-parse --git-common-dir)); Remove-Item dist -Recurse",
                 r"Remove-Item (Get-ChildItem src\hooks\*.bak)",

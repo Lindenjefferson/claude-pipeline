@@ -106,9 +106,9 @@ for command in ("Set-Location (Split-Path (git rev-parse --git-path hooks/pre-pu
                 "$global:d = git rev-parse --git-dir; Remove-Item -Recurse $d"):
     expect(command, "DENY", tool="PowerShell")
 
-for command in ('cd "$(dirname "$(git rev-parse --git-dir)")" && rm -rf dist',
+for command in ('cd "$(dirname "$(git rev-parse --git-common-dir)")" && rm -rf dist',
                 'root=$(dirname "$(git rev-parse --git-common-dir)"); cd "$root" && rm -rf dist',
-                'd=$(git rev-parse --git-dir); cd "$d/.." && rm -rf dist',
+                'd=$(git rev-parse --git-common-dir); cd "$d/.." && rm -rf dist',
                 'for f in *.bak; do rm -f "$f"; done', 'for f in a b; do echo "$f" > out.log; done'):
     expect(command, "ALLOW")
 for command in ("Set-Location (Split-Path (git rev-parse --git-common-dir)); Remove-Item dist -Recurse",
