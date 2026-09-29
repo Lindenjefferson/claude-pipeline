@@ -1,7 +1,6 @@
 ---
 stack: auth
 paths: ["**/*auth*", "**/*auth*/**", "**/*login*", "**/*login*/**", "**/*signup*", "**/*signup*/**", "**/*password*", "**/*password*/**", "**/*session*", "**/*invite*", "**/*invite*/**", "**/*convite*", "**/*convite*/**", "**/*convid*", "**/*convid*/**", "**/*cadastro*", "**/*cadastro*/**", "**/*reset*", "**/*reset*/**", "**/*senha*", "**/*senha*/**", "proxy.ts", "middleware.ts", "supabase/config.toml"]
-agents: [security, code-review, audit]
 ---
 
 # Auth checklist

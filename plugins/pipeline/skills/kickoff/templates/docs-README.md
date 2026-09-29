@@ -6,12 +6,13 @@ Esta pasta é a documentação viva do código: registra **o que existe e por qu
 
 | Doc | Módulo |
 |---|---|
-| _(criado pelo agente `docs` quando a spec existir)_ | — |
+| _(criado pelo agente `dev` na primeira tarefa do módulo)_ | — |
 
 ## Outras pastas
 
 - [`discovery/`](discovery/) — achados estruturados das fontes brutas (gerados pelo agente `discovery`).
-- [`quality-reports/`](quality-reports/) — um relatório por entrega aprovada e `history.jsonl` com as notas (gerados pelo `gate`).
+- [`quality-reports/`](quality-reports/) — um relatório por entrega aprovada (gerado pelo `gate`).
+- `lessons.md` — regras curtas aprendidas com erros das entregas; o `dev` e o `reviewer` leem antes de cada tarefa.
 
 ## Diferença em relação à especificação
 
