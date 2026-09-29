@@ -37,6 +37,8 @@ If `graphify-out/graph.json` exists, orient with `python -m graphify query "<que
 - **NEEDS_CONTEXT** — state exactly what is missing (e.g. the intended behavior is not derivable from the code).
 - **BLOCKED** — state why.
 
+The manager's ledger rejects a placeholder report: DONE / DONE_WITH_CONCERNS needs at least 200 non-space characters besides the `LEDGER` line; NO_DOC_CHANGE_NEEDED / NEEDS_CONTEXT / BLOCKED need the `LEDGER` line and a concrete reason of at least 40 non-space characters (never just "placeholder" or "TODO").
+
 ## Delivery ledger
 The `manager` may pass a ledger path (`.superpowers/ledger.jsonl`). Read it, never write it: it shows which agents already ran on this delivery and which findings are still open. End your report with one last line, exactly this shape, with your report's verdict:
 `LEDGER {"agent":"docs","verdict":"DONE"}`

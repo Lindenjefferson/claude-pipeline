@@ -85,4 +85,60 @@ r = lesson("--lessons", custom, "list", "--json")
 check("--lessons points at another file; a missing file lists nothing", r.returncode == 0 and json.loads(r.stdout) == [],
       r.stderr)
 
+r = add("stackless", stack="postgres")
+check("lesson add refuses a stack with no lessons file", r.returncode != 0 and "postgres-supabase" in r.stderr, r.stderr)
+r = add("pg-rls-assert-row-count")
+check("lesson add refuses an id that already exists globally", r.returncode != 0 and "already exists" in r.stderr, r.stderr)
+r = lesson("--lessons-dir", GLOBAL_DIR, "add", "--id", "custom-stack", "--stack", "general", "--text", "x",
+           "--task", "T1", "--agent", "qa", "--finding", "f")
+check("lesson add takes its stacks from --lessons-dir", r.returncode == 0, r.stderr)
+
+own = os.path.join(repo, "own.jsonl")
+r = lesson("--lessons", own, "mark", "--id", "pg-rls-assert-row-count", "--held")
+first = rows(own)
+check("mark works for a plugin global lesson, as a counters-only override row",
+      r.returncode == 0 and first == [{"id": "pg-rls-assert-row-count", "stack": "postgres-supabase", "override": True,
+                                       "counters": {"injected": 0, "held": 1, "recurred": 0}}], r.stderr + json.dumps(first))
+lesson("--lessons", own, "mark", "--id", "pg-rls-assert-row-count", "--recurred")
+check("a second mark increments the same override row",
+      len(rows(own)) == 1 and rows(own)[0]["counters"] == {"injected": 0, "held": 1, "recurred": 1}, json.dumps(rows(own)))
+check("mark still refuses an id that is nowhere",
+      lesson("--lessons", own, "mark", "--id", "nowhere", "--held").returncode != 0)
+r = lesson("--lessons", own, "promote", "--id", "pg-rls-assert-row-count", "--to", target)
+check("promote refuses an override row", r.returncode != 0 and "sync" in r.stderr, r.stderr)
+r = lesson("--lessons", own, "list")
+check("list shows an override as a global lesson", "global lesson" in r.stdout and "held 1" in r.stdout, r.stdout)
+
+synced_dir = os.path.join(repo, "synced")
+os.makedirs(synced_dir)
+seed = [{"id": "g-one", "stack": "postgres-supabase", "paths": [], "text": "One é.",
+         "counters": {"injected": 2, "held": 1, "recurred": 0}, "status": "active"},
+        {"id": "g-two", "stack": "postgres-supabase", "paths": [], "text": "Two.",
+         "counters": {"injected": 0, "held": 0, "recurred": 0}, "status": "active"}]
+seed_file = os.path.join(synced_dir, "postgres-supabase.jsonl")
+with open(seed_file, "w", encoding="utf-8", newline="\n") as handle:
+    handle.write("".join(json.dumps(item, ensure_ascii=False) + "\n" for item in seed))
+second_line = open(seed_file, encoding="utf-8").read().splitlines()[1]
+overrides = os.path.join(repo, "overrides.jsonl")
+lesson("--lessons", overrides, "--lessons-dir", synced_dir, "mark", "--id", "g-one", "--held")
+lesson("--lessons", overrides, "--lessons-dir", synced_dir, "mark", "--id", "g-one", "--recurred")
+r = lesson("--lessons", overrides, "sync", "--to-dir", synced_dir)
+after = rows(seed_file)
+check("sync adds the override counters into the global file",
+      r.returncode == 0 and after[0]["counters"] == {"injected": 2, "held": 2, "recurred": 1}, r.stderr + json.dumps(after))
+check("sync keeps untouched lines byte-identical and leaves no temp file",
+      open(seed_file, encoding="utf-8").read().splitlines()[1] == second_line
+      and not os.path.exists(seed_file + ".tmp"))
+check("sync zeroes the synced override and dates it",
+      rows(overrides)[0]["counters"] == {"injected": 0, "held": 0, "recurred": 0} and rows(overrides)[0].get("synced"),
+      json.dumps(rows(overrides)))
+r = lesson("--lessons", overrides, "sync", "--to-dir", synced_dir)
+check("a second sync adds nothing", r.returncode == 0 and rows(seed_file)[0]["counters"]["held"] == 2, r.stdout)
+lesson("--lessons", overrides, "--lessons-dir", synced_dir, "mark", "--id", "g-two", "--held")
+before = open(seed_file, encoding="utf-8").read()
+r = lesson("--lessons", overrides, "sync", "--to-dir", GLOBAL_DIR)
+check("sync to a folder without the lesson changes nothing",
+      r.returncode != 0 and open(seed_file, encoding="utf-8").read() == before and rows(overrides)[1]["counters"]["held"] == 1,
+      r.stderr)
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

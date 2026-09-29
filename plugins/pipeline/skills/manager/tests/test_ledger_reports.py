@@ -98,8 +98,12 @@ check("--allow-unlisted accepts the report", r.returncode == 0, r.stdout + r.std
 check("--allow-unlisted records the files and a ruling note",
       last[-2].get("unlisted") == ["README.md"] and last[-1].get("kind") == "ruling"
       and "README.md" in last[-1].get("text", "") and "read only" in last[-1]["text"], json.dumps(last[-2:]))
+count = len(entries())
 r = append(DEV, unlisted, extra=("--allow-unlisted",))
-check("--allow-unlisted works without a reason", r.returncode == 0, r.stderr)
+check("--allow-unlisted without a reason is refused", r.returncode != 0 and len(entries()) == count, r.stderr)
+r = append(DEV, unlisted, extra=("--allow-unlisted", "   "))
+check("--allow-unlisted with a blank reason is refused",
+      r.returncode != 0 and "reason" in r.stderr and len(entries()) == count, r.stderr)
 r = append(DEV, report("ignored.md", f"Committed {c1}.\nFiles:\n- `src/a.py`\n- `.superpowers/good.md`\n"
                                       f"- docs/none.md\n\n{PAD}\n{DEV}\n"))
 check("untracked and missing paths in the Files section are not checked", r.returncode == 0, r.stderr)
@@ -143,7 +147,8 @@ r = ledger("save-report", "--task", "1", "--agent", "code-review", "--file", REV
 check("auto round follows the ledger (one code-review entry for task 1 -> r2)",
       r.returncode == 0 and r.stdout.strip().endswith("1-code-review-r2.md"), r.stdout + r.stderr)
 r = ledger("save-report", "--task", "spec", "--agent", "db", "--round", "3", "--file", REVIEW_REPORT)
-check("explicit round is used as given", r.returncode == 0 and r.stdout.strip().endswith("spec-db-r3.md"), r.stdout)
+check("explicit round is used as given (db on the spec task is a reviewer)",
+      r.returncode == 0 and r.stdout.strip().endswith("spec-db-review-r3.md"), r.stdout)
 check("save-report refuses an empty report",
       ledger("save-report", "--task", "2", "--agent", "qa", "--stdin", stdin="  \n").returncode != 0)
 check("save-report refuses a task id with a path",
@@ -152,5 +157,74 @@ check("save-report refuses an unknown agent",
       ledger("save-report", "--task", "2", "--agent", "nobody", "--stdin", stdin="x\n").returncode != 0)
 check("save-report refuses a bad round",
       ledger("save-report", "--task", "2", "--agent", "qa", "--round", "0", "--stdin", stdin="x\n").returncode != 0)
+
+sys.path.insert(0, os.path.dirname(LEDGER_PY))
+from ledger import cited_paths
+
+AGENTS = os.path.join(os.path.dirname(LEDGER_PY), "..", "..", "agents")
+
+
+def template(agent, path):
+    text = open(os.path.join(AGENTS, agent), encoding="utf-8").read()
+    start = text.index("```\nCommit:") + 4
+    block = text[start:text.index("```", start)]
+    return block.replace("<full SHA from `git rev-parse HEAD`>", c1).replace("<path>", path)
+
+
+for agent, line in (("dev.md", DEV), ("db.md", 'LEDGER {"agent":"db","verdict":"DONE"}')):
+    r = append(line, report(f"tpl-bad-{agent}", f"{template(agent, 'README.md')}\n{PAD}\n{line}\n"))
+    check(f"the literal {agent} template: an unchanged file is rejected",
+          r.returncode != 0 and "README.md" in r.stderr, r.stderr)
+    r = append(line, report(f"tpl-good-{agent}", f"{template(agent, 'src/a.py')}\n{PAD}\n{line}\n"))
+    check(f"the literal {agent} template: a changed file is accepted", r.returncode == 0, r.stderr)
+
+for label in ("Files changed (from `git show --stat HEAD`, or `git diff --stat <task start>..HEAD` for several commits):",
+              "**Files changed** (3):", "Files changed (2 files):", "## Files changed (2)"):
+    r = append(DEV, report("paren.md", f"Committed {c1[:8]}.\n\n{label}\n- `src/a.py`\n- README.md\n\n{PAD}\n{DEV}\n"))
+    check(f"a Files label with a parenthetical or count is still checked: {label[:30]}",
+          r.returncode != 0 and "README.md" in r.stderr, r.stderr)
+
+for item, expected in (("- `app/page.tsx`: now calls `lib/format.ts`", {"app/page.tsx"}),
+                       ("- src/b.ts: added x", {"src/b.ts"}),
+                       ("- Modify: src/c.ts", {"src/c.ts"}),
+                       ("- Modify: `src/d.ts:3-9`", {"src/d.ts"}),
+                       ("- src/e.ts", {"src/e.ts"})):
+    found = cited_paths(f"Files:\n{item}\n", files_section_only=True)
+    check(f"a Files item yields one path: {item}", found == expected, str(found))
+
+short = "Nothing in this task changes documented behavior."
+r = append('LEDGER {"agent":"docs","verdict":"NO_DOC_CHANGE_NEEDED"}',
+           report("nodoc.md", short + '\nLEDGER {"agent":"docs","verdict":"NO_DOC_CHANGE_NEEDED"}\n'))
+check("NO_DOC_CHANGE_NEEDED with a 40+ character reason is accepted", r.returncode == 0, r.stderr)
+r = append('LEDGER {"agent":"dev","verdict":"BLOCKED"}',
+           report("blockedshort.md", "Blocked: the RPC signature is missing from the approved plan.\n" + 'LEDGER {"agent":"dev","verdict":"BLOCKED"}\n'))
+check("BLOCKED with a short concrete reason is accepted", r.returncode == 0, r.stderr)
+for name, body in (("tiny.md", "Blocked, no access."), ("ph.md", "placeholder placeholder placeholder placeholder TODO")):
+    r = append('LEDGER {"agent":"dev","verdict":"BLOCKED"}',
+               report(name, body + '\nLEDGER {"agent":"dev","verdict":"BLOCKED"}\n'))
+    check(f"BLOCKED with a reason under 40 characters or a placeholder is rejected ({name})",
+          r.returncode != 0 and "placeholder" in r.stderr, r.stderr)
+r = append(DEV, report("doneshort.md", f"Committed {c1[:8]}.\n{short}\n{DEV}\n"))
+check("DONE still needs 200 characters", r.returncode != 0 and "200" in r.stderr, r.stderr)
+
+DB_DONE = 'LEDGER {"agent":"db","verdict":"DONE"}'
+impl = ledger("save-report", "--task", "7", "--agent", "db", "--role", "implementer", "--stdin",
+              stdin=f"Committed {c1}.\nFiles changed:\n- `src/a.py`\n\n{PAD}\n{DB_DONE}\n")
+check("db implementer report r1", impl.returncode == 0 and impl.stdout.strip().endswith("7-db-r1.md"), impl.stdout + impl.stderr)
+append(DB_DONE, impl.stdout.strip(), task="7")
+r = ledger("save-report", "--task", "7", "--agent", "db", "--stdin", stdin="review\n")
+check("save-report refuses db without --role outside the spec task", r.returncode != 0 and "--role" in r.stderr, r.stderr)
+r = ledger("save-report", "--task", "7", "--agent", "db", "--role", "reviewer", "--stdin", stdin="review\n")
+check("the first db review after an implementer round is review r1, in its own file name",
+      r.returncode == 0 and r.stdout.strip().endswith("7-db-review-r1.md"), r.stdout + r.stderr)
+append(reviewer("db", "PASS"), r.stdout.strip(), task="7")
+check("the ledger round of that review is 1", entries()[-1].get("round") == 1, json.dumps(entries()[-1]))
+r = ledger("save-report", "--task", "7", "--agent", "db", "--role", "implementer", "--stdin", stdin="fix\n")
+check("the next db implementer report is r2", r.returncode == 0 and r.stdout.strip().endswith("7-db-r2.md"), r.stdout)
+r = ledger("save-report", "--task", "7", "--agent", "security", "--role", "implementer", "--stdin", stdin="x\n")
+check("--role must fit the agent", r.returncode != 0, r.stdout)
+r = ledger("save-report", "--task", "7", "--agent", "security", "--stdin", stdin="x\n")
+check("the role is inferred for single-role agents", r.returncode == 0 and r.stdout.strip().endswith("7-security-r1.md"),
+      r.stdout + r.stderr)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

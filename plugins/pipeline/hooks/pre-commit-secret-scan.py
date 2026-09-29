@@ -21,14 +21,19 @@ script file that calls git inside is not seen, and commands typed in a user term
 are not affected. `--install-pre-push` writes a real
 git pre-push hook that runs `--pre-push`: the same secret scan on the outgoing
 commits, enforced by git however push is invoked (approval gate not included).
-A flagged line whose fingerprint (sha256 of the line with whitespace collapsed) is listed
-in .pipeline-secrets-allow at the repo root is not reported; `--fingerprint` prints the
-fingerprints of flagged lines read from stdin (a diff or plain text).
+A flagged line whose fingerprint (sha256 of its file path and the line with whitespace
+collapsed) is listed in .pipeline-secrets-allow at the repo root is not reported. The list
+is read from the index for a commit and from each pushed ref's tree for a push, never from
+the working tree, and the hook denies Claude's own edits of that file. `--fingerprint`
+prints the fingerprints of flagged lines read from stdin (a diff, or plain text with
+`--path <file>`).
 Fails open on any internal error or outside a git repo. As a Claude hook it is wired
 by the `pipeline` plugin, so it runs only in sessions of repos that enable the plugin."""
 import base64
+import collections
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -54,12 +59,17 @@ SECRET_ASSIGNMENT = re.compile(
     r"|access[_-]?key))[\"' ]*[:=][ \t]*")
 SECRET_CHARS = re.compile(r"[A-Za-z0-9/+_=.\-]{16,}")
 DOTTED_NAME = re.compile(r"^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$")
-IDENTIFIER = re.compile(r"^(?:[a-z][a-z0-9]*(?:_[a-z0-9]+)*|[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*"
-                        r"|[a-z]+(?:[A-Z][a-z0-9]*)+)$")
+SNAKE_NAME = re.compile(r"^(?:[a-z][a-z0-9]*(?:_[a-z0-9]+)+|[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)$")
+CAMEL_MAX = 40
+PASSWORD_KEY = re.compile(r"(?i)(?:passw(?:or)?d|secret)$")
+CODE_WORD_PARTS = ("pass", "pwd", "secret", "token", "key", "hash", "crypt", "cred", "salt")
+CODE_WORDS = {"value", "input", "new", "old", "plain", "current", "default", "env", "config",
+              "user", "field", "param", "arg", "form", "data", "confirm", "stored", "raw", "tmp",
+              "temp", "mock", "fake", "test", "dummy", "given", "local", "result"}
 ENV_REFERENCE = re.compile(r"^(?:\$|%\w+%|process\.env\b|os\.environ\b|os\.getenv\b"
                            r"|import\.meta\.env\b|Deno\.env\b|env\()")
 TEMPLATED = re.compile(r"\$\{|\$\(|\{\{|^\$|^%\w+%$")
-PLACEHOLDER = re.compile(r"(?i)placeholder|example|changeme|your[_-]|x{8,}|\*{8,}")
+PLACEHOLDER = re.compile(r"(?i)^(?:placeholder|example|changeme|x+|\*+)$|^(?:your[_-]|<)")
 SQL_KEYWORDS = {"null", "default", "true", "false", "excluded", "current_user", "session_user",
                 "current_timestamp", "current_setting", "now"}
 JWT = re.compile(r"eyJ[\w-]{8,}\.(eyJ[\w-]{8,})\.[\w-]{10,}")
@@ -132,6 +142,35 @@ def quoted_secret(content):
     return bool(SECRET_CHARS.match(word)) or (len(word) >= 12 and char_classes(word) >= 3)
 
 
+def random_looking(value):
+    counts = collections.Counter(value)
+    bits = -sum(n / len(value) * math.log2(n / len(value)) for n in counts.values())
+    # why: plain identifiers already reach 3.5 bits/char; random strings also use almost every character once
+    return bits >= 3.5 and bits >= 0.95 * math.log2(len(value))
+
+
+def name_words(value):
+    if SNAKE_NAME.match(value):
+        return value.lower().split("_")
+    if len(value) > CAMEL_MAX or not re.fullmatch(r"[A-Za-z0-9]+", value):
+        return None
+    words = re.findall(r"[A-Z]?[a-z]+|[A-Z]", re.sub(r"[0-9]", "", value))
+    if len(words) < 2 or any(sum(c.islower() for c in word) < 2
+                             or not re.search(r"[aeiouy]", word, re.I) for word in words):
+        return None
+    return [word.lower() for word in words]
+
+
+def written_identifier(name, value):
+    words = name_words(value)
+    if words is None or sum(c.isdigit() for c in value) > 3 or random_looking(value):
+        return False
+    if PASSWORD_KEY.search(name):
+        return any(word in CODE_WORDS or any(part in word for part in CODE_WORD_PARTS)
+                   for word in words)
+    return True
+
+
 def unquoted_secret(name, rest):
     match = SECRET_CHARS.match(rest)
     if not match:
@@ -142,7 +181,7 @@ def unquoted_secret(name, rest):
         return False
     if value.lower() == name.rsplit(".", 1)[-1].lower() or value.lower() in SQL_KEYWORDS:
         return False
-    return not (IDENTIFIER.match(value) and sum(c.isdigit() for c in value) <= 3)
+    return not written_identifier(name, value)
 
 
 def assigns_secret(text):
@@ -165,8 +204,9 @@ def assigns_secret(text):
             return True
 
 
-def fingerprint(line):
-    return hashlib.sha256(" ".join(line.split()).encode("utf-8")).hexdigest()
+def fingerprint(path, line):
+    text = (path or "") + "\0" + " ".join(line.split())
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def line_findings(line):
@@ -192,13 +232,12 @@ def added_entries(diff):
             yield path, line[1:]
 
 
-def load_allowlist(top):
-    try:
-        with open(os.path.join(top, ALLOWLIST_FILE), encoding="utf-8") as handle:
-            entries = (line.split("#", 1)[0].strip().lower() for line in handle)
-            return {entry for entry in entries if re.fullmatch(r"[0-9a-f]{64}", entry)}
-    except (OSError, TypeError):
+def load_allowlist(cwd, rev=""):
+    code, text = git(["show", f"{rev}:{ALLOWLIST_FILE}"], cwd)
+    if code != 0:
         return set()
+    entries = (line.split("#", 1)[0].strip().lower() for line in text.splitlines())
+    return {entry for entry in entries if re.fullmatch(r"[0-9a-f]{64}", entry)}
 
 
 def scan(diff, names, allowed=frozenset()):
@@ -213,7 +252,7 @@ def scan(diff, names, allowed=frozenset()):
         labels = line_findings(line)
         if not labels:
             continue
-        mark = fingerprint(line)
+        mark = fingerprint(path, line)
         if mark in allowed or (path, mark) in seen:
             continue
         seen.add((path, mark))
@@ -223,21 +262,28 @@ def scan(diff, names, allowed=frozenset()):
 
 
 ALLOW_HINT = ("\n\nFor a false positive, leave that line out and commit the rest, or ask the user "
-              "to allowlist that exact line: they add its fingerprint to " + ALLOWLIST_FILE
-              + " at the repo root, one per line as `<fingerprint>  # reason`. Any edit to the "
-              "line changes its fingerprint. To list the fingerprints of flagged lines: git diff "
-              "--cached | python \"" + os.path.abspath(__file__).replace("\\", "/")
+              "to allowlist that exact line: they add `<fingerprint>  # reason` to " + ALLOWLIST_FILE
+              + " at the repo root and stage it (git add " + ALLOWLIST_FILE + "). Only staged "
+              "entries count for a commit and only committed ones for a push; you may not edit "
+              "or stage that file yourself. The fingerprint covers the file path and the line, "
+              "so any edit to either changes it. To list the fingerprints of flagged lines: git "
+              "diff --cached | python \"" + os.path.abspath(__file__).replace("\\", "/")
               + "\" --fingerprint")
 
 
 def print_fingerprints():
+    given = sys.argv[sys.argv.index("--path") + 1] if "--path" in sys.argv[:-1] else None
     text = sys.stdin.buffer.read().decode("utf-8", "replace")
     diff = re.search(r"^(diff --git|@@ )", text, re.M)
-    entries = added_entries(text) if diff else ((None, line) for line in text.splitlines())
+    if not diff and given is None:
+        sys.stderr.write("Plain text input needs --path <file path relative to the repo root>, "
+                         "because the fingerprint covers the path.\n")
+        sys.exit(2)
+    entries = added_entries(text) if diff else ((given, line) for line in text.splitlines())
     for path, line in entries:
         labels = line_findings(line)
         if labels:
-            print(f"{fingerprint(line)}  # {path or '-'}: {', '.join(labels)}")
+            print(f"{fingerprint(path, line)}  # {path or '-'}: {', '.join(labels)}")
     sys.exit(0)
 
 
@@ -265,8 +311,6 @@ ZERO_SHA = "0" * 40
 
 def pre_push():
     cwd = os.getcwd()
-    _, top = git(["rev-parse", "--show-toplevel"], cwd)
-    allowed = load_allowlist(top.strip() or cwd)
     for line in sys.stdin:
         parts = line.split()
         if len(parts) < 4 or parts[1] == ZERO_SHA:
@@ -281,7 +325,7 @@ def pre_push():
             revs = [local_sha, "--not", "--remotes"]
             code, diff = git(["log", "-p", "-m", "--format="] + revs + ["--"] + EXCLUDES, cwd)
         _, names = git(["log", "--name-only", "--format="] + revs, cwd)
-        findings = scan(diff, names.splitlines(), allowed)
+        findings = scan(diff, names.splitlines(), load_allowlist(cwd, local_sha))
         if findings:
             sys.stderr.write("Secret scan blocked this push. The commits leaving this machine "
                              "contain:\n- " + "\n- ".join(findings)
@@ -694,11 +738,13 @@ def push_reason(cwd, top, tokens):
             outgoing.append((name, sha))
     if not outgoing:
         return None
-    shas = sorted({sha for _, sha in outgoing})
-    _, diff = git(["log", "-p", "-m", "--format="] + shas + ["--not", "--remotes", "--"]
-                  + EXCLUDES, cwd)
-    _, names = git(["log", "--name-only", "--format="] + shas + ["--not", "--remotes"], cwd)
-    findings = scan(diff, names.splitlines(), load_allowlist(top))
+    findings = []
+    for sha in sorted({sha for _, sha in outgoing}):
+        _, diff = git(["log", "-p", "-m", "--format=", sha, "--not", "--remotes", "--"]
+                      + EXCLUDES, cwd)
+        _, names = git(["log", "--name-only", "--format=", sha, "--not", "--remotes"], cwd)
+        findings += [finding for finding in scan(diff, names.splitlines(), load_allowlist(cwd, sha))
+                     if finding not in findings]
     if findings:
         return ("Secret scan blocked this push: the commits about to leave this machine "
                 "contain:\n- " + "\n- ".join(findings)
@@ -722,6 +768,47 @@ def push_reason(cwd, top, tokens):
     return None
 
 
+FILE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+FILE_READERS = {"cat", "type", "head", "tail", "less", "more", "grep", "rg", "wc", "ls", "dir",
+                "get-content", "gc", "select-string", "sls", "get-childitem", "gci", "test-path"}
+GIT_READERS = {"diff", "log", "show", "blame", "status", "grep", "ls-files", "cat-file",
+               "check-ignore", "commit", "push"}
+HARMLESS_REDIRECT = re.compile(r"(?i)\d?>&\d|\d?>\s*(?:/dev/null|\$null|nul)(?![\w.-])")
+ALLOWLIST_DENY = (ALLOWLIST_FILE + " is maintained only by the user: the secret scan trusts its "
+                  "entries, so an agent may not write, stage, move, restore or delete it. Ask the "
+                  "user to add the line `<fingerprint>  # reason` to " + ALLOWLIST_FILE
+                  + " at the repo root and stage it (git add " + ALLOWLIST_FILE + "). Entries "
+                  "count only once staged (for a commit) or committed (for a push). Reading it "
+                  "with git diff/log/show or cat is allowed.")
+
+
+def touches_allowlist(command, powershell):
+    if ALLOWLIST_FILE not in command.lower():
+        return False
+    if ">" in HARMLESS_REDIRECT.sub("", command):
+        return True
+    for segment in split_segments(command, powershell):
+        if ALLOWLIST_FILE not in segment.lower():
+            continue
+        tokens = tokenize(segment, powershell)
+        while tokens and (tokens[0][0].lower() in WRAPPERS
+                          or (not powershell and ASSIGNMENT.match(tokens[0][0]))):
+            tokens = tokens[1:]
+        if not tokens:
+            continue
+        name = program(tokens[0][0])
+        if name in FILE_READERS:
+            continue
+        if name == "git":
+            rest = tokens[1:]
+            while rest and rest[0][0].startswith("-"):
+                rest = rest[2:] if rest[0][0] in GIT_VALUE_OPTIONS else rest[1:]
+            if rest and rest[0][0] in GIT_READERS:
+                continue
+        return True
+    return False
+
+
 def main():
     if "--pre-push" in sys.argv:
         pre_push()
@@ -734,8 +821,16 @@ def main():
     except Exception:
         allow()
 
-    command = (payload.get("tool_input") or {}).get("command", "") or ""
+    tool_input = payload.get("tool_input") or {}
+    if payload.get("tool_name") in FILE_TOOLS:
+        target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
+        if re.split(r"[\\/]", str(target).strip())[-1].lower() == ALLOWLIST_FILE:
+            deny(ALLOWLIST_DENY)
+        allow()
+    command = tool_input.get("command", "") or ""
     powershell = payload.get("tool_name") == "PowerShell"
+    if touches_allowlist(command, powershell):
+        deny(ALLOWLIST_DENY)
     base = payload.get("cwd") or None
     pending, unknown_add = {}, False
     queue, expansions = find_git_ops(command, powershell), 0

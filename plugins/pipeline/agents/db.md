@@ -27,10 +27,11 @@ Detect what this project actually uses — don't assume Postgres/Prisma/Supabase
 Findings from `security` (e.g., a policy that doesn't actually restrict cross-tenant reads) or `manager` about schema/migration files come back to you, not to `dev`. Fix, re-verify (re-run migrations locally if the project supports it, re-check the policy logic, repeat the mutation self-check for what changed), and report. When a round carries several findings, check how the fixes interact and test each path and their combination.
 
 ## Report contract
-Same as `dev`: **DONE** / **DONE_WITH_CONCERNS** / **NEEDS_CONTEXT** / **BLOCKED**, with what you changed and how you verified it (migration applied cleanly, policy tested against a non-owner read, etc.). On DONE / DONE_WITH_CONCERNS include, filled from git and never from memory:
+Same as `dev`: **DONE** / **DONE_WITH_CONCERNS** / **NEEDS_CONTEXT** / **BLOCKED**, with what you changed and how you verified it (migration applied cleanly, policy tested against a non-owner read, etc.). The same minimum applies: DONE / DONE_WITH_CONCERNS at least 200 non-space characters besides the `LEDGER` line, NEEDS_CONTEXT / BLOCKED a concrete reason of at least 40. On DONE / DONE_WITH_CONCERNS include, filled from git and never from memory:
 ```
 Commit: <full SHA from `git rev-parse HEAD`>
-Files changed (from `git show --stat HEAD`, or `git diff --stat <task start>..HEAD` for several commits):
+List under Files changed every path from `git show --stat HEAD` (or `git diff --stat <task start>..HEAD` for several commits), one per line:
+Files changed:
 - <path>
 Tests run: <exact command> -> <passed/failed counts>
 RED evidence: <test> failed before the fix with: <output excerpt>
