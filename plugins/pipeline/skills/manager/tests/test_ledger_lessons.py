@@ -1,4 +1,4 @@
-import json, os, subprocess, sys, tempfile, time
+import hashlib, json, os, subprocess, sys, tempfile, time
 
 LEDGER_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ledger.py")
 repo = os.path.join(tempfile.gettempdir(), f"ledgerlessons_{int(time.time() * 1000)}")
@@ -141,43 +141,80 @@ check("sync to a folder without the lesson changes nothing",
       r.returncode != 0 and open(seed_file, encoding="utf-8").read() == before and rows(overrides)[1]["counters"]["held"] == 1,
       r.stderr)
 
-check("a finished sync leaves no journal and records its id on the global row",
-      "sync_pending" not in rows(overrides)[0] and len(rows(seed_file)[0].get("sync_ids", [])) == 1,
+check("a finished sync leaves no journal and writes no sync bookkeeping into the global file",
+      "sync_pending" not in rows(overrides)[0] and not os.path.exists(os.path.join(repo, "overrides.sync.json"))
+      and all(set(row) <= {"id", "stack", "paths", "text", "counters", "status"} for row in rows(seed_file)),
       json.dumps(rows(overrides)) + json.dumps(rows(seed_file)))
 
-crash_dir = os.path.join(repo, "crash")
-os.makedirs(crash_dir)
-crash_seed = os.path.join(crash_dir, "postgres-supabase.jsonl")
-with open(crash_seed, "w", encoding="utf-8", newline="\n") as handle:
-    handle.write(json.dumps({"id": "g-done", "stack": "postgres-supabase", "paths": [], "text": "Done.",
-                             "counters": {"injected": 0, "held": 5, "recurred": 0}, "status": "active",
-                             "sync_ids": ["s-applied"]}) + "\n")
-    handle.write(json.dumps({"id": "g-todo", "stack": "postgres-supabase", "paths": [], "text": "Todo.",
-                             "counters": {"injected": 0, "held": 1, "recurred": 0}, "status": "active"}) + "\n")
-crashed = os.path.join(repo, "crashed.jsonl")
-with open(crashed, "w", encoding="utf-8", newline="\n") as handle:
-    handle.write(json.dumps({"id": "g-done", "stack": "postgres-supabase", "override": True,
-                             "counters": {"injected": 0, "held": 3, "recurred": 0},
-                             "sync_pending": {"id": "s-applied", "counters": {"injected": 0, "held": 2, "recurred": 0}}})
-                 + "\n")
-    handle.write(json.dumps({"id": "g-todo", "stack": "postgres-supabase", "override": True,
-                             "counters": {"injected": 0, "held": 2, "recurred": 0},
-                             "sync_pending": {"id": "s-lost", "counters": {"injected": 0, "held": 2, "recurred": 0}}})
-                 + "\n")
-r = lesson("--lessons", crashed, "sync", "--to-dir", crash_dir)
-globals_after = {item["id"]: item for item in rows(crash_seed)}
-delivery_after = {item["id"]: item for item in rows(crashed)}
+
+def digest(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def global_text(items):
+    return "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in items)
+
+
+def crash_case(name, held_global, held_pending, held_delivery, file_state, with_journal=True):
+    folder = os.path.join(repo, name)
+    os.makedirs(folder)
+    target = os.path.join(folder, "postgres-supabase.jsonl")
+    other = {"id": "g-other", "stack": "postgres-supabase", "paths": [], "text": "Other.",
+             "counters": {"injected": 0, "held": 7, "recurred": 0}, "status": "active"}
+    base = [{"id": "g-x", "stack": "postgres-supabase", "paths": [], "text": "X.",
+             "counters": {"injected": 0, "held": held_global, "recurred": 0}, "status": "active"}, other]
+    applied = [dict(base[0], counters={"injected": 0, "held": held_global + held_pending, "recurred": 0}), other]
+    before, after = global_text(base), global_text(applied)
+    current = {"before": before, "after": after}.get(file_state, file_state)
+    with open(target, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(current)
+    delivery = os.path.join(folder, "lessons.jsonl")
+    with open(delivery, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps({"id": "g-x", "stack": "postgres-supabase", "override": True,
+                                 "counters": {"injected": 0, "held": held_delivery, "recurred": 0},
+                                 "sync_pending": {"id": "s-1", "counters": {"injected": 0, "held": held_pending,
+                                                                            "recurred": 0}}}) + "\n")
+    journal = os.path.join(folder, "lessons.sync.json")
+    if with_journal:
+        with open(journal, "w", encoding="utf-8") as handle:
+            json.dump({"id": "s-1", "files": {os.path.normcase(os.path.abspath(target)):
+                                              {"before": digest(before), "after": digest(after)}}}, handle)
+    result = lesson("--lessons", delivery, "sync", "--to-dir", folder)
+    return result, target, delivery, journal
+
+
+r, target, delivery, journal = crash_case("crash-after-write", 5, 2, 3, "after")
 check("after a crash past the global write, a rerun does not add the journaled counters again",
-      r.returncode == 0 and globals_after["g-done"]["counters"]["held"] == 5, r.stderr + json.dumps(globals_after))
-check("counters marked after the crash stay in the delivery row",
-      delivery_after["g-done"]["counters"]["held"] == 1 and "sync_pending" not in delivery_after["g-done"],
-      json.dumps(delivery_after))
-check("after a crash before the global write, a rerun adds the journaled counters once",
-      globals_after["g-todo"]["counters"]["held"] == 3 and globals_after["g-todo"]["sync_ids"] == ["s-lost"]
-      and delivery_after["g-todo"]["counters"]["held"] == 0, json.dumps(globals_after) + json.dumps(delivery_after))
-r = lesson("--lessons", crashed, "sync", "--to-dir", crash_dir)
+      r.returncode == 0 and rows(target)[0]["counters"]["held"] == 7 and rows(target)[1]["counters"]["held"] == 7,
+      r.stderr + json.dumps(rows(target)))
+check("counters marked after the crash stay in the delivery row, and the journal is gone",
+      rows(delivery)[0]["counters"]["held"] == 1 and "sync_pending" not in rows(delivery)[0]
+      and not os.path.exists(journal), json.dumps(rows(delivery)))
+r = lesson("--lessons", delivery, "sync", "--to-dir", os.path.dirname(target))
 check("the delivery row keeps its leftover counters for the next sync",
-      r.returncode == 0 and {item["id"]: item for item in rows(crash_seed)}["g-done"]["counters"]["held"] == 6
-      and rows(crashed)[0]["counters"]["held"] == 0, r.stderr + json.dumps(rows(crash_seed)))
+      r.returncode == 0 and rows(target)[0]["counters"]["held"] == 8 and rows(delivery)[0]["counters"]["held"] == 0,
+      r.stderr + json.dumps(rows(target)))
+r, target, delivery, journal = crash_case("crash-before-write", 1, 2, 2, "before")
+check("after a crash between the journal and the global write, a rerun adds the counters once",
+      r.returncode == 0 and rows(target)[0]["counters"]["held"] == 3 and rows(delivery)[0]["counters"]["held"] == 0
+      and not os.path.exists(journal), r.stderr + json.dumps(rows(target)))
+r, target, delivery, journal = crash_case("crash-before-journal", 1, 2, 2, "before", with_journal=False)
+check("after a crash before the journal was written, a rerun adds the counters once",
+      r.returncode == 0 and rows(target)[0]["counters"]["held"] == 3 and not os.path.exists(journal),
+      r.stderr + json.dumps(rows(target)))
+edited = global_text([{"id": "g-x", "stack": "postgres-supabase", "paths": [], "text": "X edited.",
+                       "counters": {"injected": 0, "held": 1, "recurred": 0}, "status": "active"}])
+r, target, delivery, journal = crash_case("crash-then-edited", 1, 2, 2, edited)
+check("a global file changed since the interrupted sync stops the rerun and writes nothing",
+      r.returncode != 0 and "changed since the interrupted sync" in r.stderr
+      and open(target, encoding="utf-8").read() == edited and "sync_pending" in rows(delivery)[0]
+      and os.path.exists(journal), r.stderr)
+stale = os.path.join(repo, "stale")
+os.makedirs(stale)
+with open(os.path.join(stale, "lessons.sync.json"), "w", encoding="utf-8") as handle:
+    handle.write('{"id": "old", "files": {}}')
+r = lesson("--lessons", os.path.join(stale, "lessons.jsonl"), "sync", "--to-dir", stale)
+check("a journal left after the delivery rows were already finished is removed",
+      r.returncode == 0 and not os.path.exists(os.path.join(stale, "lessons.sync.json")), r.stderr)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

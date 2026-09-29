@@ -1,6 +1,6 @@
 ---
 stack: nextjs-react
-paths: ["app/**", "src/**", "components/**", "lib/**", "**/*.tsx", "proxy.ts", "middleware.ts", "next.config.*"]
+paths: ["app/**", "src/**", "components/**", "lib/**", "**/*.tsx", "**/*.jsx", "**/actions.ts", "**/actions/**", "**/*.actions.ts", "**/*-actions.ts", "**/page.tsx", "**/layout.tsx", "**/route.ts", "**/*redirect*", "**/*redirect*/**", "**/*callback*/**", "proxy.ts", "middleware.ts", "next.config.*"]
 agents: [code-review, security, design]
 ---
 

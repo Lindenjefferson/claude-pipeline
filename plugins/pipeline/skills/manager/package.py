@@ -71,14 +71,15 @@ def matches_any(globs, paths):
 
 
 def specificity(pattern):
-    literal = re.sub(r"[*?]", "", pattern)
-    return len(re.split(r"[*?]", pattern, maxsplit=1)[0]), len(literal), -len(re.findall(r"\*\*|\*|\?", pattern))
+    literal = len(re.sub(r"[*?/]", "", pattern))
+    prefix = len(re.split(r"[*?]", pattern, maxsplit=1)[0])
+    return literal, -len(re.findall(r"\*\*|\*|\?", pattern)), prefix
 
 
 def relevance(globs, paths):
     patterns = [pattern.strip().lstrip("/") for pattern in globs if pattern.strip()]
     ranked = [(glob_regex(pattern), specificity(pattern)) for pattern in patterns]
-    matched, best = 0, (-1, -1, 0)
+    matched, best = 0, (-1, 0, -1)
     for path in paths:
         hits = [rank for regex, rank in ranked if regex.match(path)]
         if hits:
@@ -242,12 +243,41 @@ def lesson_score(lesson, from_delivery, overrides):
     return held - 2 * recurred + (0.25 if from_delivery else 0)
 
 
-def lesson_rank(lesson, from_delivery, overrides, task_paths):
-    matched, (prefix, literal, wildcards) = relevance(lesson.get("paths") or [], task_paths)
+def lesson_priority(lesson):
     priority = lesson.get("priority", 0)
-    priority = priority if isinstance(priority, int) and not isinstance(priority, bool) else 0
-    return (-priority, -prefix, -literal, -wildcards, -matched, -lesson_score(lesson, from_delivery, overrides),
-            lesson["id"])
+    return priority if isinstance(priority, int) and not isinstance(priority, bool) else 0
+
+
+def lesson_rank(lesson, from_delivery, overrides, task_paths):
+    matched, (literal, wildcards, prefix) = relevance(lesson.get("paths") or [], task_paths)
+    return (-lesson_priority(lesson), -literal, -wildcards, -prefix, -matched,
+            -lesson_score(lesson, from_delivery, overrides), lesson["id"])
+
+
+def fair_order(candidates, overrides, task_paths):
+    rank = lambda item: lesson_rank(item[0], item[1], overrides, task_paths)
+    fallback = sorted((item for item in candidates if not item[0].get("paths")), key=rank)
+    queues = {}
+    for item in sorted((item for item in candidates if item[0].get("paths")), key=rank):
+        queues.setdefault(str(item[0].get("stack") or ""), []).append(item)
+    taken = {stack: 0 for stack in queues}
+    order = []
+
+    def fill(eligible, has_room):
+        while True:
+            heads = [stack for stack, queue in queues.items() if queue and eligible(queue[0])]
+            if not heads:
+                return
+            stack = min(heads, key=lambda stack: (taken[stack], rank(queues[stack][0])))
+            if not has_room(stack):
+                return
+            order.append(queues[stack].pop(0))
+            taken[stack] += 1
+
+    unserved = lambda stack: sum(1 for other, count in taken.items() if count == 0 and other != stack)
+    fill(lambda item: lesson_priority(item[0]) > 0, lambda stack: len(order) + 1 + unserved(stack) <= LESSONS_MAX)
+    fill(lambda item: True, lambda stack: True)
+    return order + fallback
 
 
 def injected_before(out):
@@ -298,7 +328,7 @@ def lessons_section(args, task_paths):
         if (globs and matches_any(globs, task_paths)) or (not globs and lesson.get("stack") == "general"):
             seen.add(lesson_id)
             candidates.append((lesson, from_delivery))
-    candidates.sort(key=lambda item: lesson_rank(item[0], item[1], overrides, task_paths))
+    candidates = fair_order(candidates, overrides, task_paths)
     chosen, size = [], len(LESSONS_HEADER)
     for lesson, from_delivery in candidates:
         if len(chosen) == LESSONS_MAX:

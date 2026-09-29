@@ -233,12 +233,20 @@ def added_entries(diff):
             yield path, line[1:]
 
 
-def load_allowlist(cwd, rev=""):
+def allowlist_lines(cwd, rev=""):
     code, text = git(["show", f"{rev}:{ALLOWLIST_FILE}"], cwd)
     if code != 0:
-        return set()
-    entries = (line.split("#", 1)[0].strip().lower() for line in text.splitlines())
-    return {entry for entry in entries if re.fullmatch(r"[0-9a-f]{64}", entry)}
+        return {}
+    lines = {}
+    for line in text.splitlines():
+        entry = line.split("#", 1)[0].strip().lower()
+        if re.fullmatch(r"[0-9a-f]{64}", entry):
+            lines.setdefault(entry, line.strip())
+    return lines
+
+
+def load_allowlist(cwd, rev=""):
+    return set(allowlist_lines(cwd, rev))
 
 
 def scan(diff, names, allowed=frozenset()):
@@ -308,6 +316,7 @@ echo "Push blocked: no Python 3 interpreter found on PATH (tried python, python3
 exit 1
 """
 ZERO_SHA = "0" * 40
+REMOTE_REFS_MAX = 200
 
 
 def pre_push():
@@ -333,20 +342,25 @@ def pre_push():
                              + "\nRewrite the affected local commits and rotate the secret."
                              + ALLOW_HINT + "\n")
             sys.exit(1)
-        warn_new_allowlist_entries(cwd, revs, remote_sha)
+        warn_new_allowlist_entries(cwd, local_sha, remote_sha)
     sys.exit(0)
 
 
-def warn_new_allowlist_entries(cwd, revs, remote_sha):
-    _, log = git(["log", "-p", "-m", "--format="] + revs + ["--", f":(top,literal){ALLOWLIST_FILE}"], cwd)
-    added = [line[1:].strip() for line in log.splitlines() if line.startswith("+") and not line.startswith("+++")]
-    known = set()
-    if remote_sha != ZERO_SHA:
-        _, text = git(["show", f"{remote_sha}:{ALLOWLIST_FILE}"], cwd)
-        known = {line.strip() for line in text.splitlines()}
-    new = [line for line in dict.fromkeys(added) if line and line not in known]
+def warn_new_allowlist_entries(cwd, local_sha, remote_sha):
+    pushed = allowlist_lines(cwd, local_sha)
+    known, note = set(), ""
+    if remote_sha == ZERO_SHA:
+        _, refs = git(["for-each-ref", "--format=%(objectname)", "refs/remotes"], cwd)
+        for ref in dict.fromkeys(refs.split()[:REMOTE_REFS_MAX]):
+            known |= load_allowlist(cwd, ref)
+        note = " (new remote branch; compared with the remote-tracking branches)"
+    elif git(["cat-file", "-e", f"{remote_sha}^{{commit}}"], cwd)[0] != 0:
+        note = " (remote state unknown; listing all entries in pushed commits)"
+    else:
+        known = load_allowlist(cwd, remote_sha)
+    new = [line for entry, line in pushed.items() if entry not in known]
     if new:
-        sys.stderr.write(f"Warning: this push adds entries to {ALLOWLIST_FILE} (secret-scan exceptions). "
+        sys.stderr.write(f"Warning: this push adds entries to {ALLOWLIST_FILE} (secret-scan exceptions){note}. "
                          "Check that you added each one:\n  " + "\n  ".join(new) + "\n")
 
 
@@ -790,7 +804,8 @@ def push_reason(cwd, top, tokens):
 
 
 FILE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
-BROAD_PATHSPECS = {".", "./", "*", "**", ":/", ":/.", ":/*", ":(top)", ":(top).", ":(glob)**"}
+RISKY_GIT_ENV = ("GIT_CONFIG", "GIT_PAGER", "PAGER", "GIT_EXTERNAL_DIFF", "GIT_EXEC_PATH", "GIT_EDITOR",
+                 "GIT_SEQUENCE_EDITOR", "EDITOR", "VISUAL")
 FILE_READERS = {"cat", "type", "head", "tail", "less", "more", "grep", "rg", "wc", "ls", "dir",
                 "get-content", "gc", "select-string", "sls", "get-childitem", "gci", "test-path"}
 GIT_READERS = {"diff", "log", "show", "blame", "status", "grep", "ls-files", "cat-file",
@@ -812,7 +827,7 @@ def names_allowlist(text):
         name = re.split(r"[\\/:]", word)[-1].strip("'\"")
         if not re.search(r"[*?\[]", name):
             continue
-        # a bare * or *.* would flag every broad command; git add and commit fall back to allowlist_dirty
+        # a bare * or *.* would flag every broad command; git add and commit ask git what the pathspec covers
         if name.startswith(".") or re.sub(r"[*?.\[\]!]", "", name):
             if fnmatch.fnmatchcase(ALLOWLIST_FILE, name):
                 return True
@@ -833,46 +848,110 @@ def allowlist_dirty(cwd, untracked):
     return False
 
 
-def add_is_broad(tokens):
-    texts = [text for text, _ in tokens]
-    flags = [text for text in texts if text.startswith("-") and text != "--"]
-    paths = [text for text in texts if not text.startswith("-")]
-    every = (any(flag in ("--all", "--no-ignore-removal") or (not flag.startswith("--") and "A" in flag)
-                 for flag in flags) or any(path in BROAD_PATHSPECS for path in paths))
-    tracked = any(flag == "--update" or (not flag.startswith("--") and "u" in flag) for flag in flags)
-    return every, tracked
+def pathspecs_reach_allowlist(cwd, pathspecs, tracked_only, force=False):
+    args = ["ls-files", "--full-name", "-m", "-d"]
+    if not tracked_only:
+        args += ["-o"] + ([] if force else ["--exclude-standard"])
+    code, out = git(args + ["--"] + pathspecs, cwd)
+    if code != 0:
+        return allowlist_dirty(cwd, untracked=not tracked_only)
+    return any(line.strip().lower() == ALLOWLIST_FILE for line in out.splitlines())
+
+
+def parse_add(tokens):
+    flags, paths, unknown, index = [], [], False, 0
+    while index < len(tokens):
+        text = tokens[index][0]
+        if text == "--":
+            paths += tokens[index + 1:]
+            break
+        if text.startswith("--pathspec-from-file"):
+            unknown = True
+            index += 1 if "=" in text else 2
+            continue
+        if text.startswith("-") and text != "-":
+            flags.append(text)
+        else:
+            paths.append(tokens[index])
+        index += 1
+    short = "".join(flag[1:] for flag in flags if not flag.startswith("--"))
+    every = "A" in short or any(flag in ("--all", "--no-ignore-removal") for flag in flags)
+    update = "u" in short or "--update" in flags
+    interactive = any(flag in ADD_INTERACTIVE for flag in flags) or bool(set(short) & set("pie"))
+    force = "f" in short or "--force" in flags
+    unknown = unknown or any(expanded(token) for token in paths)
+    return [text for text, _ in paths], every, (update or interactive) and not every, force, unknown
+
+
+def add_reaches_allowlist(tokens, cwd):
+    paths, every, tracked_only, force, unknown = parse_add(tokens)
+    if unknown:
+        return allowlist_dirty(cwd, untracked=not tracked_only)
+    if not paths:
+        if not (every or tracked_only):
+            return False
+        paths = [":/"]
+    return pathspecs_reach_allowlist(cwd, paths, tracked_only, force)
+
+
+def commit_reaches_allowlist(stage, cwd):
+    for args in stage:
+        if args == ["-A"]:
+            if allowlist_dirty(cwd, untracked=True):
+                return True
+        elif args == ["-u"]:
+            if pathspecs_reach_allowlist(cwd, [":/"], tracked_only=True):
+                return True
+        elif args[:1] == ["--"] and pathspecs_reach_allowlist(cwd, args[1:], tracked_only=True):
+            return True
+    return False
+
+
+def rewires_git(item):
+    texts = [text for text, _ in item["tokens"]]
+    return (bool(item.get("configs"))
+            or any(assign.split("=", 1)[0].upper().startswith(RISKY_GIT_ENV) for assign in item.get("assigns", []))
+            or "--ext-diff" in texts
+            or any(text.startswith(("-O", "--open-files-in-pager")) for text in texts))
 
 
 def git_touches_allowlist(item, mentioned_anywhere, base, powershell):
     tokens = item["tokens"]
     mentioned = any(names_allowlist(text) for text, _ in tokens)
-    texts = [text for text, _ in tokens]
-    rewires = (any(config.lower().startswith(("core.pager", "pager.")) for config in item.get("configs", []))
-               or any(assign.upper().startswith("GIT_PAGER=") for assign in item.get("assigns", []))
-               or "--ext-diff" in texts)
-    output = any(text == "--output" or text.startswith("--output=") for text in texts)
-    if mentioned_anywhere and (rewires or output):
+    output = any(text == "--output" or text.startswith("--output=") for text, _ in tokens)
+    if mentioned_anywhere and (rewires_git(item) or output):
         return True
     op = "add" if item["op"] == "stage" else item["op"]
-    if op == "add":
-        if mentioned:
-            return True
-        every, tracked = add_is_broad(tokens)
-    elif op == "commit":
-        stage = parse_commit(tokens)
+    if op not in ("add", "commit"):
+        return mentioned and op not in GIT_READERS
+    if mentioned and op == "add":
+        return True
+    stage = parse_commit(tokens) if op == "commit" else None
+    if op == "commit":
         if stage is None:
             return False
-        paths = [path for args in stage if args[:1] == ["--"] for path in args[1:]]
-        if any(names_allowlist(path) for path in paths):
+        if any(names_allowlist(path) for args in stage if args[:1] == ["--"] for path in args[1:]):
             return True
-        every = any(path in BROAD_PATHSPECS for path in paths) or ["-A"] in stage
-        tracked = ["-u"] in stage
-    else:
-        return mentioned and op not in GIT_READERS
-    if not (every or tracked):
-        return False
     cwd = resolve_cwd(item["steps"], base, powershell)
-    return cwd is not None and allowlist_dirty(cwd, untracked=every)
+    if cwd is None:
+        return allowlist_dirty(base, untracked=True)
+    return add_reaches_allowlist(tokens, cwd) if op == "add" else commit_reaches_allowlist(stage, cwd)
+
+
+def git_segment_risky(tokens, assigns):
+    if any(assign.split("=", 1)[0].upper().startswith(RISKY_GIT_ENV) for assign in assigns):
+        return True
+    rest = tokens
+    while rest and rest[0][0].startswith("-"):
+        option = rest[0][0]
+        if option.startswith(("-c", "--config-env")):
+            return True
+        rest = rest[2:] if option in GIT_VALUE_OPTIONS else rest[1:]
+    if not rest:
+        return False
+    if rest[0][0] not in GIT_READERS:
+        return True
+    return any(text.startswith(("-O", "--open-files-in-pager")) for text, _ in rest[1:])
 
 
 def touches_allowlist(command, powershell, base=None):
@@ -883,16 +962,18 @@ def touches_allowlist(command, powershell, base=None):
     for segment in segments:
         if not names_allowlist(segment):
             continue
-        tokens = tokenize(segment, powershell)
+        tokens, assigns = tokenize(segment, powershell), []
         while tokens and (tokens[0][0].lower() in WRAPPERS
                           or (not powershell and ASSIGNMENT.match(tokens[0][0]))):
+            assigns.append(tokens[0][0])
             tokens = tokens[1:]
         if not tokens:
             continue
         name = program(tokens[0][0])
-        if name in FILE_READERS or name == "git":
+        if name in FILE_READERS:
             continue
-        return True
+        if name != "git" or git_segment_risky(tokens[1:], assigns):
+            return True
     return any(git_touches_allowlist(item, mentioned_anywhere, base, powershell)
                for item in find_git_ops(command, powershell))
 

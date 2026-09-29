@@ -91,9 +91,9 @@ global_before = {name: open(os.path.join(GLOBAL, name), encoding="utf-8").read()
 os.remove(os.path.join(repo, "out", "T0.1.md"))
 r, text = brief("T0.1")
 section = text[text.find("## Lessons (from past deliveries)"):]
-expected = ["g-sql-high", "g-sql-low", "g-sql-zzz", "g-sql-recurred", "g-tsx", "d-sql"]
+expected = ["g-sql-high", "g-tsx", "g-sql-low", "g-sql-zzz", "g-sql-recurred", "d-sql"]
 check("lessons section comes after the addenda", text.find("Applies to every task.") < text.find("## Lessons"), text)
-check("lessons are ranked by priority, glob specificity, match count, then score (held - 2*recurred, +0.25 delivery), then id",
+check("lessons take turns by stack, each stack ranked by glob specificity, match count, score (held - 2*recurred, +0.25 delivery), id",
       [section.find(f"[{i}]") for i in expected] == sorted(section.find(f"[{i}]") for i in expected)
       and all(f"[{i}]" in section for i in expected), section)
 check("at most 6 lessons, with the truncation line",
@@ -171,10 +171,10 @@ r = package("brief", "--plan", "rls-plan.md", "--task", "R1", "--out", out,
             "--delivery-lessons", os.path.join(repo, "none.jsonl"))
 text = open(out, encoding="utf-8").read()
 injected = re.findall(r"\[([\w-]+)\]\n", text)
-priority_lessons = {"pg-revoke-default-execute", "pg-security-definer-search-path"}
+priority_lessons = {"pg-revoke-default-execute", "pg-security-definer-search-path", "pg-rpc-null-args"}
 rls_lessons = {"pg-rls-assert-row-count", "pg-rls-negative-test"}
 check("a migration + test task gets the priority lessons and the pg-rls-* test lessons first",
-      r.returncode == 0 and set(injected[:4]) == priority_lessons | rls_lessons and len(injected) == 6
+      r.returncode == 0 and set(injected[:5]) == priority_lessons | rls_lessons and len(injected) == 6
       and "gen-fix-interactions" not in injected, text)
 
 save(os.path.join(repo, "fn-plan.md"), "## Task F1: fn\n**Files:**\n- Create: `supabase/migrations/0007_fn.sql`\n")
@@ -182,8 +182,8 @@ out = os.path.join(repo, "out", "F1.md")
 r = package("brief", "--plan", "fn-plan.md", "--task", "F1", "--out", out,
             "--delivery-lessons", os.path.join(repo, "none-fn.jsonl"))
 injected = re.findall(r"\[([\w-]+)\]\n", open(out, encoding="utf-8").read())
-check("a migration-only task gets both priority-1 lessons, not the pgTAP test lessons",
-      r.returncode == 0 and set(injected[:2]) == priority_lessons and len(injected) == 6
+check("a migration-only task gets the priority-1 lessons, not the pgTAP test lessons",
+      r.returncode == 0 and set(injected[:3]) == priority_lessons and len(injected) == 6
       and not rls_lessons & set(injected) and "pg-pgtap-no-modifying-with" not in injected, str(injected))
 
 save(os.path.join(repo, "test-plan.md"), "## Task Q1: tests\n**Files:**\n- Create: `supabase/tests/rls_test.sql`\n")
@@ -192,7 +192,47 @@ r = package("brief", "--plan", "test-plan.md", "--task", "Q1", "--out", out,
             "--delivery-lessons", os.path.join(repo, "none-q.jsonl"))
 injected = re.findall(r"\[([\w-]+)\]\n", open(out, encoding="utf-8").read())
 check("a test-only task gets the pgTAP test lessons, not the migration-writing ones",
-      r.returncode == 0 and set(injected[:2]) == rls_lessons and not priority_lessons & set(injected), str(injected))
+      r.returncode == 0 and set(injected[:2]) == rls_lessons
+      and not {"pg-revoke-default-execute", "pg-security-definer-search-path"} & set(injected), str(injected))
+
+
+def seed_brief(name, paths):
+    save(os.path.join(repo, f"{name}-plan.md"),
+         f"## Task {name}: x\n**Files:**\n" + "".join(f"- Create: `{path}`\n" for path in paths))
+    out = os.path.join(repo, "out", f"{name}.md")
+    result = package("brief", "--plan", f"{name}-plan.md", "--task", name, "--out", out,
+                     "--delivery-lessons", os.path.join(repo, f"none-{name}.jsonl"))
+    return result, re.findall(r"\[([\w-]+)\]\n", open(out, encoding="utf-8").read())
+
+
+def stacks_of(ids):
+    return {"auth" if i.startswith("auth-") else "general" if i.startswith("gen-") else
+            "postgres-supabase" if i.startswith("pg-") else "nextjs-react" for i in ids}
+
+
+auth_core = {"auth-account-oracles", "auth-preregistration-takeover", "auth-sessions-after-password-change"}
+r, injected = seed_brief("LOGIN", ["app/(auth)/login/actions.ts", "app/(auth)/login/page.tsx"])
+check("a login action + page task gets the three core auth lessons first and Next.js lessons after them",
+      r.returncode == 0 and set(injected[:3]) == auth_core and len(injected) == 6
+      and {"next-server-action-auth", "next-page-level-guard"} <= set(injected), str(injected))
+r, injected = seed_brief("ACTION", ["app/(app)/pessoas/actions.ts"])
+check("a server-only action task gets no ui-*/a11y-* lessons",
+      r.returncode == 0 and "next-server-action-auth" in injected
+      and not [i for i in injected if i.startswith(("ui-", "a11y-", "react19-"))], str(injected))
+r, injected = seed_brief("COMPONENT", ["components/pessoas/person-form.tsx"])
+check("a .tsx component task gets the ui and a11y lessons",
+      r.returncode == 0 and {"ui-touch-target-44", "ui-alertdialog-from-menu", "a11y-aria-live-persistent"} <= set(injected)
+      and "next-server-action-auth" not in injected, str(injected))
+r, injected = seed_brief("MIXED", ["supabase/migrations/0003_p.sql", "app/(app)/pessoas/actions.ts",
+                                   "app/(app)/pessoas/page.tsx"])
+check("a migration + action + page task gives every matching stack a slot",
+      r.returncode == 0 and len(injected) == 6 and stacks_of(injected) == {"postgres-supabase", "nextjs-react", "general"}
+      and {"pg-revoke-default-execute", "pg-security-definer-search-path"} <= set(injected), str(injected))
+r, injected = seed_brief("CROWDED", ["supabase/migrations/0004_auth.sql", "supabase/tests/auth_test.sql",
+                                     "app/(auth)/login/actions.ts", "components/login-form.tsx"])
+check("priority lessons from several stacks still leave a slot for every matching stack",
+      r.returncode == 0 and len(injected) == 6
+      and stacks_of(injected) == {"postgres-supabase", "nextjs-react", "general", "auth"}, str(injected))
 
 ranked = os.path.join(repo, "ranked-lessons")
 jsonl(os.path.join(ranked, "postgres-supabase.jsonl"), [
