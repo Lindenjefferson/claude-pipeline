@@ -21,9 +21,13 @@ script file that calls git inside is not seen, and commands typed in a user term
 are not affected. `--install-pre-push` writes a real
 git pre-push hook that runs `--pre-push`: the same secret scan on the outgoing
 commits, enforced by git however push is invoked (approval gate not included).
+A flagged line whose fingerprint (sha256 of the line with whitespace collapsed) is listed
+in .pipeline-secrets-allow at the repo root is not reported; `--fingerprint` prints the
+fingerprints of flagged lines read from stdin (a diff or plain text).
 Fails open on any internal error or outside a git repo. As a Claude hook it is wired
 by the `pipeline` plugin, so it runs only in sessions of repos that enable the plugin."""
 import base64
+import hashlib
 import json
 import os
 import re
@@ -46,10 +50,20 @@ PATTERNS = [
      r"[^\s/:'\"]*\.[^\s/'\"]+"),
 ]
 SECRET_ASSIGNMENT = re.compile(
-    r"(?i)(?:api[_-]?key|secret|token|passw(?:or)?d|private[_-]?key|service[_-]?role\w*"
-    r"|access[_-]?key)[\"' ]*[:=][ \t]*([\"']?)[ \t]*([A-Za-z0-9/+_=.\-]{16,})(.?)")
+    r"(?i)([\w.$-]*?(?:api[_-]?key|secret|token|passw(?:or)?d|private[_-]?key|service[_-]?role\w*"
+    r"|access[_-]?key))[\"' ]*[:=][ \t]*")
+SECRET_CHARS = re.compile(r"[A-Za-z0-9/+_=.\-]{16,}")
 DOTTED_NAME = re.compile(r"^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$")
+IDENTIFIER = re.compile(r"^(?:[a-z][a-z0-9]*(?:_[a-z0-9]+)*|[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*"
+                        r"|[a-z]+(?:[A-Z][a-z0-9]*)+)$")
+ENV_REFERENCE = re.compile(r"^(?:\$|%\w+%|process\.env\b|os\.environ\b|os\.getenv\b"
+                           r"|import\.meta\.env\b|Deno\.env\b|env\()")
+TEMPLATED = re.compile(r"\$\{|\$\(|\{\{|^\$|^%\w+%$")
+PLACEHOLDER = re.compile(r"(?i)placeholder|example|changeme|your[_-]|x{8,}|\*{8,}")
+SQL_KEYWORDS = {"null", "default", "true", "false", "excluded", "current_user", "session_user",
+                "current_timestamp", "current_setting", "now"}
 JWT = re.compile(r"eyJ[\w-]{8,}\.(eyJ[\w-]{8,})\.[\w-]{10,}")
+ALLOWLIST_FILE = ".pipeline-secrets-allow"
 
 
 def jwt_role(payload):
@@ -103,39 +117,128 @@ def resolve_path(path, literal, base, powershell):
     return path if os.path.isabs(path) else os.path.join(base or os.getcwd(), path)
 
 
-def added_lines(diff):
-    return "\n".join(line[1:] for line in diff.splitlines()
-                     if line.startswith("+") and not line.startswith("+++"))
+def char_classes(value):
+    return sum(bool(re.search(pattern, value))
+               for pattern in (r"[a-z]", r"[A-Z]", r"[0-9]", r"[^A-Za-z0-9]"))
+
+
+def quoted_secret(content):
+    words = content.split()
+    if not words:
+        return False
+    word = words[0]
+    if TEMPLATED.search(word) or PLACEHOLDER.search(word):
+        return False
+    return bool(SECRET_CHARS.match(word)) or (len(word) >= 12 and char_classes(word) >= 3)
+
+
+def unquoted_secret(name, rest):
+    match = SECRET_CHARS.match(rest)
+    if not match:
+        return False
+    value = match.group(0)
+    after = rest[match.end():match.end() + 1]
+    if after == "(" or DOTTED_NAME.match(value):
+        return False
+    if value.lower() == name.rsplit(".", 1)[-1].lower() or value.lower() in SQL_KEYWORDS:
+        return False
+    return not (IDENTIFIER.match(value) and sum(c.isdigit() for c in value) <= 3)
 
 
 def assigns_secret(text):
-    for match in SECRET_ASSIGNMENT.finditer(text):
-        quote, value, after = match.groups()
-        if quote or not (after == "(" or DOTTED_NAME.match(value)):
+    position = 0
+    while True:
+        match = SECRET_ASSIGNMENT.search(text, position)
+        if not match:
+            return False
+        position = match.end()
+        name, rest = match.group(1), text[match.end():]
+        quote = rest[:1] if rest[:1] in "\"'`" else ""
+        if ENV_REFERENCE.match(rest[len(quote):].lstrip()):
+            continue
+        if quote:
+            closing = rest.find(quote, 1)
+            content = rest[1:closing] if closing > 0 else rest[1:]
+            if quoted_secret(content):
+                return True
+        elif unquoted_secret(name, rest):
             return True
-    return False
 
 
-def scan(diff, names):
+def fingerprint(line):
+    return hashlib.sha256(" ".join(line.split()).encode("utf-8")).hexdigest()
+
+
+def line_findings(line):
+    labels = [label for label, pattern in PATTERNS if re.search(pattern, line)]
+    if assigns_secret(line):
+        labels.append("generic API key/secret/token assignment")
+    for token in JWT.finditer(line):
+        role = jwt_role(token.group(1))
+        if role != "anon":
+            labels.append("JWT" + (f" with role {role}" if role else "")
+                          + " (only the public anon key may be committed)")
+            break
+    return labels
+
+
+def added_entries(diff):
+    path = None
+    for line in diff.splitlines():
+        if line.startswith("+++ "):
+            path = line[4:].strip()
+            path = path[2:] if path.startswith("b/") else None if path == "/dev/null" else path
+        elif line.startswith("+"):
+            yield path, line[1:]
+
+
+def load_allowlist(top):
+    try:
+        with open(os.path.join(top, ALLOWLIST_FILE), encoding="utf-8") as handle:
+            entries = (line.split("#", 1)[0].strip().lower() for line in handle)
+            return {entry for entry in entries if re.fullmatch(r"[0-9a-f]{64}", entry)}
+    except (OSError, TypeError):
+        return set()
+
+
+def scan(diff, names, allowed=frozenset()):
     findings = []
     env_files = sorted({n for n in names
                         if re.search(r"(^|/)\.env(\..+)?$", n)
                         and not n.endswith((".example", ".sample"))})
     if env_files:
         findings.append(".env-style file(s): " + ", ".join(env_files))
-    text = added_lines(diff)
-    for label, pattern in PATTERNS:
-        if re.search(pattern, text):
-            findings.append(f"possible {label} in added lines")
-    if assigns_secret(text):
-        findings.append("possible generic API key/secret/token assignment in added lines")
-    for token in JWT.finditer(text):
-        role = jwt_role(token.group(1))
-        if role != "anon":
-            findings.append("possible JWT" + (f" with role {role}" if role else "")
-                            + " in added lines (only the public anon key may be committed)")
-            break
+    seen = set()
+    for path, line in added_entries(diff):
+        labels = line_findings(line)
+        if not labels:
+            continue
+        mark = fingerprint(line)
+        if mark in allowed or (path, mark) in seen:
+            continue
+        seen.add((path, mark))
+        where = f" in {path}" if path else " in added lines"
+        findings.append(f"possible {', '.join(labels)}{where} (fingerprint {mark})")
     return findings
+
+
+ALLOW_HINT = ("\n\nFor a false positive, leave that line out and commit the rest, or ask the user "
+              "to allowlist that exact line: they add its fingerprint to " + ALLOWLIST_FILE
+              + " at the repo root, one per line as `<fingerprint>  # reason`. Any edit to the "
+              "line changes its fingerprint. To list the fingerprints of flagged lines: git diff "
+              "--cached | python \"" + os.path.abspath(__file__).replace("\\", "/")
+              + "\" --fingerprint")
+
+
+def print_fingerprints():
+    text = sys.stdin.buffer.read().decode("utf-8", "replace")
+    diff = re.search(r"^(diff --git|@@ )", text, re.M)
+    entries = added_entries(text) if diff else ((None, line) for line in text.splitlines())
+    for path, line in entries:
+        labels = line_findings(line)
+        if labels:
+            print(f"{fingerprint(line)}  # {path or '-'}: {', '.join(labels)}")
+    sys.exit(0)
 
 
 HOOK_MARKER = "secretscan-managed"
@@ -162,6 +265,8 @@ ZERO_SHA = "0" * 40
 
 def pre_push():
     cwd = os.getcwd()
+    _, top = git(["rev-parse", "--show-toplevel"], cwd)
+    allowed = load_allowlist(top.strip() or cwd)
     for line in sys.stdin:
         parts = line.split()
         if len(parts) < 4 or parts[1] == ZERO_SHA:
@@ -176,11 +281,12 @@ def pre_push():
             revs = [local_sha, "--not", "--remotes"]
             code, diff = git(["log", "-p", "-m", "--format="] + revs + ["--"] + EXCLUDES, cwd)
         _, names = git(["log", "--name-only", "--format="] + revs, cwd)
-        findings = scan(diff, names.splitlines())
+        findings = scan(diff, names.splitlines(), allowed)
         if findings:
             sys.stderr.write("Secret scan blocked this push. The commits leaving this machine "
                              "contain:\n- " + "\n- ".join(findings)
-                             + "\nRewrite the affected local commits and rotate the secret.\n")
+                             + "\nRewrite the affected local commits and rotate the secret."
+                             + ALLOW_HINT + "\n")
             sys.exit(1)
     sys.exit(0)
 
@@ -467,7 +573,7 @@ def index_env(cwd, adds):
     return env, copy
 
 
-def commit_reason(cwd, adds):
+def commit_reason(cwd, top, adds):
     env, copy = index_env(cwd, adds) if adds else (None, None)
     try:
         _, names = git(["diff", "--cached", "--name-only"], cwd, env)
@@ -477,12 +583,11 @@ def commit_reason(cwd, adds):
             for leftover in (copy, copy + ".lock"):
                 if os.path.exists(leftover):
                     os.remove(leftover)
-    findings = scan(diff, names.splitlines())
+    findings = scan(diff, names.splitlines(), load_allowlist(top))
     if findings:
         return ("Secret scan blocked this commit. Findings:\n- " + "\n- ".join(findings)
                 + "\n\nRemove the secret from the changes this commit records (staged, staged "
-                  "by the same command, or named in it) and try again. For a false positive, "
-                  "leave that file/line out and commit the rest.")
+                  "by the same command, or named in it) and try again." + ALLOW_HINT)
     return None
 
 
@@ -593,12 +698,13 @@ def push_reason(cwd, top, tokens):
     _, diff = git(["log", "-p", "-m", "--format="] + shas + ["--not", "--remotes", "--"]
                   + EXCLUDES, cwd)
     _, names = git(["log", "--name-only", "--format="] + shas + ["--not", "--remotes"], cwd)
-    findings = scan(diff, names.splitlines())
+    findings = scan(diff, names.splitlines(), load_allowlist(top))
     if findings:
         return ("Secret scan blocked this push: the commits about to leave this machine "
                 "contain:\n- " + "\n- ".join(findings)
                 + "\n\nRemoving it in a later commit is not enough because it stays in "
-                  "the history being pushed. Rewrite the affected local commits first.")
+                  "the history being pushed. Rewrite the affected local commits first."
+                + ALLOW_HINT)
     if os.path.isdir(os.path.join(top, "docs", "quality-reports")):
         approved, approvals = approved_trees(cwd)
         missing = []
@@ -621,6 +727,8 @@ def main():
         pre_push()
     if "--install-pre-push" in sys.argv:
         install_pre_push()
+    if "--fingerprint" in sys.argv:
+        print_fingerprints()
     try:
         payload = json.load(sys.stdin)
     except Exception:
@@ -668,7 +776,7 @@ def main():
                 deny(UNVERIFIABLE.format(op="commit", what="a git add earlier in the command"))
             if stage is None:
                 deny(UNVERIFIABLE.format(op="commit", what="a path in the command"))
-            reason = commit_reason(cwd, pending.get(top, []) + [(cwd, args) for args in stage])
+            reason = commit_reason(cwd, top, pending.get(top, []) + [(cwd, args) for args in stage])
         else:
             reason = push_reason(cwd, top, item["tokens"])
         if reason:
