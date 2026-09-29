@@ -8,8 +8,8 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ledger import (FULL_SCOPE_AGENTS, LINE_SUFFIX, SPEC_TASK, cited_paths, coverage_start, read_ledger,
-                    read_report, role)
+from findings import fix_scope_reason
+from ledger import FULL_SCOPE_AGENTS, SPEC_TASK, cited_paths, coverage_start, read_ledger, read_report, role
 
 PLUGIN_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 LOCKFILES = ("package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "Cargo.lock", "poetry.lock")
@@ -23,9 +23,6 @@ LESSON_ID = re.compile(r"^- .* \[([\w.-]+)\]$", re.MULTILINE)
 DEPENDENCY_FIELD = re.compile(r"\b(?:name|version|resolved|resolution|integrity|checksum)\b|node_modules/", re.IGNORECASE)
 DEPENDENCY_HEADER = re.compile(r"^(?:\S.*@.*|\s+/?\S+@\S+):\s*$")
 DEPENDENCY_LINES_MAX = 80
-FINDINGS_MARK = re.compile(r"^\s*(#*)\s*\**\s*(?:open\s+|new\s+|remaining\s+)?findings\b", re.IGNORECASE)
-SECTION_END = re.compile(r"^\s*(?:#+\s|LEDGER\s*\{|\*\*[^*]+\*\*\s*:?\s*$)")
-FILE_LINE = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)*[\w.-]+\.\w+):\d+")
 
 
 def git(*args):
@@ -157,65 +154,12 @@ def dependency_section(span, locks):
     return "\n".join(parts)
 
 
-def is_section_end(line, level):
-    heading = re.match(r"^\s*(#+)\s+(.*)$", line)
-    if heading:
-        if level:
-            return len(heading.group(1)) <= level
-        return not re.match(r"\W*(?:critical|important|minor)\b", heading.group(2), re.IGNORECASE)
-    if level or not SECTION_END.match(line):
-        return False
-    return line.lstrip().startswith("LEDGER") or not re.search(r"critical|important|minor", line, re.IGNORECASE)
-
-
-def findings_sections(text):
-    sections, current, level = [], None, 0
-    for line in text.splitlines():
-        if current is not None and is_section_end(line, level):
-            sections.append("\n".join(current))
-            current = None
-        if current is None:
-            mark = FINDINGS_MARK.match(line)
-            if mark and len(line.strip()) <= 80:
-                current, level = [line[mark.end():]], len(mark.group(1))
-            continue
-        current.append(line)
-    if current is not None:
-        sections.append("\n".join(current))
-    return sections
-
-
-def finding_paths(text):
-    sections = findings_sections(text)
-    if not sections:
-        return None
-    body = "\n".join(sections)
-    paths = set()
-    for candidate in cited_paths(body) | set(FILE_LINE.findall(body)):
-        path = LINE_SUFFIX.sub("", candidate.strip(" `*,;")).replace("\\", "/")
-        while path.startswith("./"):
-            path = path[2:]
-        if "/" in path or "." in path:
-            paths.add(path)
-    return paths
-
-
-def scope_reason(args, last, fixed, spec):
+def scope_reason(args, last, fixed, universe, spec):
     if args.agent in FULL_SCOPE_AGENTS:
         return f"{args.agent} always re-reviews the task's full range"
     if spec:
         return None
-    text = read_report(last["report"])
-    if text is None:
-        return f"the previous report {last['report']} cannot be read"
-    cited = finding_paths(text)
-    if not cited:
-        return "the previous report's findings cite no file"
-    outside = [path for path in fixed if path not in cited]
-    if outside:
-        more = f" +{len(outside) - 5} more" if len(outside) > 5 else ""
-        return f"the fix touches files outside the open findings: {', '.join(outside[:5])}{more}"
-    return None
+    return fix_scope_reason(read_report(last["report"]), last["report"], fixed, universe)
 
 
 def fix_package(args):
@@ -239,7 +183,8 @@ def fix_package(args):
     if not fixed:
         sys.exit(f"nothing changed{f' in {spec}' if spec else ''} since {last['head'][:8]}, "
                  f"the head of the last {args.agent} review of task {args.fix_of}")
-    reason = scope_reason(args, last, fixed, spec)
+    universe = git("diff", "--name-only", f"{start}..{head}")[1].splitlines()
+    reason = scope_reason(args, last, fixed, universe, spec)
     return {"base": last["head"] if reason is None else start, "head": head,
             "scope": "fix-only" if reason is None else f"full ({reason})",
             "flag": "fix" if reason is None else "full", "previous": last["report"], "spec": spec,

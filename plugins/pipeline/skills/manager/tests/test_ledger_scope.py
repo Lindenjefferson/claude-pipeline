@@ -5,7 +5,7 @@ repo = os.path.join(tempfile.gettempdir(), f"ledgerscope_{int(time.time() * 1000
 os.makedirs(os.path.join(repo, "src"))
 LEDGER = os.path.join(repo, ".superpowers", "ledger.jsonl")
 REPORT = os.path.join(repo, "report.md")
-open(REPORT, "w").write("report\n")
+open(REPORT, "w").write("# Review\n\n## Important\n1. `src/a.py:1` misses a guard.\n\n## Notes\nRead b.py too.\n")
 open(os.path.join(repo, ".gitignore"), "w").write(".superpowers/\nreport.md\n")
 results = []
 
@@ -87,6 +87,7 @@ check("a second fix entry extends the chain", append(reviewer("code-review"), c2
 table, _ = stale()
 check("a three-link chain still covers the task", ("1", "code-review") not in table, str(table))
 
+
 c4 = commit(["c.py"], "task 2")
 table, _ = stale()
 check("an unreviewed later commit makes the entry stale, named as not reviewed",
@@ -128,5 +129,32 @@ with open(LEDGER, "a") as handle:
                              "new": {"critical": 0, "important": 0, "minor": 0},
                              "open": {"critical": 0, "important": 0, "minor": 0}}) + "\n")
 check("an unknown scope is an invalid line", len(json.loads(ledger("status", "--json").stdout)["invalid"]) == 1)
+text = ledger("status").stdout
+design_row = next((line for line in text.splitlines() if " design " in line), "")
+check("text status prints 'chain broken' for a broken chain, not None..head",
+      "chain broken" in design_row and "None" not in design_row, text)
+with open(LEDGER, "a") as handle:
+    handle.write(json.dumps({"agent": "security", "verdict": "PASS", "task": "1", "from": c4, "head": c5, "round": 9,
+                             "report": REPORT, "scope": "fix", "covers_from": base,
+                             "new": {"critical": 0, "important": 0, "minor": 0},
+                             "open": {"critical": 0, "important": 0, "minor": 0}}) + "\n")
+invalid = json.loads(ledger("status", "--json").stdout)["invalid"]
+check("a fix-scoped security line written around append is invalid",
+      len(invalid) == 2 and "full range" in invalid[-1]["reason"], json.dumps(invalid))
+
+rounds = len(open(LEDGER).read().splitlines())
+c3b = commit(["b.py"], "fix touches b")
+r = append(reviewer("code-review"), c3, c3b, scope="fix")
+check("--scope fix is refused when the fix touches a file the previous findings do not cite",
+      r.returncode != 0 and "src/b.py" in r.stderr and "--scope full" in r.stderr, r.stderr)
+check("the refused fix entry wrote nothing", len(open(LEDGER).read().splitlines()) == rounds)
+check("the same range is accepted as a full re-review", append(reviewer("code-review"), base, c3b).returncode == 0)
+append(reviewer("security"), base, c3b)
+c3c = commit(["a.py"], "fix a for security")
+r = append(reviewer("security"), c3b, c3c, scope="fix")
+check("--scope fix is refused for security", r.returncode != 0 and "full range" in r.stderr, r.stderr)
+append(reviewer("db"), base, c3b)
+r = append(reviewer("db"), c3b, c3c, scope="fix")
+check("--scope fix is refused for a db review", r.returncode != 0 and "full range" in r.stderr, r.stderr)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
