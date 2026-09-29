@@ -2,7 +2,7 @@ import importlib.util, json, os, subprocess, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, "..", "pre-commit-secret-scan.py")
-base = os.path.join(tempfile.gettempdir(), f"guardround3_{int(time.time() * 1000)}")
+base = tempfile.mkdtemp(prefix="guardround3_")
 repo = os.path.join(base, "repo")
 xdg = os.path.join(base, "xdg")
 os.makedirs(repo)

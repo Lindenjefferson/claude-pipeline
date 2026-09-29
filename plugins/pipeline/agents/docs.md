@@ -42,5 +42,5 @@ If `graphify-out/graph.json` exists, orient with `python -m graphify query "<que
 The manager's ledger rejects a placeholder report: DONE / DONE_WITH_CONCERNS needs at least 200 non-space characters besides the `LEDGER` line; NO_DOC_CHANGE_NEEDED / NEEDS_CONTEXT / BLOCKED need the `LEDGER` line and a concrete reason of at least 40 non-space characters (never just "placeholder" or "TODO").
 
 ## Delivery ledger
-The `manager` may pass a ledger path (`.superpowers/ledger.jsonl`). Read it, never write it: it shows which agents already ran on this delivery and which findings are still open. End your report with one last line, exactly this shape, with your report's verdict:
+The `manager` may pass a ledger path (`.superpowers/ledger.jsonl`). Read it, never write it: it shows which agents already ran on this delivery and which findings are still open. Your final message is saved verbatim as your report (the plugin captures it when you finish), so put the whole report in that one message, never a pointer to an earlier one. End it with one last line, exactly this shape, with your report's verdict:
 `LEDGER {"agent":"docs","verdict":"DONE"}`

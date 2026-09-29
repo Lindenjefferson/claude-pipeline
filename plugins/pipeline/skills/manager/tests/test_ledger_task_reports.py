@@ -1,7 +1,7 @@
-import hashlib, json, os, subprocess, sys, tempfile, time
+import hashlib, json, os, subprocess, sys, tempfile
 
 LEDGER_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ledger.py")
-repo = os.path.join(tempfile.gettempdir(), f"ledgertaskreports_{int(time.time() * 1000)}")
+repo = tempfile.mkdtemp(prefix="ledgertaskreports_")
 os.makedirs(os.path.join(repo, "src"))
 LEDGER = os.path.join(repo, ".superpowers", "ledger.jsonl")
 TASK_FILE = os.path.join(repo, ".superpowers", "reports", "1.md")

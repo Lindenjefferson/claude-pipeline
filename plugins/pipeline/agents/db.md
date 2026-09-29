@@ -29,7 +29,7 @@ Findings from `security` (e.g., a policy that doesn't actually restrict cross-te
 ## Report contract
 Same as `dev`: **DONE** / **DONE_WITH_CONCERNS** / **NEEDS_CONTEXT** / **BLOCKED**, with what you changed and how you verified it (migration applied cleanly, policy tested against a non-owner read, etc.). The same minimum applies: DONE / DONE_WITH_CONCERNS at least 200 non-space characters besides the `LEDGER` line, NEEDS_CONTEXT / BLOCKED a concrete reason of at least 40. On DONE / DONE_WITH_CONCERNS include, filled from git and never from memory (paste the real short SHA from `git rev-parse --short HEAD`: the ledger rejects a placeholder `Commit:` line such as `<sha>`, "see git rev-parse" or `HEAD`):
 ```
-Commit: <the short SHA that `git rev-parse --short HEAD` prints, pasted as is>
+Commit: <output of git rev-parse --short HEAD>
 List under Files changed every path from `git show --stat HEAD` (or `git diff --stat <task start>..HEAD` for several commits), one per line:
 Files changed:
 - <path>
@@ -56,7 +56,7 @@ When the brief says **spec mode**, there is no diff and no code yet: you review 
 After a fix you always get the task's full range (`Scope: full`): an authorization or data-integrity regression can surface in code the fix did not touch. Review the whole range as in a first round, and confirm each finding of the `Previous report` is fixed (say which, with file:line). In the per-task layout that reference is a section `reports/<task>.md#<anchor>`; print it with `python "${CLAUDE_PLUGIN_ROOT}/skills/manager/ledger.py" show-report <ref>`.
 
 ## Delivery ledger
-The `manager` may pass a ledger path (`.superpowers/ledger.jsonl`). Read it, never write it: it shows which agents already ran on this delivery and which findings are still open. End your report with one last line, exactly this shape, with your report's verdict. As implementer:
+The `manager` may pass a ledger path (`.superpowers/ledger.jsonl`). Read it, never write it: it shows which agents already ran on this delivery and which findings are still open. Your final message is saved verbatim as your report (the plugin captures it when you finish), so put the whole report in that one message, never a pointer to an earlier one. End it with one last line, exactly this shape, with your report's verdict. As implementer:
 `LEDGER {"agent":"db","verdict":"DONE"}`
 As reviewer, with the counts of findings raised now (`new`) and still open (`open`):
 `LEDGER {"agent":"db","verdict":"PASS","new":{"critical":0,"important":0,"minor":0},"open":{"critical":0,"important":0,"minor":0}}`

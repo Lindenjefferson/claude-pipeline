@@ -40,7 +40,7 @@ A re-review package starts with a `Scope:` line and a `Previous report:` referen
 - `Scope: full (<reason>)`: review the whole range as in a first round, and still confirm each finding of the previous report is fixed.
 
 ## Delivery ledger
-The `manager` may pass a ledger path (`.superpowers/ledger.jsonl`). Read it, never write it: it shows which agents already ran on this delivery and which findings are still open, so you reference a finding already logged instead of repeating it. End your report with one last line, exactly this shape:
+The `manager` may pass a ledger path (`.superpowers/ledger.jsonl`). Read it, never write it: it shows which agents already ran on this delivery and which findings are still open, so you reference a finding already logged instead of repeating it. Your final message is saved verbatim as your report (the plugin captures it when you finish), so put the whole report in that one message, never a pointer to an earlier one. End it with one last line, exactly this shape:
 `LEDGER {"agent":"audit","verdict":"PASS","new":{"critical":0,"important":0,"minor":0},"open":{"critical":0,"important":0,"minor":0}}`
 `verdict` is PASS or FAIL as in your report; `new` counts the findings you raised in this run; `open` counts the findings still open after it.
 

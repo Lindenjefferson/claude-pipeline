@@ -1,8 +1,8 @@
-import importlib.util, json, os, subprocess, sys, tempfile, time
+import importlib.util, json, os, subprocess, sys, tempfile
 
 HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "pre-commit-secret-scan.py")
 os.environ["CLAUDE_PIPELINE_HOME"] = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-base = os.path.join(tempfile.gettempdir(), f"allowhard_{int(time.time() * 1000)}")
+base = tempfile.mkdtemp(prefix="allowhard_")
 repo = os.path.join(base, "repo")
 remote = os.path.join(base, "remote.git")
 os.makedirs(repo)

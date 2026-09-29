@@ -1,8 +1,8 @@
-import json, os, subprocess, sys, tempfile, time
+import json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, "..", "pre-commit-secret-scan.py")
-base = os.path.join(tempfile.gettempdir(), f"guardround2_{int(time.time() * 1000)}")
+base = tempfile.mkdtemp(prefix="guardround2_")
 repo = os.path.join(base, "repo")
 real = os.path.join(base, "real.git")
 fake = os.path.join(base, "fake.git")

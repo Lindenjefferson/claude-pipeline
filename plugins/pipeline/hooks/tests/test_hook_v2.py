@@ -1,9 +1,9 @@
 import tempfile
-import json, os, subprocess, sys, time
+import json, os, subprocess, sys
 
 HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "pre-commit-secret-scan.py")
 os.environ["CLAUDE_PIPELINE_HOME"] = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-base = os.path.join(tempfile.gettempdir(), f"hookv2_{int(time.time())}")
+base = tempfile.mkdtemp(prefix="hookv2_")
 repo = os.path.join(base, "repo")
 remote = os.path.join(base, "remote.git")
 elsewhere = os.path.join(base, "elsewhere")
