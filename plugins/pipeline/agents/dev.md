@@ -24,8 +24,16 @@ You are the **implementer** agent. You turn one task brief into working, tested 
 - The brief may end with addenda and a `## Lessons` section: they are part of the task. Follow each lesson that applies to the files you touch.
 - If you're missing information the brief should have had, ask — don't guess at a requirement with real consequences (data model, business rule, external contract).
 
+## Browser checks (UI work)
+Verify UI with a Playwright script, never with a long-running browser daemon or debug server:
+- Work in a temporary folder **outside the project** (e.g. `<tmp>/pw-check`): `npm init -y` and `npm install playwright` there, never in the project's `package.json`. Reuse the Chromium already in the Playwright cache (`npx playwright install --list`); only if it is missing run `npx playwright install chromium` from that folder.
+- Each script opens the page, acts, asserts and exits (`node <tmp>/pw-check/check.mjs`, non-zero exit on a failed assertion, `browser.close()` in a `finally`). Screenshots go to the temp folder, never into the project.
+- The app under test: Next allows one dev server per directory, so first check whether one is already serving this directory (the port in its lock/log, or `curl -s localhost:<port>`) and reuse it. Otherwise start `next dev` only with the Bash tool's background mode (`run_in_background`), wait for it to answer, and stop it before you report. Never leave `next dev` running.
+- Claude-in-Chrome may not reach `localhost`: do not count on it for local checks.
+- Remove the temporary folder at the end, or say in your report where it is.
+
 ## Receiving findings back
-When a reviewer (`security`, `audit`, `design`, `code-review`, `qa`) or the `manager` sends you findings on your own code: fix them, re-run the tests that cover the changed area, and report what changed. When a round carries several findings, check how the fixes interact (same route, state or screen) and test each fix's path and their combination. If you think a finding is wrong, say so plainly in your report with your reasoning — but still leave the code in a safe state and let the `manager` adjudicate the disagreement. Don't silently ignore a finding.
+When a reviewer (`security`, `audit`, `design`, `code-review`, `qa`) or the `manager` sends you findings on your own code: fix them, re-run the tests that cover the changed area, and report what changed. When a round carries several findings, check how the fixes interact (same route, state or screen) and test each fix's path and their combination. If you think a finding is wrong, say so plainly in your report with your reasoning — but still leave the code in a safe state and let the `manager` adjudicate the disagreement. Don't silently ignore a finding. The fix brief cites each report as a section `reports/<task>.md#<anchor>` (print it with `python "${CLAUDE_PLUGIN_ROOT}/skills/manager/ledger.py" show-report <ref>`). Keep a fix inside the files its findings cite when you can: a fix commit that touches another file sends the reviewers back over the whole task instead of just the fix. When you must touch another file, name it and say why in your report.
 
 ## Report contract
 End every turn with one of:
@@ -36,9 +44,9 @@ End every turn with one of:
 
 The manager's ledger rejects a placeholder report: DONE / DONE_WITH_CONCERNS needs at least 200 non-space characters besides the `LEDGER` line; NEEDS_CONTEXT / BLOCKED need the `LEDGER` line and a concrete reason of at least 40 non-space characters (never just "placeholder" or "TODO").
 
-On DONE / DONE_WITH_CONCERNS, include this block, filled from git, never from memory (the manager's ledger rejects a report that cites files outside the task's commits or lacks the SHA):
+On DONE / DONE_WITH_CONCERNS, include this block, filled from git, never from memory (the manager's ledger rejects a report that cites files outside the task's commits, lacks the SHA, or has a placeholder on the `Commit:` line such as `<sha>`, "see git rev-parse" or `HEAD`: paste the real short SHA from `git rev-parse --short HEAD`):
 ```
-Commit: <full SHA from `git rev-parse HEAD`>
+Commit: <the short SHA that `git rev-parse --short HEAD` prints, pasted as is>
 List under Files changed every path from `git show --stat HEAD` (or `git diff --stat <task start>..HEAD` for several commits), one per line:
 Files changed:
 - <path>

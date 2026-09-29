@@ -118,7 +118,7 @@ scanner.git = real_git
 
 sh(repo, "git", "add", ALLOW)
 sh(repo, "git", "commit", "-q", "-m", "user entry")
-write("cfg.txt", "AWS_" + "KEY=AK" + "IAABCDEFGHIJKLMNOP\n")
+write("cfg.txt", "placeholder\n")
 sh(repo, "git", "add", "cfg.txt")
 sh(repo, "git", "commit", "-q", "-m", "tracked")
 write("cfg.txt", "AWS_" + "KEY=AK" + "IAQRSTUVWXYZABCDEF\n")
@@ -161,5 +161,18 @@ check("warning escapes control characters in allowlist comments",
 check("printable() leaves normal text alone", scanner.printable("ok # reason: ção") == "ok # reason: ção")
 check("printable() escapes C0, DEL, C1 and bidi controls",
       scanner.printable("a\tb\x7fc\x85d‮e") == "a\\x09b\\x7fc\\x85d\\u202ee")
+
+linked = os.path.join(base, "linked-wt")
+sh(repo, "git", "worktree", "add", "-q", "-b", "wt-clean", linked)
+for name in ("wt.txt", "a.txt"):
+    with open(os.path.join(linked, name), "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("clean change\n")
+expect("clean add + commit inside a linked worktree", "git add wt.txt && git commit -m wt", "ALLOW", cwd=linked)
+expect("clean commit -a inside a linked worktree, entered with cd", f'cd "{linked}" && git commit -am wt', "ALLOW",
+       cwd=elsewhere)
+with open(os.path.join(linked, "a.txt"), "w", encoding="utf-8", newline="\n") as handle:
+    handle.write("AWS_" + "KEY=AK" + "IAQRSTUVWXYZABCDEF\n")
+expect("a secret in the same linked worktree is still found", "git commit -am wt", "DENY", cwd=linked,
+       reason_has="Secret scan blocked")
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
