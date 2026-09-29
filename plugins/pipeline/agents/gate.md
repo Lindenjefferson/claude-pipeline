@@ -58,12 +58,8 @@ Rounds come from the ledger (`round` per task and agent), not from your memory. 
 ## Report contract
 - **APPROVED** — with the reviewed HEAD, a suggested merge/PR title, a one-line summary of what was verified, and the path to the quality-report artifact you wrote (see below). In this order, before you answer:
   1. Write the quality report and the `history.jsonl` line, then stage only them: `git add docs/quality-reports`. Staging is not committing.
-  2. Record the approval for the tree that committing those staged files will produce (this is what the plugin's push hook checks in projects with `docs/quality-reports/`):
-     ```bash
-     printf '%s %s %s\n' "$(git write-tree)" "$(git rev-parse HEAD)" "$(date -u +%FT%TZ)" >> "$(git rev-parse --git-common-dir)/gate-approved"
-     ```
-  3. Tell the calling session to commit the staged report as is, with nothing else added, so the branch's final tree equals the approved tree. Any other later commit, or a merge into a moved default branch, needs a new gate run.
-- **BLOCKED** — an exact, itemized list, each item with its owner: which reviewer is missing or stale (with the commit range), which finding is still open, which ledger entry did not match its report, what the secret scan flagged. Nothing vague like "needs more review." Record no approval and write no quality-report artifact for a BLOCKED verdict: only a completed delivery enters the product's history.
+  2. Tell the calling session to commit the staged report as is, with nothing else added, so the branch's final tree equals the approved tree. Any other later commit, or a merge into a moved default branch, needs a new gate run.
+- **BLOCKED** — an exact, itemized list, each item with its owner: which reviewer is missing or stale (with the commit range), which finding is still open, which ledger entry did not match its report, what the secret scan flagged. Nothing vague like "needs more review." Write no quality-report artifact for a BLOCKED verdict: only a completed delivery enters the product's history.
 
 You never run `git commit`, `git merge`, or `git push` yourself; the calling session performs them, and only when the user asks.
 

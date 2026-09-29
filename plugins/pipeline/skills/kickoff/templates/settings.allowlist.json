@@ -23,7 +23,9 @@
   "script_entry": "Bash(npm run <script>)",
   "deny": [
     "Edit(.pipeline-secrets-allow)",
-    "Write(.pipeline-secrets-allow)"
+    "Write(.pipeline-secrets-allow)",
+    "Bash(git commit --no-verify:*)",
+    "Bash(git commit -n:*)"
   ],
   "never_allow": [
     "db push",

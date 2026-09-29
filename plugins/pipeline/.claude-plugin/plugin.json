@@ -1,6 +1,6 @@
 {
   "name": "pipeline",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "Personal multi-agent delivery pipeline: agents, manager and kickoff skills, secret-scan and push-gate hook. Enabled per repo, never globally.",
   "author": {
     "name": "Lindenjefferson"
