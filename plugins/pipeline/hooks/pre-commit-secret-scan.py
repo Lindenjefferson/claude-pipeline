@@ -1517,13 +1517,15 @@ REDIRECT_TOKEN = re.compile(r"^\d*>>?\|?")
 HARMLESS_TARGET = re.compile(r"(?i)^(?:&\d|/dev/null|\$null|nul)$")
 VARIABLE_MARK = re.compile(r"\$|`")
 UNRESOLVED_REACH = "unresolved"
-UNRESOLVED_HINT = (" The path goes through a variable or $(...) this check cannot resolve, so it may end under "
-                   ".git/hooks, the core.hooksPath folder or .git/config: write the literal path instead "
-                   "(rm -rf build/tmp, not rm -rf \"$dir\"/tmp or rm -rf $(pwd)/tmp).")
+GIT_SOURCE_HINT = re.compile(r"(?i)rev-parse|--git-(?:dir|path|common-dir)|\.git|hooks")
+GIT_LOCATION_VARS = {"GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE"}
+VARIABLE_SOURCE = re.compile(r"(?i)\$(\{)?(?:env:)?([A-Za-z_]\w*|\d)?([^}]*\})?")
+POWERSHELL_ASSIGNMENT = re.compile(r"(?is)^\$(?:env:)?([A-Za-z_]\w*)\s*=\s*(.*)$")
 GENERIC_PROTECTED = (([".git", "hooks"], "hooks"), ([".git", "config"], "config"),
                      ([".git", "config.worktree"], "config"))
 HOOK_CANDIDATES = ("pre-commit", "pre-push", "pre-commit.pipeline-chained")
 SUBSTITUTION_MARK = "$__substitution__"
+GIT_SUBSTITUTION_MARK = "$__git_substitution__"
 COPY_PROGRAMS = {"cp", "copy", "copy-item", "cpi", "rsync", "xcopy"}
 MOVE_PROGRAMS = {"mv", "move", "move-item", "mi"}
 PS_COPY_VALUE_PARAMS = ("-path", "-literalpath", "-pspath", "-filter", "-include", "-exclude", "-credential",
@@ -1721,16 +1723,31 @@ def resolved_parts(token, state, powershell):
     return None if resolved is None else lexical_parts(resolved)
 
 
+def points_at_git_value(value):
+    return GIT_SUBSTITUTION_MARK in value or bool(GIT_SOURCE_HINT.search(value))
+
+
+def points_at_git(reference, state):
+    if reference.startswith((GIT_SUBSTITUTION_MARK, SUBSTITUTION_MARK)):
+        return reference.startswith(GIT_SUBSTITUTION_MARK)
+    if reference.startswith("`"):
+        return bool(GIT_SOURCE_HINT.search(reference))
+    match = VARIABLE_SOURCE.match(reference)
+    name = (match.group(2) or "") if match else ""
+    return (name.upper() in GIT_LOCATION_VARS or name.lower() in state["git_vars"]
+            or bool(match and match.group(3) and GIT_SOURCE_HINT.search(match.group(3))))
+
+
 def unresolved_tail_reaches(text, state, powershell):
-    marks = [match.end() for match in VARIABLE_MARK.finditer(text)]
+    marks = list(VARIABLE_MARK.finditer(text))
     if not marks:
         return False
-    pieces = re.split(r"[\\/]", text[marks[-1]:], maxsplit=1)
+    pieces = re.split(r"[\\/]", text[marks[-1].end():], maxsplit=1)
     if len(pieces) == 2 and ".." in re.split(r"[\\/]", pieces[1]):
         return True
     tail = lexical_parts(pieces[1]) if len(pieces) == 2 else []
     if not tail or (len(tail) == 1 and any(part_matches(name, tail[0], powershell) for name in HOOK_CANDIDATES)):
-        return True
+        return points_at_git(text[marks[-1].start():], state)
     targets = list(GENERIC_PROTECTED) + [item for item in protected_git_dirs(state) if item[1] != "gitdir"]
     for target, kind in targets:
         for size in range(1, min(len(tail), len(target)) + 1):
@@ -1747,7 +1764,7 @@ def first_reach(tokens, state, powershell, variable_rule):
 
 
 def reach_reason(reach, reason):
-    return reason + UNRESOLVED_HINT if reach == UNRESOLVED_REACH else reason
+    return UNRESOLVED_DENY if reach == UNRESOLVED_REACH else reason
 
 
 def reaches_hooks(token, state, powershell, variable_rule):
@@ -1796,7 +1813,8 @@ def find_write_action(expression):
 
 
 def find_escapes_match(actions):
-    return any(action in ("-execdir", "-okdir")
+    return any((action in ("-execdir", "-okdir")
+                and any(arg != "{}" and not arg.startswith("-") for arg in args[1:]))
                or any("{}" in arg and ".." in re.split(r"[\\/]", arg) for arg in args)
                for _, action, args, _ in actions)
 
@@ -1881,6 +1899,10 @@ def find_excludes(expression, candidates, tests_apply):
                for path, prefix in candidates)
 
 
+def substitution_mark(script):
+    return GIT_SUBSTITUTION_MARK if GIT_SOURCE_HINT.search(script) else SUBSTITUTION_MARK
+
+
 def command_substitutions(command, powershell):
     collapsed, inner, quote, index = [], [], None, 0
     while index < len(command):
@@ -1893,6 +1915,14 @@ def command_substitutions(command, powershell):
             continue
         elif char in "'\"" and quote in (None, char):
             quote = None if quote else char
+        elif char == "`" and not powershell:
+            end = index + 1
+            while end < len(command) and command[end] != "`":
+                end += 2 if command[end] == "\\" else 1
+            inner.append(command[index + 1:end])
+            collapsed.append(substitution_mark(inner[-1]))
+            index = end + 1
+            continue
         elif command.startswith("$(", index) and not command.startswith("$((", index):
             depth, end, inner_quote = 1, index + 2, None
             while end < len(command) and depth:
@@ -1906,7 +1936,7 @@ def command_substitutions(command, powershell):
                     depth -= 1
                 end += 1
             inner.append(command[index + 2:end - 1 if depth == 0 else end])
-            collapsed.append(SUBSTITUTION_MARK)
+            collapsed.append(substitution_mark(inner[-1]))
             index = end
             continue
         collapsed.append(char)
@@ -1923,6 +1953,9 @@ def tampers_with_hooks(command, powershell, state):
     for segment in split_segments(command, powershell):
         if segment in ("(", ")"):
             continue
+        assignment = POWERSHELL_ASSIGNMENT.match(segment) if powershell else None
+        if assignment and points_at_git_value(assignment.group(2)):
+            state["git_vars"].add(assignment.group(1).lower())
         tokens = [substitute(token, state["variables"], powershell)
                   for token in strip_prefix(tokenize(segment, powershell), powershell, state["variables"])]
         if not tokens:
@@ -2027,6 +2060,11 @@ HOOKS_DENY = ("This command would skip or rewire git's own hooks (--no-verify, a
               "core.hooksPath folder or to .git/config, or a cd into the git dir followed by a write). Those hooks run the pipeline's "
               "secret scan on every commit and push, so an agent may not bypass them. Commit or push "
               "without that option, or ask the user to run it." + GUARD_SCOPE)
+UNRESOLVED_DENY = ("This command writes to a path built from a variable or $(...) that this check cannot resolve "
+                   "and that may resolve to the git hooks folder (.git/hooks or the core.hooksPath folder) or "
+                   "to .git/config: its value comes from git rev-parse, GIT_DIR or a .git/hooks path, or the "
+                   "path climbs out with a .. segment. Write the literal path instead (rm -rf build/hooks, not "
+                   "rm -rf \"$dir\"/hooks)." + GUARD_SCOPE)
 FIND_DENY = ("This find could delete or modify files under .git or the git hooks folder (.git/hooks or the "
              "core.hooksPath folder): its -delete or writing -exec is not kept away from them. Exclude .git "
              "first (find . -not -path './.git/*' ...), or search a subfolder (find src ...)." + GUARD_SCOPE)
@@ -2278,7 +2316,8 @@ def guard_reason(command, powershell, ops, base=None):
             return HOOKS_DENY
         if item["op"] == "config" and config_writes_protected(item["tokens"]):
             return CONFIG_DENY
-    state = {"base": base, "cwd": base or os.getcwd(), "in_git": False, "protected": None, "variables": {}}
+    state = {"base": base, "cwd": base or os.getcwd(), "in_git": False, "protected": None, "variables": {},
+             "git_vars": set()}
     if writes_path(command, powershell, GIT_INTERNALS):
         return HOOKS_DENY
     reason = tampers_with_hooks(command, powershell, state)

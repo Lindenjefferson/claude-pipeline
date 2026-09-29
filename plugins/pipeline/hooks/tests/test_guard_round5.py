@@ -81,9 +81,10 @@ for command in ("git config core.hooksPath", "git config --get core.hooksPath",
 expect("git config '--get' 'core.hooksPath'", "ALLOW", tool="PowerShell")
 
 for command in ('rm -rf "$1"/../hooks', r"""find . -name info -type d -exec sh -c 'rm -rf "$1"/../hooks' _ {} \;""",
-                r"find . -name info -type d -exec rm -rf {}\\..\\hooks \;", r'rm -rf "$X"\..\hooks',
+                r"find . -name info -type d -exec rm -rf {}\\..\\hooks \;", r'rm -rf "$X\..\hooks"',
                 'rm -rf "$D/../../x"'):
     expect(command, "DENY")
+expect(r'rm -rf "$X"\..\hooks', "DENY", tool="PowerShell")
 got, reason, _ = hook_run('rm -rf "$1"/../hooks')
 check("the unresolved-variable deny suggests the literal path", "literal path" in reason, reason)
 got, reason, _ = hook_run("rm -rf $(git rev-parse --git-path hooks)")

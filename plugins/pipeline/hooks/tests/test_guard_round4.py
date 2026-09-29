@@ -75,9 +75,10 @@ for command in ("find . -type d -name __pycache__ -exec rm -rf {} +",
     expect(command, "ALLOW")
 
 for command in ("rm -rf $(git rev-parse --git-path hooks)", "rm $(git rev-parse --git-path hooks)/pre-push",
-                'd=$(git rev-parse --git-path hooks); rm -rf "$d"', "rm -f $HOOKDIR_UNSET/pre-commit"):
+                'd=$(git rev-parse --git-path hooks); rm -rf "$d"', "rm -f $GIT_DIR/hooks/pre-commit"):
     expect(command, "DENY", reason_has="hooks")
 for command in ("rm -rf $(mktemp -d)/build", "cat $(git rev-parse --git-path hooks)/pre-push",
+                "rm -f $HOOKDIR_UNSET/pre-commit",
                 "echo $(date) done"):
     expect(command, "ALLOW")
 
