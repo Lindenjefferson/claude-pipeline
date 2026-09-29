@@ -7,13 +7,13 @@ O plugin é habilitado **por projeto**, nunca globalmente: onde não está ativo
 ## Como funciona
 
 ```
-tamanho → (spec) → plano ✋ → por tarefa: dev → reviewer → qa ↺ → gate → merge/push ✋
+tamanho → (spec) → plano ✋ → ciclo: dev por tarefa → reviewer 1× → qa 1× → correção 1× ↺ → gate.py → merge/push ✋
 ```
 
 1. **`pipeline:kickoff`** prepara o projeto: `CLAUDE.md`, `docs/`, `.gitignore`, o hook `pre-commit` de segredos, as permissões dos agentes e, conforme o stack, Playwright e a base de privilégios do Supabase.
 2. **`pipeline:manager`** classifica o pedido como pequeno, padrão ou grande, e isso decide quantas etapas rodam. Nos grandes há spec (com `discovery` quando existem fontes brutas); nos padrões e grandes, um plano que você aprova (✋ 1).
-3. Cada tarefa passa pelo laço **`dev` → `reviewer` → `qa`**. O `dev` implementa em TDD (red, green, refactor), atualiza a doc do módulo e commita na branch da feature. O `reviewer` revisa o diff da tarefa com os checklists do stack. O `qa` roda os testes e confere os critérios de aceite. Achados voltam ao `dev`; depois de 3 rodadas sem resolver, o `manager` pergunta a você.
-4. O **`gate`** roda tudo localmente: ledger completo, build, tipos, lint, testes, scan de segredos em todo o histórico da branch e revisão do diff. Responde READY ou NOT READY e, se READY, grava o relatório de qualidade.
+3. O trabalho anda em **ciclos curtos** de até ~6 tarefas. Em cada tarefa só o `dev` roda: implementa em TDD (red, green, refactor), atualiza a doc do módulo, roda a suíte e commita na branch da feature. No fim do ciclo, **um** `reviewer` revisa o diff do ciclo inteiro com os checklists do stack e **um** `qa` confere os critérios de aceite. O `dev` corrige todos os achados numa rodada só, e o reviewer confere só a correção; se ainda sobrar algo, o `manager` pergunta a você. Ciclo pequeno quer dizer diff pequeno, poucos achados e uma correção, e o que deu errado vira uma linha em `docs/lessons.md` para o ciclo seguinte não repetir.
+4. O **`gate.py`** é um script, não um agente: confere o ledger e a árvore limpa, roda os comandos Build, Typecheck, Lint e Testes do `CLAUDE.md` e o scan de segredos em todo o histórico da branch. Responde READY ou NOT READY em segundos ou minutos e, se READY, grava o relatório de qualidade.
 5. Você decide o merge e o push (✋ 2). Nada sai da máquina sem esse pedido.
 
 ## Componentes
@@ -21,17 +21,16 @@ tamanho → (spec) → plano ✋ → por tarefa: dev → reviewer → qa ↺ →
 | Componente | Função |
 |---|---|
 | `pipeline:kickoff` | Prepara um projeto novo ou existente para o fluxo. |
-| `pipeline:manager` | Conduz a entrega e mantém o ledger (`ledger.py`). |
+| `pipeline:manager` | Conduz a entrega em ciclos, mantém o ledger (`ledger.py`) e roda o `gate.py`. |
 | `pipeline:discovery` | Extrai fatos das fontes brutas (planilhas, apps de referência, documentos) antes do design. |
 | `pipeline:dev` | Implementa uma tarefa: código, migrations e a doc do módulo, sempre com o teste primeiro. |
-| `pipeline:reviewer` | Revisa o diff da tarefa (ou o spec, antes do código): corretude, testes, segurança, banco/RLS, trilha de auditoria e UI. Só reporta o que consegue provar, com arquivo e linha e o cenário de falha; zero achados é um resultado válido. |
-| `pipeline:qa` | Roda os testes de verdade e confere os critérios de aceite, no navegador quando há tela. |
-| `pipeline:gate` | Checagem final local e relatório de qualidade. |
+| `pipeline:reviewer` | Revisa o diff do ciclo (ou o spec, antes do código): corretude, testes, segurança, banco/RLS, trilha de auditoria e UI. Só reporta o que consegue provar, com arquivo e linha e o cenário de falha; zero achados é um resultado válido. |
+| `pipeline:qa` | Roda os testes de verdade e confere os critérios de aceite do ciclo, no navegador quando há tela. |
 | Hook de segredos | `pre-commit` nativo do git, instalado pelo `kickoff`: bloqueia arquivos `.env` e linhas com cara de segredo (chaves de nuvem, tokens, chaves privadas, JWT que não seja a chave pública `anon`, `password`/`secret` com valor literal). É uma trava contra acidente: `git commit --no-verify` pula o hook, e o `kickoff` nega esse comando aos agentes. |
 
 ### Ledger
 
-`.superpowers/ledger.jsonl` (fora do git) guarda uma linha por execução de agente: tarefa, agente, veredito, achados abertos, commit e rodada. `ledger.py status` mostra, por tarefa, o que falta: o reviewer ainda não viu o último commit do dev, o qa ainda não rodou depois da revisão, uma reprovação voltou para o dev, ou 3 rodadas sem resolver. `status --check` é o que o `gate` usa para saber se todas as tarefas fecharam. As decisões que o `manager` toma no seu lugar (um achado descartado, um Minor adiado) ficam como notas.
+`.superpowers/ledger.jsonl` (fora do git) guarda uma linha por execução de agente: agente, tarefa, veredito, achados abertos e commit, agrupadas em ciclos. `ledger.py status` mostra o que falta no ciclo atual: uma tarefa do dev sem concluir, o reviewer que ainda não viu as últimas mudanças, o qa que ainda não rodou depois da revisão, uma reprovação que voltou para o dev, ou uma correção que não resolveu. O ciclo fecha quando o qa aprova, e `status --check` é o que o `gate.py` usa para saber disso. As decisões que o `manager` toma no seu lugar (um achado descartado, um Minor adiado) ficam como notas.
 
 ### Checklists e lições
 
@@ -42,7 +41,7 @@ tamanho → (spec) → plano ✋ → por tarefa: dev → reviewer → qa ↺ →
 - `python "<clone>/plugins/pipeline/hooks/pre-commit-secret-scan.py" --install-pre-commit` (o `kickoff` roda isso, com a sua permissão).
 - Varre o índice que o git está commitando (`git diff --cached` com o `GIT_INDEX_FILE` que o git define), com a allowlist lida desse índice. Um `pre-commit` que já existia vira `pre-commit.pipeline-chained` e roda antes; se ele falhar, o commit para.
 - É do lado do cliente e para acidentes: `--no-verify`, commits por encanamento (`commit-tree`, `rebase`) ou um script passam por fora. A última linha é a proteção do servidor: **ative o push protection do secret scanning do GitHub** (ou o equivalente do seu provedor) em cada repositório.
-- O `gate` continua como etapa do `manager` (verificação final e relatório de qualidade), mas nada bloqueia o push: o `manager` só faz push quando você pede.
+- O `gate.py` é a checagem final antes do merge, mas nada bloqueia o push: o `manager` só faz push quando você pede.
 
 ### Falso positivo no scan de segredos
 
@@ -88,7 +87,7 @@ O kickoff é idempotente: rode de novo depois do scaffold de um projeto novo par
 
 ### Relatórios de qualidade
 
-Cada entrega que o `gate` aprova gera `docs/quality-reports/<data>-<slug>.md`: o que foi entregue, as tarefas e suas rodadas de revisão, o resultado de cada checagem, os Minors adiados e os alertas de custo (um cron novo, uma tabela grande, uma API paga).
+Cada entrega que o `gate.py` aprova gera `docs/quality-reports/<data>-<slug>.md`: o resultado de cada checagem, os commits da branch, o número de ciclos e as notas do ledger (Minors adiados, decisões).
 
 ## Requisitos
 
@@ -125,7 +124,7 @@ claude plugin install pipeline@linden-plugins --scope local
 Em uma sessão nessa pasta:
 
 - peça o **kickoff** para preparar a estrutura (ele pergunta antes de instalar hooks persistentes);
-- peça uma entrega, por exemplo "implementar o módulo de relatórios" ou "corrigir o bug do login", e o **manager** conduz do tamanho ao gate.
+- peça uma entrega, por exemplo "implementar o módulo de relatórios" ou "corrigir o bug do login", e o **manager** conduz do tamanho ao `gate.py`.
 
 Nada é enviado ao repositório remoto sem pedido explícito: os commits ficam numa branch `feat/...` ou `fix/...`, e o merge e o push só acontecem depois do READY do `gate` e da sua aprovação.
 
@@ -141,9 +140,9 @@ claude plugin uninstall pipeline@linden-plugins --scope local
 .claude-plugin/marketplace.json     marketplace linden-plugins
 plugins/pipeline/
   .claude-plugin/plugin.json        manifesto e dependências
-  agents/                           discovery, dev, reviewer, qa, gate
+  agents/                           discovery, dev, reviewer, qa
   skills/kickoff/                   skill e templates do kickoff
-  skills/manager/                   skill, ledger.py, templates/spec-checklist.md e testes
+  skills/manager/                   skill, ledger.py, gate.py, templates/spec-checklist.md e testes
   checklists/                       regras por stack (auth, nextjs-react, postgres-supabase, general)
   hooks/                            scanner de segredos (pre-commit) e testes
 ```
@@ -167,7 +166,7 @@ Observações:
 
 - O `pre-commit` que o `kickoff` instala em cada projeto não guarda caminho: localiza o scanner pela variável `CLAUDE_PIPELINE_HOME` ou por `git config pipeline.home` (raiz do plugin, isto é, `<clone>/plugins/pipeline`). Configure uma vez por máquina com `git config --global pipeline.home "<clone>/plugins/pipeline"`. Se o clone mudar de lugar, só esse valor muda. Se o scanner não for encontrado, o commit é bloqueado com uma mensagem, nunca liberado em silêncio.
 - Projetos preparados antes da 1.6.0 têm também um `pre-push` do plugin: ele passou a não fazer nada. Rode em cada um `python "<clone>/plugins/pipeline/hooks/pre-commit-secret-scan.py" --install-pre-commit`, que atualiza o `pre-commit` e remove esse `pre-push` (um `pre-push` de outra origem fica). O `git config pipeline.gate` e o arquivo `gate-approved` deixaram de ser usados e podem ser apagados.
-- A 2.0.0 trocou o fluxo: um ledger iniciado por uma versão anterior não é lido pelo `ledger.py` novo. Termine a entrega em andamento antes de atualizar, ou comece um ledger novo.
+- A 2.0.0 e a 2.1.0 trocaram o formato do ledger: um ledger iniciado por uma versão anterior não é lido pelo `ledger.py` novo. Termine a entrega em andamento antes de atualizar, ou comece um ledger novo.
 - Instalações feitas a partir do GitHub ficam fixas na `version` de `plugin.json`: aumente a versão a cada release para que `claude plugin update` traga as mudanças.
 - Os arquivos são mantidos em LF (`.gitattributes`).
 

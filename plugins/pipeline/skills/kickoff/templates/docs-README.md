@@ -11,7 +11,7 @@ Esta pasta é a documentação viva do código: registra **o que existe e por qu
 ## Outras pastas
 
 - [`discovery/`](discovery/) — achados estruturados das fontes brutas (gerados pelo agente `discovery`).
-- [`quality-reports/`](quality-reports/) — um relatório por entrega aprovada (gerado pelo `gate`).
+- [`quality-reports/`](quality-reports/) — um relatório por entrega aprovada (gerado pelo `gate.py`).
 - `lessons.md` — regras curtas aprendidas com erros das entregas; o `dev` e o `reviewer` leem antes de cada tarefa.
 
 ## Diferença em relação à especificação
