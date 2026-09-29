@@ -48,9 +48,24 @@ for command in ("rm -rf $(git rev-parse --git-path hooks)", "rm $(git rev-parse 
                 'd=`git rev-parse --git-path hooks`; rm -rf "$d"', 'rm -rf "`git rev-parse --git-dir`"/hooks',
                 "rm -rf ${GITDIR:-.git}/hooks", 'rm -rf "$1"/../hooks', "d=.git; rm $d/hooks/pre-push",
                 'rm -rf "$GIT_DIR"', "rm -f $GIT_COMMON_DIR/pre-commit", 'echo x > "$(git config core.hooksPath)"',
-                r"find . -execdir rm -rf hooks \;", r"find . -name '*.log' -okdir sh -c 'rm -rf hooks' \;"):
+                r"find . -execdir rm -rf hooks \;", r"find . -name '*.log' -okdir sh -c 'rm -rf hooks' \;",
+                'd=$(git rev-parse --git-path hooks); e=$d; rm -rf "$e"', 'x="$(git rev-parse --git-dir)"; y=$x; rm -rf "$y"',
+                'export d=$(git rev-parse --git-path hooks) && rm -rf "$d"',
+                'cd "$(git rev-parse --git-dir)" && rm -f hooks/pre-push', "cd $(git rev-parse --git-path hooks) && rm -f pre-push",
+                'd=$(git rev-parse --git-dir); pushd "$d" && rm -f hooks/pre-push',
+                r"find . -name '*.o' -execdir sh -c 'rm -rf hooks' \;", r"find . -name '*.o' -execdir rm -rf hooks \;"):
     expect(command, "DENY")
-for command in ('$d = git rev-parse --git-path hooks; Remove-Item -Recurse $d', "Remove-Item $env:GIT_DIR -Recurse"):
+for command in ('$d = git rev-parse --git-path hooks; Remove-Item -Recurse $d', "Remove-Item $env:GIT_DIR -Recurse",
+                "$d = (git rev-parse --git-path hooks); Remove-Item -Recurse -Force $d",
+                "$d = & git rev-parse --git-path hooks; Remove-Item -Recurse $d",
+                '$d = $(git rev-parse --git-dir); Remove-Item "$d/config"',
+                "$d = @(git rev-parse --git-path hooks); Remove-Item -Recurse $d",
+                "$d = git rev-parse --git-path hooks; $e = $d; Remove-Item $e -Recurse",
+                '$h = (git rev-parse --git-dir) + "/hooks"; Remove-Item -Recurse $h',
+                "$h = Join-Path (git rev-parse --git-dir) hooks; Remove-Item -Recurse $h",
+                "$x = $env:GIT_DIR; Remove-Item -Recurse $x",
+                "Remove-Item (git rev-parse --git-path hooks) -Recurse",
+                "$d = git rev-parse --git-dir; Set-Location $d; Remove-Item hooks/pre-push"):
     expect(command, "DENY", tool="PowerShell")
 
 for command in ('echo hi > "$LOG"', 'cmd 2> "$ERRFILE"', 'cp a.txt "$DEST"', 'mv a.txt "$DEST"', 'rm -f "$f"',
@@ -58,10 +73,16 @@ for command in ('echo hi > "$LOG"', 'cmd 2> "$ERRFILE"', 'cp a.txt "$DEST"', 'mv
                 'for f in *.bak; do rm -f "$f"; done', "echo `date` > out.txt",
                 r"""find . -name '*.tmp' -exec sh -c 'rm -f "$1"' _ {} \;""",
                 r"""find . -name '*.bak' -exec sh -c 'mv "$1" "${1%.bak}"' _ {} \;""",
-                r"find . -name '*.log' -execdir gzip {} \;", r"find . -name '*.log' -execdir gzip -9 {} +"):
+                r"find . -name '*.log' -execdir gzip {} \;", r"find . -name '*.log' -execdir gzip -9 {} +",
+                'tmp=$(mktemp -d); rm -rf "$tmp"', "rm -rf $(ls -d .github/tmp)", 'rm -rf "$(cat .gitignore)"',
+                'cp a "$(git rev-parse --show-toplevel)"', 'd=$(mktemp -d); e=$d; rm -rf "$e"',
+                'cd "$(mktemp -d)" && rm -f pre-push', r"find . -name '*.o' -execdir mv {} {}.bak \;"):
     expect(command, "ALLOW")
 for command in ('$f = New-TemporaryFile; "x" | Out-File $f; Remove-Item $f', '"a" > $out',
-                "Copy-Item a.txt $dest", "Remove-Item $tmp"):
+                "Copy-Item a.txt $dest", "Remove-Item $tmp", "$f = New-TemporaryFile; Remove-Item $f",
+                '$x = (Get-Date).Ticks; Remove-Item "log$x.txt"', "$d = (New-TemporaryFile); Remove-Item $d",
+                "Remove-Item (Join-Path $env:TEMP x.log)", "$e = $f; Remove-Item $e",
+                "if (Test-Path x.log) { Remove-Item x.log }"):
     expect(command, "ALLOW", tool="PowerShell")
 
 got, reason, _ = hook_run("rm -rf $(git rev-parse --git-path hooks)")
