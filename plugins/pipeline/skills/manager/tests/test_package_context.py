@@ -93,7 +93,7 @@ r, text = brief("T0.1")
 section = text[text.find("## Lessons (from past deliveries)"):]
 expected = ["g-sql-high", "g-sql-low", "g-sql-zzz", "g-sql-recurred", "g-tsx", "d-sql"]
 check("lessons section comes after the addenda", text.find("Applies to every task.") < text.find("## Lessons"), text)
-check("lessons are ranked by glob specificity, then score (held - 2*recurred, +0.25 delivery), then id",
+check("lessons are ranked by priority, glob specificity, match count, then score (held - 2*recurred, +0.25 delivery), then id",
       [section.find(f"[{i}]") for i in expected] == sorted(section.find(f"[{i}]") for i in expected)
       and all(f"[{i}]" in section for i in expected), section)
 check("at most 6 lessons, with the truncation line",
@@ -116,7 +116,29 @@ save(os.path.join(BRIEFS, "T0.1.addenda", "03-fix.md"), "Fix round.\n")
 r, text = brief("T0.1")
 check("regenerating an existing brief (new addenda) does not count again",
       "Fix round." in text and json.loads(open(DELIVERY).readline())["counters"]["injected"] == 1, r.stderr)
+with open(DELIVERY, "a", encoding="utf-8", newline="\n") as handle:
+    handle.write(json.dumps(dict(make("d-new"), priority=1)) + "\n")
+r, text = brief("T0.1")
+delivery = {item["id"]: item for item in (json.loads(l) for l in open(DELIVERY, encoding="utf-8"))}
+check("regenerating after a new delivery lesson counts only the new one",
+      "[d-new]" in text and delivery["d-new"]["counters"]["injected"] == 1
+      and delivery["d-sql"]["counters"]["injected"] == 1 and delivery["g-sql-high"]["counters"]["injected"] == 1,
+      json.dumps(delivery))
+check("the injected ids of the task are kept next to the brief",
+      "d-new" in open(os.path.join(repo, "out", "T0.1.md.lessons"), encoding="utf-8").read().split())
+os.remove(os.path.join(repo, "out", "T0.1.md.lessons"))
+r, text = brief("T0.1")
+delivery = {item["id"]: item for item in (json.loads(l) for l in open(DELIVERY, encoding="utf-8"))}
+check("without the id list, the ids in the existing brief are not counted again",
+      delivery["d-new"]["counters"]["injected"] == 1 and delivery["d-sql"]["counters"]["injected"] == 1,
+      json.dumps(delivery))
 os.remove(os.path.join(BRIEFS, "T0.1.addenda", "03-fix.md"))
+os.remove(os.path.join(repo, "out", "T0.1.md"))
+r, text = brief("T0.1")
+delivery = {item["id"]: item for item in (json.loads(l) for l in open(DELIVERY, encoding="utf-8"))}
+check("a deleted and regenerated brief does not count again",
+      delivery["d-new"]["counters"]["injected"] == 1 and delivery["g-sql-high"]["counters"]["injected"] == 1,
+      json.dumps(delivery))
 os.remove(os.path.join(repo, "out", "T0.1.md"))
 r, text = brief("T0.1", "--no-lessons")
 check("--no-lessons leaves the section and the counters out",
@@ -149,9 +171,28 @@ r = package("brief", "--plan", "rls-plan.md", "--task", "R1", "--out", out,
             "--delivery-lessons", os.path.join(repo, "none.jsonl"))
 text = open(out, encoding="utf-8").read()
 injected = re.findall(r"\[([\w-]+)\]\n", text)
-check("an RLS task gets the pg-rls-* seed lessons over generic ones",
-      r.returncode == 0 and injected[:2] == ["pg-rls-assert-row-count", "pg-rls-negative-test"] and len(injected) == 6
+priority_lessons = {"pg-revoke-default-execute", "pg-security-definer-search-path"}
+rls_lessons = {"pg-rls-assert-row-count", "pg-rls-negative-test"}
+check("a migration + test task gets the priority lessons and the pg-rls-* test lessons first",
+      r.returncode == 0 and set(injected[:4]) == priority_lessons | rls_lessons and len(injected) == 6
       and "gen-fix-interactions" not in injected, text)
+
+save(os.path.join(repo, "fn-plan.md"), "## Task F1: fn\n**Files:**\n- Create: `supabase/migrations/0007_fn.sql`\n")
+out = os.path.join(repo, "out", "F1.md")
+r = package("brief", "--plan", "fn-plan.md", "--task", "F1", "--out", out,
+            "--delivery-lessons", os.path.join(repo, "none-fn.jsonl"))
+injected = re.findall(r"\[([\w-]+)\]\n", open(out, encoding="utf-8").read())
+check("a migration-only task gets both priority-1 lessons, not the pgTAP test lessons",
+      r.returncode == 0 and set(injected[:2]) == priority_lessons and len(injected) == 6
+      and not rls_lessons & set(injected) and "pg-pgtap-no-modifying-with" not in injected, str(injected))
+
+save(os.path.join(repo, "test-plan.md"), "## Task Q1: tests\n**Files:**\n- Create: `supabase/tests/rls_test.sql`\n")
+out = os.path.join(repo, "out", "Q1.md")
+r = package("brief", "--plan", "test-plan.md", "--task", "Q1", "--out", out,
+            "--delivery-lessons", os.path.join(repo, "none-q.jsonl"))
+injected = re.findall(r"\[([\w-]+)\]\n", open(out, encoding="utf-8").read())
+check("a test-only task gets the pgTAP test lessons, not the migration-writing ones",
+      r.returncode == 0 and set(injected[:2]) == rls_lessons and not priority_lessons & set(injected), str(injected))
 
 ranked = os.path.join(repo, "ranked-lessons")
 jsonl(os.path.join(ranked, "postgres-supabase.jsonl"), [
@@ -169,19 +210,20 @@ for attempt in range(2):
     package("brief", "--plan", "rls-plan.md", "--task", "R1", "--out", out, "--lessons-dir", ranked,
             "--delivery-lessons", os.path.join(repo, "none-ranked.jsonl"))
     orders.append(re.findall(r"\[([\w-]+)\]\n", open(out, encoding="utf-8").read()))
-check("more than 6 equal-counter matches: relevance order, deterministic",
-      orders[0] == orders[1] == ["r-b-both", "r-h-prio", "r-d-root", "r-a-any", "r-i-sql2", "r-g-any2"]
+check("more than 6 equal-counter matches: priority, then glob specificity (an exact glob beats **), deterministic",
+      orders[0] == orders[1] == ["r-h-prio", "r-e-deep", "r-c-mig", "r-b-both", "r-f-tests", "r-d-root"]
       and "[lessons truncated: 3 more]" in open(os.path.join(repo, "out", "ranked-0.md"), encoding="utf-8").read(), str(orders))
 
 overrides = os.path.join(repo, "override-lessons.jsonl")
 jsonl(overrides, [{"id": "r-i-sql2", "stack": "postgres-supabase", "override": True,
                    "counters": {"injected": 0, "held": 3, "recurred": 0}}])
 out = os.path.join(repo, "out", "ranked-override.md")
-package("brief", "--plan", "rls-plan.md", "--task", "R1", "--out", out, "--lessons-dir", ranked,
+save(os.path.join(repo, "sql-plan.md"), "## Task S1: sql\n**Files:**\n- Create: `db/x.sql`\n")
+package("brief", "--plan", "sql-plan.md", "--task", "S1", "--out", out, "--lessons-dir", ranked,
         "--delivery-lessons", overrides)
 order = re.findall(r"\[([\w-]+)\]\n", open(out, encoding="utf-8").read())
 check("delivery override counters add to the global counters in the ranking",
-      order.index("r-i-sql2") < order.index("r-a-any"), str(order))
+      order == ["r-i-sql2", "r-a-any", "r-g-any2"], str(order))
 row = json.loads(open(overrides, encoding="utf-8").readline())
 check("the override row counts the injection", row["counters"] == {"injected": 1, "held": 3, "recurred": 0}, str(row))
 

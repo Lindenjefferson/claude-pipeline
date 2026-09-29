@@ -18,6 +18,7 @@ LESSONS_HEADER = "## Lessons (from past deliveries)\n"
 LESSONS_MAX = 6
 LESSONS_CHARS = 8000
 TRUNCATION_RESERVE = 40
+LESSON_ID = re.compile(r"^- .* \[([\w.-]+)\]$", re.MULTILINE)
 DEPENDENCY_FIELD = re.compile(r"\b(?:name|version|resolved|resolution|integrity|checksum)\b|node_modules/", re.IGNORECASE)
 DEPENDENCY_HEADER = re.compile(r"^(?:\S.*@.*|\s+/?\S+@\S+):\s*$")
 DEPENDENCY_LINES_MAX = 80
@@ -71,7 +72,7 @@ def matches_any(globs, paths):
 
 def specificity(pattern):
     literal = re.sub(r"[*?]", "", pattern)
-    return len(re.split(r"[*?]", pattern, 1)[0]), len(literal), -len(re.findall(r"\*\*|\*|\?", pattern))
+    return len(re.split(r"[*?]", pattern, maxsplit=1)[0]), len(literal), -len(re.findall(r"\*\*|\*|\?", pattern))
 
 
 def relevance(globs, paths):
@@ -245,12 +246,27 @@ def lesson_rank(lesson, from_delivery, overrides, task_paths):
     matched, (prefix, literal, wildcards) = relevance(lesson.get("paths") or [], task_paths)
     priority = lesson.get("priority", 0)
     priority = priority if isinstance(priority, int) and not isinstance(priority, bool) else 0
-    return (-matched, -prefix, -literal, -wildcards, -priority, -lesson_score(lesson, from_delivery, overrides),
+    return (-priority, -prefix, -literal, -wildcards, -matched, -lesson_score(lesson, from_delivery, overrides),
             lesson["id"])
 
 
-def count_injections(path, rows, chosen):
-    pending = {lesson["id"]: lesson for lesson, _, _ in chosen}
+def injected_before(out):
+    sidecar = out + ".lessons"
+    if os.path.isfile(sidecar):
+        with open(sidecar, encoding="utf-8", errors="replace") as handle:
+            return {line.strip() for line in handle if line.strip()}
+    if not os.path.isfile(out):
+        return set()
+    with open(out, encoding="utf-8", errors="replace") as handle:
+        text = handle.read()
+    start = text.find(LESSONS_HEADER)
+    return set(LESSON_ID.findall(text[start:])) if start >= 0 else set()
+
+
+def count_injections(path, rows, chosen, already):
+    pending = {lesson["id"]: lesson for lesson, _, _ in chosen if lesson["id"] not in already}
+    if not pending:
+        return
     lines = []
     for raw, lesson in rows:
         if lesson and lesson.get("id") in pending:
@@ -266,7 +282,7 @@ def count_injections(path, rows, chosen):
     replace_file(path, "".join(lines))
 
 
-def lessons_section(args, task_paths, count):
+def lessons_section(args, task_paths):
     delivery_rows = load_jsonl(args.delivery_lessons) if os.path.isfile(args.delivery_lessons) else []
     overrides = {lesson["id"]: lesson for _, lesson in delivery_rows
                  if lesson and is_override(lesson) and lesson.get("id")}
@@ -294,8 +310,10 @@ def lessons_section(args, task_paths, count):
         size += len(line)
     if not chosen:
         return "", 0
-    if count:
-        count_injections(args.delivery_lessons, delivery_rows, chosen)
+    already = injected_before(args.out)
+    count_injections(args.delivery_lessons, delivery_rows, chosen, already)
+    injected = sorted(already | {lesson["id"] for lesson, _, _ in chosen})
+    write(args.out + ".lessons", "".join(f"{lesson_id}\n" for lesson_id in injected))
     section = LESSONS_HEADER + "".join(line for _, _, line in chosen)
     left = len(candidates) - len(chosen)
     if left:
@@ -315,7 +333,7 @@ def brief(args):
             text += "\n---\n\n" + handle.read().replace("\r\n", "\n").rstrip("\n") + "\n"
     injected = 0
     if not args.no_lessons:
-        section, injected = lessons_section(args, cited_paths(task_text), count=not os.path.exists(args.out))
+        section, injected = lessons_section(args, cited_paths(task_text))
         if section:
             text += "\n" + section
     write(args.out, text)
