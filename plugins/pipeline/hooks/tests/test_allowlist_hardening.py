@@ -158,9 +158,9 @@ r = subprocess.run([sys.executable, HOOK, "--pre-push"], cwd=repo, capture_outpu
                    input=f"refs/heads/main {head} refs/heads/main {'1' * 40}\n")
 check("pre-push says so when the remote state is unknown, and lists every entry",
       r.returncode == 0 and "remote state unknown" in r.stderr and FP in r.stderr and FP2 in r.stderr, r.stderr)
-r = subprocess.run([sys.executable, HOOK, "--pre-push"], cwd=repo, capture_output=True, text=True, encoding="utf-8",
-                   input=f"refs/heads/new {head} refs/heads/new {'0' * 40}\n")
-check("pre-push to a new remote branch compares with the remote-tracking branches",
+r = subprocess.run([sys.executable, HOOK, "--pre-push", "origin", remote], cwd=repo, capture_output=True,
+                   text=True, encoding="utf-8", input=f"refs/heads/new {head} refs/heads/new {'0' * 40}\n")
+check("pre-push to a new remote branch compares with the remote's default branch",
       r.returncode == 0 and "Warning" not in r.stderr, r.stderr)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

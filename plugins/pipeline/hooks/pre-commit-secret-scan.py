@@ -27,7 +27,9 @@ is read from the index for a commit and from each pushed ref's tree for a push, 
 the working tree, and the hook denies Claude's own edits of that file. `--fingerprint`
 prints the fingerprints of flagged lines read from stdin (a diff, or plain text with
 `--path <file>`).
-Fails open on any internal error or outside a git repo. As a Claude hook it is wired
+Fails open on any internal error. A git add, commit or push whose repository it cannot
+resolve (no repository in the folder it runs in, or one reached through --git-dir,
+--work-tree, --namespace or GIT_DIR-style variables) is denied. As a Claude hook it is wired
 by the `pipeline` plugin, so it runs only in sessions of repos that enable the plugin."""
 import base64
 import collections
@@ -316,11 +318,12 @@ echo "Push blocked: no Python 3 interpreter found on PATH (tried python, python3
 exit 1
 """
 ZERO_SHA = "0" * 40
-REMOTE_REFS_MAX = 200
 
 
 def pre_push():
     cwd = os.getcwd()
+    position = sys.argv.index("--pre-push") + 1
+    remote = sys.argv[position] if position < len(sys.argv) else None
     for line in sys.stdin:
         parts = line.split()
         if len(parts) < 4 or parts[1] == ZERO_SHA:
@@ -342,26 +345,51 @@ def pre_push():
                              + "\nRewrite the affected local commits and rotate the secret."
                              + ALLOW_HINT + "\n")
             sys.exit(1)
-        warn_new_allowlist_entries(cwd, local_sha, remote_sha)
+        warn_new_allowlist_entries(cwd, local_sha, remote_sha, remote)
     sys.exit(0)
 
 
-def warn_new_allowlist_entries(cwd, local_sha, remote_sha):
+def printable(text):
+    return "".join(char if char.isprintable()
+                   else f"\\x{ord(char):02x}" if ord(char) < 0x100
+                   else f"\\u{ord(char):04x}" if ord(char) < 0x10000
+                   else f"\\U{ord(char):08x}"
+                   for char in text)
+
+
+def remote_default_branch(cwd, remote):
+    if not remote:
+        return None
+    for name in ("HEAD", "main", "master"):
+        ref = f"refs/remotes/{remote}/{name}"
+        if git(["check-ref-format", ref], cwd)[0] != 0:
+            return None
+        code, sha = git(["rev-parse", "--verify", "--quiet", ref + "^{commit}"], cwd)
+        if code == 0 and sha.strip():
+            return ref, sha.strip()
+    return None
+
+
+def warn_new_allowlist_entries(cwd, local_sha, remote_sha, remote):
     pushed = allowlist_lines(cwd, local_sha)
     known, note = set(), ""
     if remote_sha == ZERO_SHA:
-        _, refs = git(["for-each-ref", "--format=%(objectname)", "refs/remotes"], cwd)
-        for ref in dict.fromkeys(refs.split()[:REMOTE_REFS_MAX]):
-            known |= load_allowlist(cwd, ref)
-        note = " (new remote branch; compared with the remote-tracking branches)"
+        default = remote_default_branch(cwd, remote)
+        if default:
+            known = load_allowlist(cwd, default[1])
+            note = f" (new remote branch; compared with {default[0]})"
+        else:
+            note = (" (new remote branch and no default branch known for this remote; listing every "
+                    "entry in the pushed allowlist)")
     elif git(["cat-file", "-e", f"{remote_sha}^{{commit}}"], cwd)[0] != 0:
         note = " (remote state unknown; listing every entry in the pushed allowlist)"
     else:
         known = load_allowlist(cwd, remote_sha)
     new = [line for entry, line in pushed.items() if entry not in known]
     if new:
-        sys.stderr.write(f"Warning: this push adds entries to {ALLOWLIST_FILE} (secret-scan exceptions){note}. "
-                         "Check that you added each one:\n  " + "\n  ".join(new) + "\n")
+        sys.stderr.write(f"Warning: this push adds entries to {ALLOWLIST_FILE} (secret-scan exceptions)"
+                         f"{printable(note)}. Check that you added each one:\n  "
+                         + "\n  ".join(printable(line) for line in new) + "\n")
 
 
 def install_pre_push():
@@ -392,6 +420,10 @@ CD_BASH = {"cd", "pushd"}
 CD_POWERSHELL = {"cd", "chdir", "set-location", "sl", "pushd", "push-location"}
 GIT_VALUE_OPTIONS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path",
                      "--super-prefix", "--config-env", "--list-cmds"}
+RELOCATING_OPTIONS = {"--git-dir", "--work-tree", "--namespace"}
+RELOCATING_ENV = {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_NAMESPACE"}
+RELOCATING_SET = re.compile(r"(?i)\benv:(?:" + "|".join(RELOCATING_ENV) + r")\b|(?<![\w$:])(?:"
+                            + "|".join(RELOCATING_ENV) + r")\s*=")
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 BASH_ESCAPABLE_IN_QUOTES = '$`"\\\n'
 BASH_ESCAPABLE = BASH_ESCAPABLE_IN_QUOTES + " \t'&|;()<>{}*?[]#~!"
@@ -483,9 +515,44 @@ def inline_script(tokens, flags):
     return None
 
 
-def find_git_ops(command, powershell, steps=None, ops=None):
+def assignment_value(name, assigns):
+    for assign in reversed(assigns):
+        key, _, value = assign.partition("=")
+        if key == name:
+            return value
+    return os.environ.get(name)
+
+
+def git_options(tokens, assigns):
+    local, configs, pairs, relocated, rest = [], [], [], False, tokens
+    while rest and rest[0][0].startswith("-"):
+        option = rest[0][0]
+        name, has_value, attached = option.partition("=")
+        relocated = relocated or name in RELOCATING_OPTIONS
+        setting, from_env = None, False
+        if name == "--config-env" and has_value:
+            setting, from_env, rest = attached, True, rest[1:]
+        elif option in GIT_VALUE_OPTIONS and len(rest) > 1:
+            if option == "-C":
+                local.append(rest[1])
+            elif option in ("-c", "--config-env"):
+                setting, from_env = rest[1][0], option == "--config-env"
+            rest = rest[2:]
+        else:
+            if option.startswith("-c") and len(option) > 2:
+                setting = option[2:]
+            rest = rest[1:]
+        if setting is not None:
+            key, _, value = setting.partition("=")
+            configs.append(setting)
+            pairs.append((key.lower(), assignment_value(value, assigns) if from_env else value))
+    return local, configs, pairs, relocated, rest
+
+
+def find_git_ops(command, powershell, steps=None, ops=None, env=None):
     steps = [] if steps is None else steps
     ops = [] if ops is None else ops
+    env = {"relocated": False} if env is None else env
     subshells = []
     for segment in split_segments(command, powershell):
         if segment == "(":
@@ -500,18 +567,20 @@ def find_git_ops(command, powershell, steps=None, ops=None):
                           or (not powershell and ASSIGNMENT.match(tokens[0][0]))):
             assigns.append(tokens[0][0])
             tokens = tokens[1:]
+        if (not tokens or program(tokens[0][0]) != "git") and RELOCATING_SET.search(segment):
+            env["relocated"] = True
         if not tokens:
             continue
         name = program(tokens[0][0])
         if name in SHELLS:
             script = inline_script(tokens[1:], {"-c"})
             if script:
-                find_git_ops(script, False, list(steps), ops)
+                find_git_ops(script, False, list(steps), ops, env)
             continue
         if name in POWERSHELLS:
             script = inline_script(tokens[1:], {"-c", "-command"})
             if script:
-                find_git_ops(script, True, list(steps), ops)
+                find_git_ops(script, True, list(steps), ops, env)
             continue
         if name in (CD_POWERSHELL if powershell else CD_BASH):
             paths = [t for t in tokens[1:] if not t[0].startswith("-")]
@@ -520,22 +589,13 @@ def find_git_ops(command, powershell, steps=None, ops=None):
             continue
         if name != "git":
             continue
-        local, configs, rest = [], [], tokens[1:]
-        while rest and rest[0][0].startswith("-"):
-            option = rest[0][0]
-            if option in GIT_VALUE_OPTIONS and len(rest) > 1:
-                if option == "-C":
-                    local.append(rest[1])
-                elif option in ("-c", "--config-env"):
-                    configs.append(rest[1][0])
-                rest = rest[2:]
-            else:
-                if option.startswith("-c") and len(option) > 2:
-                    configs.append(option[2:])
-                rest = rest[1:]
+        local, configs, pairs, relocated, rest = git_options(tokens[1:], assigns)
+        relocated = (relocated or env["relocated"]
+                     or any(assign.split("=", 1)[0].upper() in RELOCATING_ENV for assign in assigns))
         if rest:
             ops.append({"op": rest[0][0], "steps": steps + local, "tokens": rest[1:],
-                        "configs": configs, "assigns": assigns})
+                        "configs": configs, "pairs": pairs, "assigns": assigns,
+                        "relocated": relocated, "chain": ()})
     return ops
 
 
@@ -543,19 +603,62 @@ def shell_quote(text):
     return "'" + text.replace("'", "'\\''") + "'"
 
 
-def expand_alias(item, cwd, top):
-    code, alias = git(["config", "--get", "alias." + item["op"]], cwd)
-    alias = alias.strip()
-    if code != 0 or not alias:
+def alias_value(item, cwd):
+    key = "alias." + item["op"].lower()
+    given = [value for name, value in item.get("pairs", []) if name == key]
+    if given:
+        return given[-1]
+    if any(assign.split("=", 1)[0].upper().startswith("GIT_CONFIG") for assign in item.get("assigns", [])):
+        return None
+    code, alias = git(["config", "--get", key], cwd)
+    return alias.strip() if code == 0 else ""
+
+
+def expand_alias(item, base, powershell):
+    cwd = resolve_cwd(item["steps"], base, powershell) or base
+    alias = alias_value(item, cwd)
+    if alias is None:
+        item["unverifiable"] = True
+    if not alias:
         return []
-    _, builtins = git(["--list-cmds=builtins"], cwd)
-    if item["op"] in builtins.split():
-        return []
+    inherited = {"chain": item["chain"] + (item["op"].lower(),)}
     if alias.startswith("!"):
+        code, top = git(["rev-parse", "--show-toplevel"], cwd)
+        start = [(top.strip(), True)] if code == 0 else list(item["steps"])
         script = alias[1:] + "".join(" " + shell_quote(text) for text, _ in item["tokens"])
-        return find_git_ops(script, False, [(top, True)])
+        expansions = find_git_ops(script, False, start)
+        for inner in expansions:
+            inner.update(inherited, configs=item["configs"] + inner["configs"],
+                         pairs=item["pairs"] + inner["pairs"], assigns=item["assigns"] + inner["assigns"],
+                         relocated=item["relocated"] or inner["relocated"])
+        return expansions
     tokens = tokenize(alias, False) + item["tokens"]
-    return [{"op": tokens[0][0], "steps": item["steps"], "tokens": tokens[1:]}]
+    return [dict(item, op=tokens[0][0], tokens=tokens[1:], **inherited)]
+
+
+def expand_ops(ops, base, powershell):
+    if not ops:
+        return []
+    _, listed = git(["--list-cmds=builtins"], base)
+    builtins = set(listed.split())
+    result, queue, expansions = [], list(ops), 0
+    while queue:
+        item = queue.pop(0)
+        if item["op"] == "stage":
+            item["op"] = "add"
+        known = item["op"] in builtins
+        if item["relocated"] and (item["op"] in SCANNED_OPS or not known):
+            deny(RELOCATED.format(op=item["op"]))
+        result.append(item)
+        if known or item["op"] in SCANNED_OPS or item["op"].lower() in item["chain"]:
+            continue
+        expanded = expand_alias(item, base, powershell)
+        if expanded and expansions >= MAX_ALIAS_EXPANSIONS:
+            item["unverifiable"] = True
+            continue
+        expansions += bool(expanded)
+        queue[:0] = expanded
+    return result
 
 
 def resolve_cwd(steps, base, powershell):
@@ -570,6 +673,19 @@ def resolve_cwd(steps, base, powershell):
 UNVERIFIABLE = ("Cannot verify what this git {op} includes: {what} uses a command substitution "
                 "or a variable, which this check cannot expand. Use a literal value and run it "
                 "again.")
+SCANNED_OPS = {"add", "commit", "push"}
+RELOCATED = ("Cannot verify what this git {op} touches: it points git at a repository through "
+             "--git-dir, --work-tree, --namespace or GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/"
+             "GIT_COMMON_DIR/GIT_NAMESPACE, which this check does not follow. Run git from inside the "
+             "repository without --git-dir/--work-tree (cd into it, or use git -C <repo>) and without "
+             "those variables.")
+UNRESOLVED = ("Cannot verify what this git {op} touches: git finds no repository at {cwd}, the "
+              "folder this check resolved for it. Run git from inside the repository without "
+              "--git-dir/--work-tree (cd into it with a literal path, or use git -C <repo>). If this "
+              "same command creates the repository, create it first in a separate command.")
+ALIAS_UNVERIFIABLE = ("Cannot verify what the git alias `{op}` runs: its definition comes from an "
+                      "environment variable or a GIT_CONFIG* setting this check cannot read, or it "
+                      "nests too many aliases. Run the git command it stands for directly.")
 COMMIT_VALUE_FLAGS = "mFCct"
 COMMIT_ATTACHED_FLAGS = "Su"
 COMMIT_VALUE_OPTIONS = {"--message", "--file", "--reuse-message", "--reedit-message", "--template",
@@ -838,7 +954,7 @@ def allowlist_dirty(cwd, untracked):
     code, out = git(["status", "--porcelain", "--untracked-files=all", "--",
                      f":(top,literal){ALLOWLIST_FILE}"], cwd)
     if code != 0:
-        return False
+        return None
     for line in out.splitlines():
         if line.startswith("??"):
             if untracked:
@@ -854,7 +970,7 @@ def pathspecs_reach_allowlist(cwd, pathspecs, tracked_only, force=False):
         args += ["-o"] + ([] if force else ["--exclude-standard"])
     code, out = git(args + ["--"] + pathspecs, cwd)
     if code != 0:
-        return allowlist_dirty(cwd, untracked=not tracked_only)
+        return allowlist_dirty(cwd, untracked=not tracked_only) is not False
     return any(line.strip().lower() == ALLOWLIST_FILE for line in out.splitlines())
 
 
@@ -886,7 +1002,7 @@ def parse_add(tokens):
 def add_reaches_allowlist(tokens, cwd):
     paths, every, tracked_only, force, unknown = parse_add(tokens)
     if unknown:
-        return allowlist_dirty(cwd, untracked=not tracked_only)
+        return allowlist_dirty(cwd, untracked=not tracked_only) is not False
     if not paths:
         if not (every or tracked_only):
             return False
@@ -897,7 +1013,7 @@ def add_reaches_allowlist(tokens, cwd):
 def commit_reaches_allowlist(stage, cwd):
     for args in stage:
         if args == ["-A"]:
-            if allowlist_dirty(cwd, untracked=True):
+            if allowlist_dirty(cwd, untracked=True) is not False:
                 return True
         elif args == ["-u"]:
             if pathspecs_reach_allowlist(cwd, [":/"], tracked_only=True):
@@ -934,7 +1050,7 @@ def git_touches_allowlist(item, mentioned_anywhere, base, powershell):
             return True
     cwd = resolve_cwd(item["steps"], base, powershell)
     if cwd is None:
-        return allowlist_dirty(base, untracked=True)
+        return allowlist_dirty(base, untracked=True) is not False
     return add_reaches_allowlist(tokens, cwd) if op == "add" else commit_reaches_allowlist(stage, cwd)
 
 
@@ -954,7 +1070,7 @@ def git_segment_risky(tokens, assigns):
     return any(text.startswith(("-O", "--open-files-in-pager")) for text, _ in rest[1:])
 
 
-def touches_allowlist(command, powershell, base=None):
+def touches_allowlist(command, powershell, base, ops):
     segments = split_segments(command, powershell)
     mentioned_anywhere = any(names_allowlist(segment) for segment in segments)
     if mentioned_anywhere and ">" in HARMLESS_REDIRECT.sub("", command):
@@ -975,7 +1091,7 @@ def touches_allowlist(command, powershell, base=None):
         if name != "git" or git_segment_risky(tokens[1:], assigns):
             return True
     return any(git_touches_allowlist(item, mentioned_anywhere, base, powershell)
-               for item in find_git_ops(command, powershell))
+               for item in ops)
 
 
 def is_allowlist_path(target):
@@ -1004,16 +1120,24 @@ def main():
     command = tool_input.get("command", "") or ""
     powershell = payload.get("tool_name") == "PowerShell"
     base = payload.get("cwd") or None
-    if touches_allowlist(command, powershell, base):
-        deny(ALLOWLIST_DENY)
-    pending, unknown_add = {}, False
-    queue, expansions = find_git_ops(command, powershell), 0
-    while queue:
-        item = queue.pop(0)
-        if item["op"] == "stage":
-            item["op"] = "add"
-        guarded = item["op"] in ("commit", "push")
+    ops = expand_ops(find_git_ops(command, powershell), base, powershell)
+    tops, targets = {}, []
+    for item in ops:
         cwd = resolve_cwd(item["steps"], base, powershell)
+        if cwd is not None and cwd not in tops:
+            code, top = git(["rev-parse", "--show-toplevel"], cwd)
+            tops[cwd] = top.strip() if code == 0 and top.strip() else None
+        if item["op"] in SCANNED_OPS and cwd is not None and tops[cwd] is None:
+            deny(UNRESOLVED.format(op=item["op"], cwd=cwd))
+        targets.append((item, cwd))
+    if touches_allowlist(command, powershell, base, ops):
+        deny(ALLOWLIST_DENY)
+    for item in ops:
+        if item.get("unverifiable"):
+            deny(ALIAS_UNVERIFIABLE.format(op=item["op"]))
+    pending, unknown_add = {}, False
+    for item, cwd in targets:
+        guarded = item["op"] in ("commit", "push")
         if cwd is None:
             if item["op"] == "add":
                 unknown_add = True
@@ -1023,10 +1147,9 @@ def main():
                  "in the command uses a command substitution or a variable not set in the "
                  "environment. Use a literal path (or cd to it in a separate command) and run "
                  "it again.")
-        code, top = git(["rev-parse", "--show-toplevel"], cwd)
-        if code != 0:
+        top = tops[cwd]
+        if top is None:
             continue
-        top = top.strip()
         if item["op"] == "add":
             args = add_args(item["tokens"])
             if args is None:
@@ -1035,9 +1158,6 @@ def main():
                 pending.setdefault(top, []).append((cwd, args))
             continue
         if not guarded:
-            if expansions < MAX_ALIAS_EXPANSIONS:
-                expansions += 1
-                queue[:0] = expand_alias(item, cwd, top)
             continue
         if item["op"] == "commit":
             stage = parse_commit(item["tokens"])

@@ -212,9 +212,9 @@ def stacks_of(ids):
 
 auth_core = {"auth-account-oracles", "auth-preregistration-takeover", "auth-sessions-after-password-change"}
 r, injected = seed_brief("LOGIN", ["app/(auth)/login/actions.ts", "app/(auth)/login/page.tsx"])
-check("a login action + page task gets the three core auth lessons first and Next.js lessons after them",
-      r.returncode == 0 and set(injected[:3]) == auth_core and len(injected) == 6
-      and {"next-server-action-auth", "next-page-level-guard"} <= set(injected), str(injected))
+check("a login action + page task fills its first slots with the core auth and Next.js security lessons",
+      r.returncode == 0 and len(injected) == 6
+      and set(injected[:5]) == auth_core | {"next-server-action-auth", "next-page-level-guard"}, str(injected))
 r, injected = seed_brief("ACTION", ["app/(app)/pessoas/actions.ts"])
 check("a server-only action task gets no ui-*/a11y-* lessons",
       r.returncode == 0 and "next-server-action-auth" in injected
