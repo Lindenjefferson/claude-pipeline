@@ -1,0 +1,33 @@
+{
+  "core": [
+    "Bash(npm ci)",
+    "Bash(npm install)",
+    "Bash(npm run lint:*)",
+    "Bash(npm run typecheck:*)",
+    "Bash(npm test:*)",
+    "Bash(npm run test:*)",
+    "Bash(npm run build:*)"
+  ],
+  "nextjs": [
+    "Bash(npm run dev:*)",
+    "Bash(npx next info)"
+  ],
+  "supabase": [
+    "Bash(npm run db:*)",
+    "Bash(npx supabase status)",
+    "Bash(npx supabase start)",
+    "Bash(npx supabase stop)",
+    "Bash(npx supabase db reset)",
+    "Bash(npx supabase test db:*)",
+    "Bash(npx supabase migration new:*)",
+    "Bash(npx supabase migration list --local)"
+  ],
+  "never_allow": [
+    "npx supabase db push",
+    "npx supabase link",
+    "npx supabase functions deploy",
+    "vercel",
+    "git push",
+    "rm -rf"
+  ]
+}
