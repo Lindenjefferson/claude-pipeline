@@ -1,6 +1,6 @@
 # Spec checklist
 
-A spec answers every section below before step 2 (spec review). Write "not applicable" with the reason instead of leaving a section out. Spec reviewers treat a missing answer in their domain as a finding.
+A spec answers every section below. Write "not applicable" with the reason instead of leaving a section out. The reviewer, in spec mode, treats a missing answer as a finding.
 
 ## 1. Sensitive writes and audit trail
 For every write to roles, permissions, memberships, invites, credentials or money:
