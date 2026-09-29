@@ -4,8 +4,10 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -28,16 +30,35 @@ FAIL_HINT_RE = re.compile(r"\bFAIL\b|✗|×|\bnot ok\b|AssertionError|\bfailed\b
 OPERATORS = ("comparison", "boundary", "and-or-swap", "negate-condition", "return-flip")
 COMPARISON_SWAP = {"<": "<=", "<=": "<", ">": ">=", ">=": ">", "===": "!==", "!==": "===", "==": "!=", "!=": "=="}
 RELATIONAL = {"<", "<=", ">", ">="}
+WORKTREE_PREFIX = "tsmutate-wt-"
+WORKTREE_NAME_RE = re.compile(re.escape(WORKTREE_PREFIX) + r"(\d+)-")
 
 HELP_EPILOG = """\
-How it runs:
-  1. Refuses to start if FILE has uncommitted changes or is untracked (override: --allow-dirty).
-  2. Keeps the original bytes in memory and a backup copy in the temp directory.
-  3. Runs --test-cmd once on the original; it must pass.
-  4. For each mutant: writes the mutated file, runs --test-cmd, and in a `finally` writes the
-     original bytes back and checks their sha256. If the restored file does not match, it
-     stops immediately (exit 3) and prints the backup path.
+How it runs (default: temporary git worktree, FILE itself is never written):
+  1. Removes the temporary worktrees of earlier runs whose process is gone (named
+     tsmutate-wt-<pid>-*, in the temp directory), then `git worktree prune`.
+  2. `git worktree add --detach <temp>/tsmutate-wt-<pid>-<random> HEAD` (git hooks off), copies
+     the working-tree version of FILE into it (so uncommitted edits to FILE are what gets
+     mutated), and links every node_modules found in the folders from the repo root down to
+     FILE's folder and to --cwd into the same place in the worktree (a directory junction
+     via `mklink /J` on Windows, a symlink elsewhere). Other uncommitted files are NOT in
+     the worktree: it is HEAD plus FILE (the run prints a note listing them).
+  3. Runs --test-cmd with cwd = --cwd mapped into the worktree, so paths in --test-cmd must
+     be relative to --cwd (an absolute path would point at the real tree). Tools that write
+     caches into node_modules (vite, vitest) write them through the link, into the real
+     node_modules.
+  4. Runs --test-cmd once on the unmutated copy; it must pass. Then for each mutant writes
+     the mutated copy, runs --test-cmd and restores the copy (sha256 checked).
+  5. Removes the worktree (links first, never following them) and prunes it. If the process
+     is hard-killed (e.g. `taskkill /F /T` from a tool timeout), the project tree is
+     untouched and step 1 of the next run removes the leftover worktree.
   A mutant is killed when --test-cmd exits non-zero or times out, survived when it exits 0.
+
+--in-place (explicit opt-in): mutates FILE where it is. Refuses a FILE with uncommitted
+changes or untracked (override: --allow-dirty); keeps the original bytes in memory and a
+backup copy in the temp directory; writes each mutant into FILE and in a `finally` writes
+the original back and checks its sha256 (mismatch: exit 3, backup path printed). A hard kill
+(no `finally`) leaves the mutant in FILE: restore it with `git checkout -- FILE`.
 
 Comparison swaps on `<` and `>` only apply with whitespace on both sides (`a < b`), so TS
 generics such as `Array<number>` are left alone.
@@ -406,6 +427,185 @@ def run_command(cmd, cwd, timeout):
     return proc.returncode, out.decode("utf-8", "replace")
 
 
+def git_run(folder, *args, hooks_off=False):
+    prefix = ["git", "-c", f"core.hooksPath={os.path.join(tempfile.gettempdir(), WORKTREE_PREFIX + 'no-hooks')}"] \
+        if hooks_off else ["git"]
+    p = subprocess.run(prefix + ["-C", folder, *args], capture_output=True)
+    if p.returncode != 0:
+        raise ToolError(f"git {' '.join(args)} failed: {p.stderr.decode('utf-8', 'replace').strip()[:300]}")
+    return p.stdout.decode("utf-8", "replace")
+
+
+def git_toplevel(path):
+    folder = os.path.dirname(os.path.abspath(path))
+    p = subprocess.run(["git", "-C", folder, "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    return os.path.normpath(p.stdout.strip()) if p.returncode == 0 and p.stdout.strip() else None
+
+
+def pid_alive(pid):
+    if pid == os.getpid():
+        return True
+    if os.name == "nt":
+        import ctypes
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return ctypes.get_last_error() == 5
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
+            return code.value == 259
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def is_link(path):
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    return stat.S_ISLNK(st.st_mode) or bool(getattr(st, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def remove_link(path):
+    first, second = (os.rmdir, os.unlink) if os.name == "nt" else (os.unlink, os.rmdir)
+    try:
+        first(path)
+    except OSError:
+        second(path)
+
+
+def make_dir_link(target, link):
+    target, link = os.path.normpath(os.path.abspath(target)), os.path.normpath(os.path.abspath(link))
+    os.makedirs(os.path.dirname(link), exist_ok=True)
+    if os.name == "nt":
+        p = subprocess.run(["cmd", "/c", "mklink", "/J", link, target], capture_output=True)
+        if p.returncode == 0 and is_link(link):
+            return
+    try:
+        os.symlink(target, link, target_is_directory=True)
+    except OSError as e:
+        raise ToolError(f"could not link {link} -> {target}: {e}")
+
+
+def safe_rmtree(path):
+    if is_link(path):
+        remove_link(path)
+        return
+    for entry in os.scandir(path):
+        if is_link(entry.path):
+            remove_link(entry.path)
+        elif entry.is_dir(follow_symlinks=False):
+            safe_rmtree(entry.path)
+        else:
+            try:
+                os.remove(entry.path)
+            except PermissionError:
+                os.chmod(entry.path, stat.S_IWRITE)
+                os.remove(entry.path)
+    os.rmdir(path)
+
+
+def registered_worktrees(root):
+    out = git_run(root, "worktree", "list", "--porcelain")
+    return [os.path.normpath(line[len("worktree "):]) for line in out.splitlines() if line.startswith("worktree ")]
+
+
+def remove_worktree(root, path):
+    if os.path.lexists(path):
+        safe_rmtree(path)
+    git_run(root, "worktree", "prune")
+
+
+def cleanup_stale_worktrees(root):
+    temp = tempfile.gettempdir()
+    candidates = set(registered_worktrees(root))
+    candidates |= {os.path.normpath(os.path.join(temp, d)) for d in os.listdir(temp) if d.startswith(WORKTREE_PREFIX)}
+    removed = []
+    for path in sorted(candidates):
+        m = WORKTREE_NAME_RE.match(os.path.basename(path))
+        if not m or pid_alive(int(m.group(1))):
+            continue
+        try:
+            if os.path.lexists(path):
+                safe_rmtree(path)
+            removed.append(path)
+        except OSError:
+            pass
+    git_run(root, "worktree", "prune")
+    return removed
+
+
+def link_node_modules(root, wt, rel_dirs):
+    linked = []
+    for rel in rel_dirs:
+        source = os.path.normpath(os.path.join(root, rel, "node_modules"))
+        link = os.path.normpath(os.path.join(wt, rel, "node_modules"))
+        if os.path.isdir(source) and not os.path.lexists(link):
+            make_dir_link(source, link)
+            linked.append(link)
+    return linked
+
+
+def ancestor_dirs(rel_path):
+    parts = [] if rel_path in ("", ".") else rel_path.replace("\\", "/").split("/")
+    return [os.path.join(*parts[:k]) if k else "." for k in range(len(parts) + 1)]
+
+
+def create_worktree(root, path, rel_file, rel_cwd):
+    cleanup_stale_worktrees(root)
+    wt = os.path.join(tempfile.gettempdir(), f"{WORKTREE_PREFIX}{os.getpid()}-{secrets.token_hex(4)}")
+    git_run(root, "worktree", "add", "--detach", wt, "HEAD", hooks_off=True)
+    try:
+        target = os.path.join(wt, rel_file)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.copyfile(path, target)
+        rel_dirs = sorted(set(ancestor_dirs(os.path.dirname(rel_file))) | set(ancestor_dirs(rel_cwd)))
+        link_node_modules(root, wt, rel_dirs)
+    except BaseException:
+        remove_worktree(root, wt)
+        raise
+    return wt
+
+
+def other_local_changes(root, rel_file):
+    out = git_run(root, "status", "--porcelain", "--untracked-files=no")
+    changed = [line[3:].strip() for line in out.splitlines() if line.strip()]
+    return [c for c in changed if c.replace("\\", "/") != rel_file.replace("\\", "/")]
+
+
+def run_in_worktree(path, rows, test_cmd, cwd, timeout, progress=None, warn=None):
+    root = git_toplevel(path)
+    if root is None:
+        raise ToolError(f"{path} is not in a git repository: pass --in-place to mutate it where it is")
+    rel_file = os.path.relpath(path, root)
+    rel_cwd = os.path.relpath(os.path.abspath(cwd), root)
+    if rel_file.startswith("..") or rel_cwd.startswith(".."):
+        raise ToolError("FILE and --cwd must be inside the same git repository in worktree mode")
+    others = other_local_changes(root, rel_file)
+    if others and warn:
+        warn(f"note: the temporary worktree is HEAD plus {rel_file}; these local changes are not in it: "
+             + ", ".join(others[:10]) + (" ..." if len(others) > 10 else ""))
+    wt = create_worktree(root, path, rel_file, rel_cwd)
+    try:
+        return run_all(os.path.join(wt, rel_file), rows, test_cmd, os.path.normpath(os.path.join(wt, rel_cwd)),
+                       timeout, progress=progress)
+    finally:
+        try:
+            remove_worktree(root, wt)
+        except (OSError, ToolError) as e:
+            if warn:
+                warn(f"warning: could not remove the temporary worktree {wt} ({e}); the next run removes it")
+
+
 def killing_hint(output):
     for line in ANSI_RE.sub("", output).splitlines():
         if FAIL_HINT_RE.search(line) and not re.search(r"\b0 failed\b", line):
@@ -489,15 +689,21 @@ def build_parser():
     p = argparse.ArgumentParser(
         prog="tsmutate.py",
         description="Textual mutation testing for one TS/JS file (e.g. a lib/calculations module): "
-                    "writes each mutant, runs the test command, always restores the original.",
+                    "runs the test command against each mutant in a temporary git worktree "
+                    "(or in place with --in-place).",
         epilog=HELP_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("file", help="TS/JS file to mutate")
     p.add_argument("--test-cmd", help="command that runs the relevant tests, e.g. 'npx vitest run lib/calculations'")
-    p.add_argument("--cwd", help="working directory for --test-cmd (default: the git root of FILE, else its folder)")
+    p.add_argument("--cwd", help="working directory for --test-cmd, mapped into the temporary worktree "
+                                 "(default: the git root of FILE, else its folder)")
     p.add_argument("--operators", help="comma-separated subset of: " + ", ".join(OPERATORS))
     p.add_argument("--timeout", type=int, default=300, help="seconds per test run (default 300)")
     p.add_argument("--max-mutants", type=int, help="cap on the number of mutants run")
-    p.add_argument("--allow-dirty", action="store_true", help="run even if FILE has uncommitted changes")
+    p.add_argument("--in-place", action="store_true",
+                   help="mutate FILE where it is instead of in a temporary git worktree (a hard kill leaves the "
+                        "mutant in FILE)")
+    p.add_argument("--allow-dirty", action="store_true",
+                   help="with --in-place, run even if FILE has uncommitted changes")
     p.add_argument("--list", action="store_true", help="only list the mutants, do not write the file")
     p.add_argument("--json", action="store_true", help="print JSON instead of the table")
     p.add_argument("--fail-on-survivors", action="store_true", help="exit 1 when any mutant survives")
@@ -541,14 +747,20 @@ def main(argv=None):
             return 0
         if not args.test_cmd:
             raise ToolError("--test-cmd is required unless --list")
-        state = git_state(path)
-        if state != "clean" and not args.allow_dirty:
-            raise ToolError(f"{args.file} is {state}: commit or stash it first (or pass --allow-dirty); "
-                            "a clean file is what guarantees the restore can be checked against git")
+        if args.in_place:
+            state = git_state(path)
+            if state != "clean" and not args.allow_dirty:
+                raise ToolError(f"{args.file} is {state}: commit or stash it first (or pass --allow-dirty); "
+                                "a clean file is what guarantees the restore can be checked against git")
         progress = None if args.json else (lambda r: print(f"  {r['id']} {r['status']}", file=sys.stderr, flush=True))
         if not args.json:
-            print(f"tsmutate: {len(rows)} mutants in {rel}", file=sys.stderr)
-        run_all(path, rows, args.test_cmd, cwd, args.timeout, progress=progress)
+            print(f"tsmutate: {len(rows)} mutants in {rel}"
+                  + (" (in place)" if args.in_place else " (temporary git worktree)"), file=sys.stderr)
+        if args.in_place:
+            run_all(path, rows, args.test_cmd, cwd, args.timeout, progress=progress)
+        else:
+            run_in_worktree(path, rows, args.test_cmd, cwd, args.timeout, progress=progress,
+                            warn=lambda msg: print(f"tsmutate: {msg}", file=sys.stderr, flush=True))
         summary = summarize(rows)
         if args.json:
             print(json.dumps({"file": rel, "test_cmd": args.test_cmd, "summary": summary, "mutants": public_rows(rows)},
@@ -559,9 +771,14 @@ def main(argv=None):
                   f"score {summary['score']}%")
         return 1 if args.fail_on_survivors and summary["survived"] else 0
     except RestoreError as e:
-        print(f"tsmutate: RESTORE FAILURE: {e}. The original is kept in the tsmutate-* folder under "
-              f"{tempfile.gettempdir()}; restore it (or `git checkout -- {args.file}`) before anything else.",
-              file=sys.stderr)
+        if args.in_place:
+            print(f"tsmutate: RESTORE FAILURE: {e}. The original is kept in the tsmutate-* folder under "
+                  f"{tempfile.gettempdir()}; restore it (or `git checkout -- {args.file}`) before anything else.",
+                  file=sys.stderr)
+        else:
+            print(f"tsmutate: RESTORE FAILURE in the temporary worktree: {e}. {args.file} itself was not written; "
+                  "the run stopped because the remaining mutants would not be measured against the original.",
+                  file=sys.stderr)
         return 3
     except ToolError as e:
         print(f"tsmutate: error: {e}", file=sys.stderr)

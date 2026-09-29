@@ -72,6 +72,15 @@ check("lex keeps strings, dollar quotes and nested comments atomic",
       kinds == ["ident", "str", "punct", "dollar", "punct", "ident"], kinds)
 check("lex splits operators without swallowing comments",
       [t.text for t in pg.significant(pg.lex("a>=--x\nb <> c->>'k'"))] == ["a", ">=", "b", "<>", "c", "->>", "'k'"])
+check("lex: >=-1 splits into >= and -, other operators keep their trailing sign rules",
+      [t.text for t in pg.significant(pg.lex("a >=-1 and b<=+2 and c @- d and e ->> f"))]
+      == ["a", ">=", "-", "1", "and", "b", "<=", "+", "2", "and", "c", "@-", "d", "and", "e", "->>", "f"],
+      [t.text for t in pg.significant(pg.lex("a >=-1 and b<=+2 and c @- d and e ->> f"))])
+boundary_fn = pg.find_function_defs(
+    "create function public.b(n int) returns bool language sql as $$ select n >=-1 $$;", "b.sql")[0][0]
+check("boundary mutant generated for n >=-1",
+      [(m.operator, m.replacement) for m in pg.generate_mutants(boundary_fn, operators=("boundary",))] == [("boundary", ">")],
+      pg.generate_mutants(boundary_fn))
 check("lex: E-strings with backslash escapes",
       [t.kind for t in pg.significant(pg.lex(r"select E'it\'s; x' ;"))] == ["ident", "str", "punct"])
 
@@ -179,25 +188,76 @@ select plan(1);
 create function pg_temp.f() returns void language plpgsql as $$ begin commit; end $$;
 savepoint a;
 rollback to savepoint a;
-\\set x 1
-select ok(true);
+rollback work to b;
+release savepoint a;
+select ok(true), E'a\\b\\'', 'c\\d', "we\\ird"; -- \\! not a command
+/* \\c nor /* nested \\o */ this */
+select $f$ \\gexec $f$;
 select * from finish();
 rollback;
 """
 body = pg.prepare_test(TEST_OK, "t.sql")
 check("prepare_test strips the leading begin and trailing rollback only",
       "begin;" not in body.split("$$")[0] and "rollback;" not in body.replace("rollback to savepoint a;", "")
-      and "rollback to savepoint a;" in body and "\\set x 1" in body and "select ok(true);" in body, body)
+      and "rollback to savepoint a;" in body and "select ok(true)," in body and "$f$ \\gexec $f$" in body, body)
 check("prepare_test keeps the body without begin/rollback as is",
       "select 1;" in pg.prepare_test("select 1;\n", "t.sql"))
 check("prepare_test refuses a commit in the middle",
       "commit" in (expect_error(lambda: pg.prepare_test("begin;\nselect 1;\ncommit;\nselect 2;\nrollback;\n", "t.sql")) or ""))
 check("prepare_test refuses a second begin",
       expect_error(lambda: pg.prepare_test("begin;\nselect 1;\nbegin;\nselect 2;\n", "t.sql")) is not None)
-check("prepare_test refuses file includes and shell escapes",
-      expect_error(lambda: pg.prepare_test("\\ir other.sql\nselect 1;\n", "t.sql")) is not None
-      and expect_error(lambda: pg.prepare_test("\\! rm -rf x\n", "t.sql")) is not None
-      and expect_error(lambda: pg.prepare_test("select 1;\n\\c other\n", "t.sql")) is not None)
+META_FORMS = [
+    r"\ir other.sql" "\nselect 1;\n",
+    r"\! rm -rf x" "\n",
+    "select 1;\n" r"\c other" "\n",
+    r"select 1; \! echo pwned" "\n",
+    r"select ok(true); \c postgresql://evil.example.com/db" "\n",
+    r"select 'commit' \gexec" "\n",
+    r"select 1 \g |calc.exe" "\n",
+    r"select 1 \g out.txt" "\n",
+    r"select 1 \gx" "\n",
+    r"select 1; \lo_export 123 /tmp/x" "\n",
+    r"\s history.txt" "\n",
+    r"\setenv PGHOST evil" "\n",
+    r"\cd /tmp" "\n",
+    r"\set x 1" "\n",
+    r"select 1\;select 2;" "\n",
+    r"select 'a\'' \! pwn '" "\n",
+    r"select 'ok' as x -- fine" "\n" r"/* ok */ \o /tmp/x" "\n",
+]
+for form in META_FORMS:
+    check(f"prepare_test refuses unquoted backslash: {form.strip()[:40]!r}",
+          expect_error(lambda: pg.prepare_test(form, "t.sql"), pg.UnsupportedTest) is not None)
+check("refusal names the line of the meta-command",
+      ":2:" in (expect_error(lambda: pg.prepare_test("select 1;\nselect 2; \\! x\n", "t.sql")) or ""))
+QUOTED_BACKSLASHES = [
+    r"select E'\\ \' \! x';" "\n",
+    r"select 'c:\dir\n';" "\n",
+    r'select "a\b" from t;' "\n",
+    r"-- \! x" "\nselect 1;\n",
+    r"/* \! /* \c */ \o */ select 1;" "\n",
+    r"select $x$ \! $$ \c $x$;" "\n",
+    r"do $$ begin raise notice '\!'; end $$;" "\n",
+]
+for form in QUOTED_BACKSLASHES:
+    check(f"prepare_test allows quoted backslashes: {form.strip()[:40]!r}",
+          expect_error(lambda: pg.prepare_test(form, "t.sql")) is None, expect_error(lambda: pg.prepare_test(form, "t.sql")))
+TX_FORMS = ["commit;", "end;", "end work;", "abort;", "rollback;", "rollback work;", "rollback prepared 'x';",
+            "prepare transaction 'x';", "commit prepared 'x';", "start transaction;", "begin;", "begin isolation level serializable;"]
+for form in TX_FORMS:
+    check(f"prepare_test refuses top-level `{form}` in the middle",
+          expect_error(lambda: pg.prepare_test(f"begin;\nselect 1;\n{form}\nselect 2;\nrollback;\n", "t.sql"),
+                       pg.UnsupportedTest) is not None)
+for form in ("rollback to savepoint a;", "rollback to a;", "rollback transaction to savepoint a;", "savepoint a;",
+             "release savepoint a;", "select 'commit';", "create function pg_temp.g() returns int language plpgsql as $$ begin commit; end $$;"):
+    check(f"prepare_test allows `{form}` in the middle",
+          expect_error(lambda: pg.prepare_test(f"begin;\nselect 1;\n{form}\nselect 2;\nrollback;\n", "t.sql")) is None,
+          expect_error(lambda: pg.prepare_test(f"begin;\nselect 1;\n{form}\nselect 2;\nrollback;\n", "t.sql")))
+check("prepare_test strips a trailing end/abort as the closing statement",
+      "end" not in pg.prepare_test("begin;\nselect 1;\nend;\n", "t.sql")
+      and "abort" not in pg.prepare_test("start transaction;\nselect 1;\nabort;\n", "t.sql"))
+check("build_script refuses a DDL that would carry a meta-command",
+      expect_error(lambda: pg.build_script("select 1; \\! x", "select 1;", 30), pg.UnsupportedTest) is not None)
 check("prepare_test turns a trailing commit into the wrapper's rollback",
       "commit" not in pg.prepare_test("begin;\nselect 1;\ncommit;\n", "t.sql"))
 
@@ -223,6 +283,70 @@ for url in ("postgres://u@db.example.com/db", "postgres://u@10.0.0.5/db", "postg
             "postgresql://u@localhost/db?host=remote.example.com", "host=10.1.2.3 dbname=x", "service=prod",
             "postgresql://u@localhost/db?hostaddr=192.168.0.10", "mysql://u@localhost/db"):
     check(f"remote url refused: {url}", expect_error(lambda: pg.check_local_url(url)) is not None)
+for url in ("postgres://u@134744072/db", "postgres://u@0x08080808/db", "postgres://u@010.0.0.1/db",
+            "postgres://u@0x7f.1/db", "host=134744072 dbname=x", "postgresql://u@localhost/db?host=0x08080808",
+            "postgres://u@0/db", "postgres://u@0X7F000001/db"):
+    check(f"numeric/hex/octal host refused: {url}", expect_error(lambda: pg.check_local_url(url)) is not None)
+os.environ["PGHOST"] = "remote.example.com"
+check("a URL without host is local even when PGHOST points elsewhere (PGHOST is stripped)",
+      expect_error(lambda: pg.check_local_url("postgresql:///postgres")) is None)
+del os.environ["PGHOST"]
+env = pg.psql_env({"PATH": "p", "PGHOST": "evil", "PGHOSTADDR": "1.2.3.4", "PGPORT": "1", "PGSERVICE": "prod",
+                   "PGSERVICEFILE": "f", "PGPASSFILE": "f", "PGSSLMODE": "disable", "PGSSLROOTCERT": "c",
+                   "PGSYSCONFDIR": "d", "PGOPTIONS": "-c x=1", "PSQLRC": "rc", "PGCLIENTENCODING": "LATIN1"})
+check("psql child env drops every PG* variable and PSQLRC, keeps the rest, sets PGCLIENTENCODING",
+      env == {"PATH": "p", "PGCLIENTENCODING": "UTF8"}, env)
+check("psql runs with -X and ON_ERROR_STOP=1",
+      "-X" in pg.psql_command_for_url("postgres://u@localhost/db", "psql")
+      and "ON_ERROR_STOP=1" in pg.psql_command_for_url("postgres://u@localhost/db", "psql")
+      and "-X" in pg.psql_command_for_container("c") and "ON_ERROR_STOP=1" in pg.psql_command_for_container("c"))
+os.environ["PGHOST"] = "remote.example.com"
+probe = pg.make_runner([sys.executable, "-c", "import os,sys; sys.stdin.read(); print(os.environ.get('PGHOST', 'unset'))"], 30)
+check("runner does not pass PGHOST to the child", probe("x").strip() == "unset", probe("x"))
+del os.environ["PGHOST"]
+exit3 = pg.make_runner([sys.executable, "-c", "import sys; sys.stdin.read(); print('ERROR:  boom'); sys.exit(3)"], 30)
+check("psql exit 3 (script error under ON_ERROR_STOP) returns the output to classify", "ERROR:  boom" in (exit3("x") or ""))
+exit2 = pg.make_runner([sys.executable, "-c", "import sys; sys.stdin.read(); sys.exit(2)"], 30)
+check("psql exit 2 (connection) is a tool error", expect_error(lambda: exit2("x")) is not None)
+
+for ep, ok in (("unix:///var/run/docker.sock", True), ("npipe:////./pipe/docker_engine", True),
+               ("tcp://127.0.0.1:2375", True), ("tcp://localhost:2375", True), ("ssh://me@localhost", True),
+               ("tcp://10.0.0.5:2376", False), ("ssh://me@build.example.com", False), ("tcp://134744072:2375", False),
+               ("tcp://:2375", False), ("fd://", False)):
+    check(f"docker endpoint {ep} {'local' if ok else 'refused'}", pg.docker_endpoint_is_local(ep) == ok)
+
+
+class FakeRun:
+    def __init__(self, stdout, code=0):
+        self.stdout, self.code, self.calls = stdout, code, []
+
+    def __call__(self, cmd, **kw):
+        self.calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, self.code, self.stdout, "boom")
+
+
+def ctx(host):
+    return '[{"Name":"x","Endpoints":{"docker":{"Host":"%s"}}}]' % host
+
+
+saved = {k: os.environ.pop(k) for k in ("DOCKER_HOST", "DOCKER_CONTEXT") if k in os.environ}
+check("docker context with a local endpoint passes",
+      expect_error(lambda: pg.check_local_docker(FakeRun(ctx("npipe:////./pipe/docker_engine")))) is None)
+os.environ["DOCKER_CONTEXT"] = "remote"
+err = expect_error(lambda: pg.check_local_docker(FakeRun(ctx("tcp://10.1.2.3:2376"))))
+check("docker context with a remote endpoint is refused and names DOCKER_CONTEXT", err and "DOCKER_CONTEXT=remote" in err, err)
+del os.environ["DOCKER_CONTEXT"]
+check("unreadable docker context fails closed", expect_error(lambda: pg.check_local_docker(FakeRun("", 1))) is not None
+      and expect_error(lambda: pg.check_local_docker(FakeRun("not json"))) is not None)
+os.environ["DOCKER_HOST"] = "tcp://build.example.com:2376"
+fake_run = FakeRun(ctx("unix:///var/run/docker.sock"))
+check("remote DOCKER_HOST is refused before the context", expect_error(lambda: pg.check_local_docker(fake_run)) is not None
+      and not fake_run.calls)
+os.environ["DOCKER_HOST"] = "unix:///var/run/docker.sock"
+check("local DOCKER_HOST overrides the context", expect_error(lambda: pg.check_local_docker(FakeRun(ctx("tcp://10.1.2.3:1"))))
+      is None)
+del os.environ["DOCKER_HOST"]
+os.environ.update(saved)
 
 
 class FakeDB:
@@ -306,6 +430,16 @@ sh("git", "commit", "-q", "-m", "two")
 check("changed_functions discovers functions created/replaced in the diff range",
       pg.changed_functions(root, first, "HEAD", "supabase/migrations") == [("public", "helper")],
       pg.changed_functions(root, first, "HEAD", "supabase/migrations"))
+
+second = sh("git", "rev-parse", "HEAD")
+sh("git", "mv", "supabase/migrations/0002_b.sql", "supabase/migrations/0003_b.sql")
+open(os.path.join(root, "supabase", "migrations", "0003_b.sql"), "a", encoding="utf-8").write(
+    "create function public.renamed_extra() returns int language sql as $$ select 1 $$;\n")
+sh("git", "add", ".")
+sh("git", "commit", "-q", "-m", "rename and edit")
+check("changed_functions follows a renamed and edited migration (--diff-filter=AMR)",
+      pg.changed_functions(root, second, "HEAD", "supabase/migrations") == [("public", "helper"), ("public", "renamed_extra")],
+      pg.changed_functions(root, second, "HEAD", "supabase/migrations"))
 
 r = tool("--from", first, "--list", "--json")
 check("CLI --from --list lists the changed function's mutants", r.returncode == 0 and '"public.helper(p_x int)"' in r.stdout,
