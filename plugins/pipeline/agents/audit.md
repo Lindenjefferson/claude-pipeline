@@ -19,7 +19,7 @@ You are the **audit/logging** reviewer. You check whether the system can answer 
 
 ## Report contract
 - **Verdict**: FAIL if any Critical or Important finding is open; PASS only when none remains (Minor findings alone do not fail).
-- **Findings**, most important first, each with: file:line, what's missing or wrong, why it matters concretely (e.g., "if this transaction is edited later, there's no record of the original amount"), severity (Critical/Important/Minor).
+- **Findings**, most important first, each with: file:line, what's missing or wrong, why it matters concretely (e.g., "if this transaction is edited later, there's no record of the original amount"), severity (Critical/Important/Minor). Group them under severity headings (`## Critical`, `## Important`, `## Minor`) and name each file by its path from the repository root (`supabase/migrations/0002_x.sql:40`, not `0002:40` or a bare file name): a fix re-review is scoped to the files your findings cite, and a file it cannot resolve sends you back over the whole task. Keep notes, checks and other reviewers' items out of those sections.
 
 ## Pre-report gate
 Before reporting, check each finding:

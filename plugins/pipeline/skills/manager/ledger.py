@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import contextlib
 import glob
 import hashlib
 import json
@@ -8,6 +9,9 @@ import re
 import subprocess
 import sys
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from findings import LINE_SUFFIX, fix_scope_reason
 
 SEVERITIES = ("critical", "important", "minor")
 IMPLEMENTER_VERDICTS = ("DONE", "DONE_WITH_CONCERNS", "NEEDS_CONTEXT", "BLOCKED", "NO_DOC_CHANGE_NEEDED")
@@ -48,12 +52,14 @@ FILES_LABEL = re.compile(r"^\s*(?:#+\s*)?\**\s*(?:changed\s+|modified\s+)?files"
 FILES_HEADING = re.compile(r"^\s*#+\s*(?:changed\s+)?files(?:\s+changed)?" + PARENTHETICAL + r"\s*$",
                            re.IGNORECASE)
 LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*)$")
-LINE_SUFFIX = re.compile(r":\d+(?:-\d+)?$")
 LIST_GAP = re.compile(r"^\s*(?:\([^()]*\)\s*)?(?:,\s*(?:and\s+)?|and\s+|&\s*)$", re.IGNORECASE)
 SCOPES = ("fix", "full")
 LAYOUTS = ("task", "per-file")
 FULL_SCOPE_AGENTS = ("security", "db")
 ANCHOR_MARK = '<a id="{}"></a>'
+SECTION_RANGE = re.compile(r"^## .* ([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})\s*$", re.MULTILINE)
+LOCK_WAIT_SECONDS = 10.0
+LOCK_STALE_SECONDS = 30.0
 ITEM_LABELS = {"add", "added", "change", "changed", "create", "created", "delete", "deleted", "modify",
                "modified", "new", "remove", "removed", "rename", "renamed", "update", "updated", "test", "tests"}
 
@@ -138,6 +144,8 @@ def scope_problem(entry):
         return f"'scope' must be one of: {', '.join(SCOPES)}"
     if role(entry) != "review":
         return "'scope' is only valid on reviewer entries"
+    if entry["scope"] == "fix" and entry.get("agent") in FULL_SCOPE_AGENTS:
+        return f"{entry['agent']} always re-reviews the task's full range; 'scope' fix is not valid for it"
     if entry["scope"] == "fix" and not entry.get("covers_from"):
         return "a fix-scoped entry lacks 'covers_from'"
     return None
@@ -243,7 +251,7 @@ def section_bounds(path, anchor):
     return None
 
 
-def read_report(ref):
+def report_bytes(ref):
     path, anchor = split_ref(ref)
     if not os.path.isfile(path):
         return None
@@ -254,7 +262,26 @@ def read_report(ref):
         if bounds is None:
             return None
         raw = raw[bounds[0]:bounds[1]]
-    return raw.decode("utf-8", errors="replace")
+    return raw
+
+
+def read_report(ref):
+    raw = report_bytes(ref)
+    return None if raw is None else raw.decode("utf-8", errors="replace")
+
+
+def section_problem(ref, agent, kind, from_sha, head):
+    anchor = split_ref(ref)[1]
+    if not anchor:
+        return None
+    stem = anchor_stem(agent, kind)
+    if not re.fullmatch(re.escape(stem) + r"\d+", anchor):
+        return f"--report anchor #{anchor} is not a section of this {agent} {kind} line (expected #{stem}<N>)"
+    found = SECTION_RANGE.search(read_report(ref) or "")
+    if not found or not from_sha.startswith(found.group(1)) or not head.startswith(found.group(2)):
+        saved = f"{found.group(1)}..{found.group(2)}" if found else "no range"
+        return f"section #{anchor} was saved for {saved}, not for --from {from_sha[:7]} --head {head[:7]}"
+    return None
 
 
 def report_ref_problem(ref):
@@ -397,6 +424,17 @@ def fix_coverage(earlier, from_sha, task):
     return covers
 
 
+def fix_scope_problem(earlier, covers, head, task):
+    if task == SPEC_TASK:
+        return None
+    previous = earlier[-1]
+    plain = ("-c", "core.quotepath=off")
+    fixed = git(*plain, "diff", "--name-only", f"{previous['head']}..{head}")[1].splitlines()
+    universe = git(*plain, "diff", "--name-only", f"{covers}..{head}")[1].splitlines()
+    reason = fix_scope_reason(read_report(previous["report"]), previous["report"], fixed, universe)
+    return f"--scope fix does not fit: {reason}; record it with --scope full" if reason else None
+
+
 def append(args):
     raw = args.line.strip()
     if raw.startswith("LEDGER"):
@@ -420,10 +458,15 @@ def append(args):
     problem = report_ref_problem(args.report)
     if problem:
         sys.exit(problem)
-    for field in ("spec", "scope", "covers_from"):
+    for field in ("spec", "scope", "covers_from", "report_sha256"):
         entry.pop(field, None)
     if args.scope and role(entry) != "review":
         sys.exit("--scope is only for reviewer lines")
+    if args.scope == "fix" and entry["agent"] in FULL_SCOPE_AGENTS:
+        sys.exit(f"{entry['agent']} always re-reviews the task's full range; record it with --scope full")
+    problem = section_problem(args.report, entry["agent"], role(entry), from_sha, head)
+    if problem:
+        sys.exit(problem)
     if args.spec:
         spec = os.path.normpath(args.spec).replace("\\", "/")
         if git("cat-file", "-e", f"{head}:./{spec}")[0] != 0:
@@ -446,11 +489,15 @@ def append(args):
     earlier = [e for e in entries if e.get("agent") == entry["agent"] and e.get("task") == args.task
                and role(e) == role(entry)]
     entry.update({"ts": now(), "from": from_sha, "head": head,
-                  "round": len(earlier) + 1, "report": args.report})
+                  "round": len(earlier) + 1, "report": args.report,
+                  "report_sha256": hashlib.sha256(report_bytes(args.report) or b"").hexdigest()})
     if role(entry) == "review":
         scope = args.scope or "full"
         entry["scope"] = scope
         entry["covers_from"] = fix_coverage(earlier, from_sha, args.task) if scope == "fix" else from_sha
+        problem = fix_scope_problem(earlier, entry["covers_from"], head, args.task) if scope == "fix" else None
+        if problem:
+            sys.exit(problem)
     if unlisted:
         entry["unlisted"] = unlisted
     write_line(args.ledger, entry)
@@ -504,7 +551,7 @@ def save_report(args):
         sys.exit(f"--round must be 'auto' or a positive integer: {args.round}")
     entries = read_ledger(args.ledger)[0] if os.path.exists(args.ledger) else []
     directory = args.reports_dir or os.path.join(os.path.dirname(args.ledger) or ".", "reports")
-    suffix = "-review" if len(agent_roles(args.agent)) == 2 and kind == "review" else ""
+    suffix = anchor_stem(args.agent, kind)[len(args.agent):-len("-r")]
     first = 1 + sum(1 for e in entries if e.get("agent") == args.agent and e.get("task") == args.task
                     and role(e) == kind)
     text = text if text.endswith("\n") else text + "\n"
@@ -512,6 +559,92 @@ def save_report(args):
         save_task_section(args, text, directory, suffix, first)
     else:
         save_report_file(args, text, directory, suffix, first)
+
+
+def anchor_stem(agent, kind):
+    return f"{agent}{'-review' if len(agent_roles(agent)) == 2 and kind == 'review' else ''}-r"
+
+
+def process_alive(pid):
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return ctypes.get_last_error() == 5
+        try:
+            code = ctypes.c_ulong()
+            return not kernel.GetExitCodeProcess(handle, ctypes.byref(code)) or code.value == 259
+        finally:
+            kernel.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def read_lock(lock):
+    try:
+        with open(lock, encoding="utf-8") as handle:
+            return handle.read()
+    except OSError:
+        return None
+
+
+def lock_is_stale(lock, holder):
+    parts = holder.split()
+    try:
+        pid, since = int(parts[0]), float(parts[1])
+    except (IndexError, ValueError):
+        try:
+            return time.time() - os.path.getmtime(lock) > LOCK_STALE_SECONDS
+        except OSError:
+            return False
+    return time.time() - since > LOCK_STALE_SECONDS or not process_alive(pid)
+
+
+def remove_quietly(path, attempts=50):
+    for _ in range(attempts):
+        try:
+            os.remove(path)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            time.sleep(0.02)
+
+
+@contextlib.contextmanager
+def exclusive(path):
+    lock = path + ".lock"
+    deadline, delay = time.monotonic() + LOCK_WAIT_SECONDS, 0.005
+    while True:
+        try:
+            descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError:
+            holder = read_lock(lock)
+            if holder is not None and lock_is_stale(lock, holder) and read_lock(lock) == holder:
+                remove_quietly(lock, attempts=1)
+                continue
+        except PermissionError:
+            pass
+        if time.monotonic() > deadline:
+            sys.exit(f"{path} is locked by another save-report ({lock}); retry, or delete the lock file if no "
+                     "save-report is running")
+        time.sleep(delay * (1 + int.from_bytes(os.urandom(1), "big") / 255))
+        delay = min(delay * 2, 0.25)
+    try:
+        os.write(descriptor, f"{os.getpid()} {time.time():.3f}\n".encode("ascii"))
+        os.close(descriptor)
+        yield
+    finally:
+        remove_quietly(lock)
 
 
 def ledger_layout(entries):
@@ -543,6 +676,13 @@ def save_task_section(args, text, directory, suffix, first):
     if not from_sha or not head:
         sys.exit(f"--from/--head must be commits: {args.from_sha}, {args.head}")
     path = os.path.join(directory, f"{args.task}.md")
+    os.makedirs(directory, exist_ok=True)
+    with exclusive(path):
+        anchor = append_section(args, text, path, suffix, first, from_sha, head)
+    print(f"{path.replace(chr(92), '/')}#{anchor}")
+
+
+def append_section(args, text, path, suffix, first, from_sha, head):
     sections = []
     if os.path.exists(path):
         problems = report_file_problems(path)
@@ -558,17 +698,18 @@ def save_task_section(args, text, directory, suffix, first):
     if anchor in anchors:
         sys.exit(f"section #{anchor} already exists in {path}, not overwriting")
     title = f"{args.agent}{' review' if suffix else ''} r{number} — {from_sha[:7]}..{head[:7]}"
-    start = sections[-1]["end"] if sections else 0
+    start = os.path.getsize(path) if os.path.exists(path) else 0
     block = (("\n" if start else "") + ANCHOR_MARK.format(anchor) + f"\n## {title}\n\n{text}").encode("utf-8")
-    os.makedirs(directory, exist_ok=True)
     with open(path, "ab") as handle:
         handle.write(block)
+        handle.flush()
+        os.fsync(handle.fileno())
     with open(path, "rb") as handle:
         prefix = handle.read(start + len(block))
     sections.append({"anchor": anchor, "title": title, "start": start, "end": start + len(block),
                      "sha256": hashlib.sha256(prefix).hexdigest()})
     write_sums(path, sections)
-    print(f"{path.replace(chr(92), '/')}#{anchor}")
+    return anchor
 
 
 def read_lessons(path):
@@ -889,12 +1030,13 @@ class History:
         return self.files[sha]
 
 
-def spec_stale(entry, head):
+def spec_stale(entry, start, head):
     behind = commits_after(entry.get("head"), head, entry["spec"])
-    if behind == 0:
-        return None
-    return {"task": entry["task"], "agent": entry["agent"], "head": entry.get("head"),
+    item = {"task": entry["task"], "agent": entry["agent"], "head": entry.get("head"), "covers_from": start,
             "commits_after": behind, "spec": entry["spec"]}
+    if start is None:
+        return {**item, "chain_broken": True}
+    return None if behind == 0 else item
 
 
 def code_stale(entry, start, head, history, reviewed):
@@ -929,7 +1071,7 @@ def stale_entries(entries, latest, head):
         if id(entry) not in starts:
             continue
         if entry["task"] == SPEC_TASK and entry.get("spec"):
-            item = spec_stale(entry, head)
+            item = spec_stale(entry, starts[id(entry)], head)
         else:
             item = code_stale(entry, starts[id(entry)], head, history, reviewed)
         if item:
@@ -976,9 +1118,9 @@ def status(args):
             flag, details = stale_lines(flagged[key])
         start = starts.get(id(entry), entry.get("from"))
         chain = f"  (fix-scoped from {str(entry.get('from'))[:8]})" if entry.get("scope") == "fix" else ""
+        span = "chain broken" if start is None else f"{str(start)[:8]}..{str(entry.get('head'))[:8]}"
         print(f"{entry['task']:<10} {label(entry):<16} {entry['verdict']:<20} "
-              f"{str(start)[:8]}..{str(entry.get('head'))[:8]}  round {entry.get('round')}"
-              f"{chain}{flag}")
+              f"{span}  round {entry.get('round')}{chain}{flag}")
         for detail in details:
             print(f"{'':<12}{detail}")
     for scope, buckets in (("total", totals), ("spec ", spec_totals)):
@@ -999,15 +1141,19 @@ def verify_reports(args):
         count += 1
         who = f"task {entry['task']} {label(entry)} r{entry.get('round')}"
         path, anchor = split_ref(entry["report"])
-        if not anchor:
-            if not os.path.isfile(path):
-                problems.append(f"{who}: report {path} does not exist")
+        if not anchor and not os.path.isfile(path):
+            problems.append(f"{who}: report {path} does not exist")
             continue
-        if path not in checked:
-            checked[path] = report_file_problems(path)
-            problems.extend(checked[path])
-        if not checked[path] and section_bounds(path, anchor) is None:
-            problems.append(f"{who}: section #{anchor} is not in {path}")
+        if anchor:
+            if path not in checked:
+                checked[path] = report_file_problems(path)
+                problems.extend(checked[path])
+            if not checked[path] and section_bounds(path, anchor) is None:
+                problems.append(f"{who}: section #{anchor} is not in {path}")
+                continue
+        recorded, raw = entry.get("report_sha256"), report_bytes(entry["report"])
+        if recorded and raw is not None and hashlib.sha256(raw).hexdigest() != recorded:
+            problems.append(f"{who}: {entry['report']} differs from the bytes recorded at append (sha256 mismatch)")
     if args.json:
         print(json.dumps({"entries": count, "files": sorted(checked), "problems": problems}, indent=2))
     else:

@@ -131,8 +131,43 @@ check("a spec re-review is scoped to the spec diff",
 r = package("--fix-of", "spec", "--agent", "security")
 check("security re-reviews the whole spec", "Scope: full (security always" in header("spec-security-fix-r2"))
 
+T1_1 = """# T1.1-code-review-r1
+
+**Verdict: FAIL.** 2 Important (test-quality gaps on admin-only write rules); migration correct.
+
+## Important
+1. 04_privilegios.sql / 02_permissoes.sql: admin-only write policies (households_update 0002:226; household_members_insert/update 0002:232-236) have no negative test.
+2. 04_privilegios.sql:131-134: lives_ok on UPDATE passes when RLS filters every row.
+
+## Minor
+4. 02:64: explicit nivel='nenhum' row not exercised.
+
+LEDGER {"agent":"code-review","verdict":"FAIL","new":{"critical":0,"important":2,"minor":1},"open":{"critical":0,"important":2,"minor":1}}
+"""
+sh("git", "reset", "-q", "--hard", c1)
+t0 = sh("git", "rev-parse", "HEAD")
+commit(["supabase/migrations/0002_pessoas.sql", "supabase/tests/02_permissoes.sql", "supabase/tests/04_privilegios.sql",
+        "supabase/tests/01_rls.sql"], "task T1.1")
+review("code-review", T1_1, task="T1.1", frm=t0)
+review("design", T1_1.replace("code-review", "design"), task="T1.1", frm=t0)
+fix = commit(["supabase/tests/04_privilegios.sql", "supabase/tests/02_permissoes.sql",
+              "supabase/migrations/0002_pessoas.sql"], "T1.1 fix")
+r = package("--fix-of", "T1.1", "--agent", "code-review")
+check("a real report citing bare names and shorthand (04_privilegios.sql, 0002:226, 02:64) gives fix-only",
+      r.returncode == 0 and "scope: fix-only" in r.stdout, r.stdout + r.stderr)
+flags = r.stdout.split("record with: ")[-1].split()
+ref = ledger("save-report", "--task", "T1.1", "--agent", "code-review", "--from", flags[1], "--stdin",
+             stdin="## Findings\nnone\n\n" + reviewer("code-review", "PASS")).stdout.strip()
+r = ledger("append", "--task", "T1.1", "--report", ref, "--line", reviewer("code-review", "PASS"), *flags)
+check("append accepts the fix scope the package printed", r.returncode == 0, r.stdout + r.stderr)
+commit(["supabase/tests/01_rls.sql"], "T1.1 touches 01")
+r = package("--fix-of", "T1.1", "--agent", "design")
+check("a fix touching a file the real report does not cite gives the full range",
+      "Scope: full (the fix touches files outside the open findings: supabase/tests/01_rls.sql)"
+      in header("T1.1-design-fix-r2"), header("T1.1-design-fix-r2")[:300])
+
 sys.path.insert(0, os.path.join(HERE, ".."))
-from package import finding_paths
+from findings import finding_paths
 
 for name, report, expected in (
         ("heading with severity sub-headings", "## Findings\n### Critical\n- `x/a.sql:4`\n### Minor\n- y/b.ts:2\n"

@@ -21,7 +21,7 @@ Find the project's actual design reference — a style guide file, a design-toke
 
 ## Report contract
 - **Verdict**: FAIL if any Critical or Important finding is open; PASS only when none remains (Minor findings alone do not fail).
-- **Findings**, each with: file:line or component name, what's inconsistent/inaccessible, what the existing pattern is (with a pointer), severity (Critical/Important/Minor).
+- **Findings**, each with: file:line or component name, what's inconsistent/inaccessible, what the existing pattern is (with a pointer), severity (Critical/Important/Minor). Group them under severity headings (`## Critical`, `## Important`, `## Minor`) and name each file by its path from the repository root (`app/(app)/layout.tsx:43`, not `layout.tsx:43`): a fix re-review is scoped to the files your findings cite, and a file it cannot resolve sends you back over the whole task. Keep open questions, checks and other reviewers' items out of those sections.
 
 ## Pre-report gate
 Before reporting, check each finding:

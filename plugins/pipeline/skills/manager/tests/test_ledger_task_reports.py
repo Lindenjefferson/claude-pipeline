@@ -1,4 +1,4 @@
-import json, os, subprocess, sys, tempfile, time
+import hashlib, json, os, subprocess, sys, tempfile, time
 
 LEDGER_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ledger.py")
 repo = os.path.join(tempfile.gettempdir(), f"ledgertaskreports_{int(time.time() * 1000)}")
@@ -85,6 +85,20 @@ check("append accepts the reviewer section", append(reviewer("code-review"), cr_
 r = ledger("save-report", "--task", "1", "--agent", "db", "--role", "reviewer", "--from", base, "--stdin",
            stdin="db review\n")
 check("a db review gets its own anchor", r.returncode == 0 and r.stdout.strip().endswith("#db-review-r1"), r.stdout)
+db_ref = r.stdout.strip()
+entry = json.loads(open(LEDGER).read().splitlines()[-1])
+section = open(TASK_FILE, "rb").read()
+bounds = next(s for s in json.load(open(TASK_FILE + ".sums"))["sections"] if s["anchor"] == "code-review-r1")
+check("append records the sha256 of the section's bytes",
+      entry.get("report_sha256") == hashlib.sha256(section[bounds["start"]:bounds["end"]]).hexdigest(), json.dumps(entry))
+r = append(reviewer("design"), cr_ref)
+check("append refuses a section saved for another agent", r.returncode != 0 and "#code-review-r1" in r.stderr, r.stderr)
+r = append('LEDGER {"agent":"db","verdict":"DONE"}', db_ref)
+check("append refuses a db review section for a db implementer line",
+      r.returncode != 0 and "expected #db-r" in r.stderr, r.stderr)
+r = ledger("append", "--task", "1", "--from", c1, "--head", "HEAD", "--report", cr_ref, "--line", reviewer("code-review"))
+check("append refuses a section whose heading names another range",
+      r.returncode != 0 and f"{base[:7]}..{c1[:7]}" in r.stderr, r.stderr)
 r = save("1", "code-review", "again\n", "--round", "1")
 check("an explicit round that already exists is refused", r.returncode != 0 and "already exists" in r.stderr, r.stderr)
 r = append(reviewer("code-review"), TASK_FILE + "#nope")
@@ -112,6 +126,19 @@ r = append(reviewer("code-review"), cr_ref)
 check("append refuses a reference into a tampered file", r.returncode != 0 and "prefix hash" in r.stderr, r.stderr)
 open(TASK_FILE, "wb").write(pristine)
 check("restoring the bytes makes it verify again", ledger("verify-reports").returncode == 0)
+pristine_sums = open(TASK_FILE + ".sums", "rb").read()
+forged = pristine.replace(b"- none", b"- NONE")
+sums = json.loads(pristine_sums)
+for item in sums["sections"]:
+    item["sha256"] = hashlib.sha256(forged[:item["end"]]).hexdigest()
+open(TASK_FILE, "wb").write(forged)
+open(TASK_FILE + ".sums", "w").write(json.dumps(sums))
+data = json.loads(ledger("verify-reports", "--json").stdout)
+check("verify-reports flags a section rewritten together with its .sums (ledger sha256)",
+      len(data["problems"]) == 1 and "code-review r1" in data["problems"][0] and "sha256" in data["problems"][0],
+      json.dumps(data))
+open(TASK_FILE, "wb").write(pristine)
+open(TASK_FILE + ".sums", "wb").write(pristine_sums)
 os.remove(TASK_FILE + ".sums")
 r = ledger("verify-reports")
 check("a missing sidecar is a problem", r.returncode != 0 and ".sums" in r.stdout, r.stdout)
