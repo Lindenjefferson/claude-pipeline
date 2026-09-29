@@ -82,6 +82,21 @@ r, _ = record("1", "dev", f"Commit: <sha> (real one below)\nCommitted {c1[:8]}.\
               base, "DONE")
 check("a placeholder line is rejected even when a real SHA appears elsewhere", r.returncode != 0
       and "placeholder" in r.stderr, r.stderr)
+r, _ = record("1", "dev", f"Head: same as r1\nCommitted {c1[:8]}; checked with `git rev-parse HEAD`.\n\n"
+              f"Files changed:\n- `src/a.ts`\n\n{PAD}", base, "DONE")
+check("a report whose only labelled SHA line carries no SHA is rejected", r.returncode != 0
+      and "placeholder" in r.stderr and "Head: same as r1" in r.stderr, r.stderr)
+for label, lines in (("prose mentioning git rev-parse",
+                      f"Checked the tip with `git rev-parse HEAD` before writing.\nCommit: {c1[:7]}"),
+                     ("an extra 'Head: same as r1' line", f"- **Commit:** {c1[:7]}\nHead: same as r1"),
+                     ("a bulleted bold SHA label", f"+ **SHA:** {c1}"),
+                     ("no labelled line at all", f"Committed {c1[:8]} after checking `git rev-parse HEAD`.")):
+    check(f"the SHA check accepts a report with {label}", lg.sha_placeholder(lines) is None,
+          str(lg.sha_placeholder(lines)))
+r, _ = record("1", "dev", f"Checked the tip with `git rev-parse HEAD`.\nHead: same as r1\nCommit: {c1[:7]}\n\n"
+              f"Files changed:\n- `src/a.ts`\n- `src/b.ts`\n\n{PAD}", base, "DONE")
+check("append accepts prose about git rev-parse and a 'Head: same as r1' line next to a real Commit line",
+      r.returncode == 0, r.stderr)
 r, _ = record("1", "dev", f"Commit: {c1[:7]}\n\nFiles changed:\n- `src/a.ts`\n- `src/b.ts`\n\n{PAD}", base, "DONE")
 check("a real short SHA on the SHA line is accepted", r.returncode == 0, r.stderr)
 r, _ = record("1", "dev", "Commit: none, blocked before any change because the brief lacks the schema.", base,

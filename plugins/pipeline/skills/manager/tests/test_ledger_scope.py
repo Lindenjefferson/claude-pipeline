@@ -100,7 +100,7 @@ check("a later commit of another task touching none of its files, reviewed there
       ("1", "code-review") not in table and ("2", "code-review") not in table, str(table))
 
 c5 = commit(["a.py", "c.py"], "task 2 touches a")
-append(reviewer("code-review"), c3, c5, task="2")
+append(reviewer("code-review", "FAIL", 1), c3, c5, task="2")
 table, _ = stale()
 item = table.get(("1", "code-review"), {})
 check("a later commit of another task touching one of its files makes it stale, with file and commit",
@@ -109,6 +109,10 @@ check("a later commit of another task touching one of its files makes it stale, 
 text = ledger("status", "--head", "HEAD").stdout
 check("text status shows which commit touched which file", f"{c5[:8]} touches src/a.py" in text, text)
 check("the other task's own review is current", ("2", "code-review") not in table, str(table))
+append(reviewer("code-review"), c3, c5, task="2")
+table, _ = stale()
+check("the same agent passing a later task whose range holds that commit clears the touch",
+      ("1", "code-review") not in table, str(table))
 
 append(reviewer("security"), base, c5, task="1")
 table, _ = stale()
@@ -156,5 +160,30 @@ check("--scope fix is refused for security", r.returncode != 0 and "full range" 
 append(reviewer("db"), base, c3b)
 r = append(reviewer("db"), c3b, c3c, scope="fix")
 check("--scope fix is refused for a db review", r.returncode != 0 and "full range" in r.stderr, r.stderr)
+
+
+
+def commit_paths(paths, message):
+    for path in paths:
+        os.makedirs(os.path.dirname(os.path.join(repo, path)), exist_ok=True)
+        with open(os.path.join(repo, path), "a") as handle:
+            handle.write(f"{message}\n")
+    sh("git", "add", ".")
+    sh("git", "commit", "-q", "-m", message)
+    return sh("git", "rev-parse", "HEAD")
+
+
+d0 = sh("git", "rev-parse", "HEAD")
+d1 = commit_paths(["src/d.py", "docs/m.md"], "task 3 code and docs")
+append(reviewer("design"), d0, d1, task="3")
+d2 = commit_paths(["docs/m.md"], "task 4 docs only")
+append(reviewer("code-review"), d1, d2, task="4")
+table, _ = stale()
+check("a later docs/ change does not make a non-docs reviewer stale", ("3", "design") not in table, str(table))
+d3 = commit_paths(["src/d.py"], "task 4 code")
+append(reviewer("code-review"), d1, d3, task="4")
+table, _ = stale()
+check("a later code change reviewed only by another agent still makes it stale",
+      [t["commit"] for t in table.get(("3", "design"), {}).get("touched", [])] == [d3], str(table))
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
