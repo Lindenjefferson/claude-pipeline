@@ -1,7 +1,7 @@
 {
   "name": "pipeline",
-  "version": "2.0.0",
-  "description": "Personal multi-agent delivery pipeline: agents, manager and kickoff skills, pre-commit secret scan. Enabled per repo, never globally.",
+  "version": "2.1.0",
+  "description": "Personal multi-agent delivery pipeline: dev, reviewer and qa agents, manager and kickoff skills, local gate script, pre-commit secret scan. Enabled per repo, never globally.",
   "author": {
     "name": "Lindenjefferson"
   },

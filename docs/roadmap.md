@@ -2,7 +2,15 @@
 
 Backlog vivo do plugin. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin ou ideia adaptada do ECC) e o esforço estimado (P, M, G). Ao entregar um item, mover para a seção da versão correspondente com o PR.
 
-## 2.0.0 — em andamento (branch `refactor/simple-flow`)
+## 2.1.0 — em andamento (branch `refactor/cycle-review`)
+
+Objetivo: menos tempo por módulo (o fluxo 1.x levou 4 a 5 horas e mais de 20 relatórios num módulo).
+
+- [x] **Ciclos curtos**: até ~6 tarefas; por tarefa só o `dev`; no fim do ciclo um `reviewer` sobre o diff inteiro, um `qa` e uma rodada de correção em lote (o reviewer confere só a correção). Módulo de 6 tarefas: ~9 execuções de agente em vez de 20+.
+- [x] **`gate.py` no lugar do agente `gate`**: ledger, árvore limpa, Build/Typecheck/Lint/Testes do `CLAUDE.md` e scan de segredos no histórico da branch, sem LLM; grava o relatório de qualidade no READY.
+- [x] **Ledger por ciclo**: o ciclo fecha quando o qa aprova; uma segunda reprovação pede decisão do usuário.
+
+## 2.0.0 — entregue (PR #6)
 
 Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `verification-loop`), em versão enxuta.
 
