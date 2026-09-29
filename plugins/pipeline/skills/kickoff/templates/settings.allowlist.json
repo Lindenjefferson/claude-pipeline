@@ -17,13 +17,15 @@
   ],
   "script_name_globs": {
     "core": ["lint", "lint:*", "typecheck", "typecheck:*", "test", "test:*", "build"],
-    "nextjs": ["dev"],
+    "nextjs": ["dev", "e2e:smoke"],
     "supabase": ["db:*"]
   },
   "script_entry": "Bash(npm run <script>)",
   "deny": [
     "Edit(.pipeline-secrets-allow)",
-    "Write(.pipeline-secrets-allow)"
+    "Write(.pipeline-secrets-allow)",
+    "Bash(git commit --no-verify:*)",
+    "Bash(git commit -n:*)"
   ],
   "never_allow": [
     "db push",

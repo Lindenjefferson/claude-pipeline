@@ -1,7 +1,7 @@
 import hashlib, json, os, subprocess, sys, tempfile, time
 
 LEDGER_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ledger.py")
-repo = os.path.join(tempfile.gettempdir(), f"ledgerlessons_{int(time.time() * 1000)}")
+repo = tempfile.mkdtemp(prefix="ledgerlessons_")
 GLOBAL_DIR = os.path.join(repo, "plugin", "lessons")
 os.makedirs(GLOBAL_DIR)
 DELIVERY = os.path.join(repo, ".superpowers", "lessons.jsonl")

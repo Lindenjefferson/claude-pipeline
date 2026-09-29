@@ -1,7 +1,7 @@
-import json, os, subprocess, sys, tempfile, time
+import json, os, subprocess, sys, tempfile
 
 LEDGER_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ledger.py")
-root = os.path.join(tempfile.gettempdir(), f"ledgerrequired_{int(time.time() * 1000)}")
+root = tempfile.mkdtemp(prefix="ledgerrequired_")
 repo = os.path.join(root, "repo")
 empty = os.path.join(root, "no-checklists")
 lists = os.path.join(root, "checklists")

@@ -78,6 +78,11 @@ ANCHOR_MARK = '<a id="{}"></a>'
 SECTION_RANGE = re.compile(r"^## .* ([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})\s*$", re.MULTILINE)
 LOCK_WAIT_SECONDS = 10.0
 LOCK_STALE_SECONDS = 30.0
+INBOX_DIR = "inbox"
+INBOX_SAVED_DIR = "saved"
+INBOX_NAME = re.compile(r"^\d{8}T\d{6}Z-(?P<agent>[\w-]+)-[A-Za-z0-9]{1,8}(?:\.\d+)?\.md$")
+LEDGER_JSON = re.compile(r"^[\s`>*-]*LEDGER\s*(\{.*\})", re.MULTILINE)
+LEDGER_VERDICT = re.compile(r'^[\s`>*-]*LEDGER\s*\{.*"verdict"\s*:\s*"([A-Z_]+)"', re.MULTILINE)
 ITEM_LABELS = {"add", "added", "change", "changed", "create", "created", "delete", "deleted", "modify",
                "modified", "new", "remove", "removed", "rename", "renamed", "update", "updated", "test", "tests"}
 
@@ -609,18 +614,86 @@ def report_role(args):
     sys.exit(f"{args.agent} is both implementer and reviewer: pass --role implementer|reviewer")
 
 
-def save_report(args):
-    if not NAME_PATTERN.match(args.task):
-        sys.exit(f"--task must match {NAME_PATTERN.pattern}: {args.task}")
-    if args.agent not in AGENT_VERDICTS:
-        sys.exit(f"unknown agent '{args.agent}' (expected one of: {', '.join(AGENT_VERDICTS)})")
+def reports_directory(args):
+    return args.reports_dir or os.path.join(os.path.dirname(args.ledger) or ".", "reports")
+
+
+def inbox_agent(path):
+    match = INBOX_NAME.match(os.path.basename(path))
+    return match.group("agent") if match else None
+
+
+def declared_agent(text):
+    lines = LEDGER_JSON.findall(text)
+    try:
+        return json.loads(lines[-1]).get("agent") if lines else None
+    except (ValueError, AttributeError):
+        return None
+
+
+def latest_inbox(args):
+    if not args.agent:
+        sys.exit("--latest-inbox needs --agent")
+    directory = os.path.join(reports_directory(args), INBOX_DIR)
+    pending = sorted(name for name in (os.listdir(directory) if os.path.isdir(directory) else ())
+                     if inbox_agent(name) == args.agent)
+    if not pending:
+        sys.exit(f"no inbox report of {args.agent} in {directory}; transcribe the report with --stdin or --file")
+    if len(pending) > 1:
+        print(f"warning: older inbox reports of {args.agent} remain in {directory}: {', '.join(pending[:-1])}",
+              file=sys.stderr)
+    return os.path.join(directory, pending[-1])
+
+
+def read_inbox(args):
+    path = args.from_inbox or latest_inbox(args)
+    if not os.path.isfile(path):
+        sys.exit(f"inbox report does not exist: {path}")
+    with open(path, "rb") as handle:
+        raw = handle.read()
+    text = raw.decode("utf-8", errors="replace")
+    agent = declared_agent(text) or inbox_agent(path)
+    if not agent:
+        sys.exit(f"cannot tell which agent wrote {path}: no LEDGER line naming it and no <ts>-<agent>-<id>.md name")
+    if args.agent and args.agent != agent:
+        sys.exit(f"--agent {args.agent} does not match the agent of the inbox report ({agent}): {path}")
+    args.agent = agent
+    verdicts = LEDGER_VERDICT.findall(text)
+    if agent == "db" and not args.role and args.task != SPEC_TASK and verdicts:
+        args.role = "reviewer" if verdicts[-1] in REVIEWER_VERDICTS else "implementer"
+    return path, raw
+
+
+def read_source(args):
+    if args.from_inbox or args.latest_inbox:
+        return read_inbox(args)
     if args.file:
         if not os.path.isfile(args.file):
             sys.exit(f"--file does not exist: {args.file}")
         with open(args.file, "rb") as handle:
-            raw = handle.read()
-    else:
-        raw = sys.stdin.buffer.read()
+            return None, handle.read()
+    return None, sys.stdin.buffer.read()
+
+
+def archive_inbox(path):
+    directory = os.path.join(os.path.dirname(path), INBOX_SAVED_DIR)
+    os.makedirs(directory, exist_ok=True)
+    stem, extension = os.path.splitext(os.path.basename(path))
+    target, attempt = os.path.join(directory, stem + extension), 1
+    while os.path.exists(target):
+        attempt += 1
+        target = os.path.join(directory, f"{stem}.{attempt}{extension}")
+    os.replace(path, target)
+
+
+def save_report(args):
+    if not NAME_PATTERN.match(args.task):
+        sys.exit(f"--task must match {NAME_PATTERN.pattern}: {args.task}")
+    if not args.agent and not args.from_inbox:
+        sys.exit("--agent is required unless the report comes from --from-inbox")
+    inbox_path, raw = read_source(args)
+    if args.agent not in AGENT_VERDICTS:
+        sys.exit(f"unknown agent '{args.agent}' (expected one of: {', '.join(AGENT_VERDICTS)})")
     text = re.sub(r"\r+\n", "\n", raw.decode("utf-8", errors="replace"))
     if not text.strip():
         sys.exit("the report is empty; nothing saved")
@@ -628,7 +701,7 @@ def save_report(args):
     if args.round != "auto" and not (args.round.isdigit() and int(args.round) > 0):
         sys.exit(f"--round must be 'auto' or a positive integer: {args.round}")
     entries = read_ledger(args.ledger)[0] if os.path.exists(args.ledger) else []
-    directory = args.reports_dir or os.path.join(os.path.dirname(args.ledger) or ".", "reports")
+    directory = reports_directory(args)
     suffix = anchor_stem(args.agent, kind)[len(args.agent):-len("-r")]
     first = 1 + sum(1 for e in entries if e.get("agent") == args.agent and e.get("task") == args.task
                     and role(e) == kind)
@@ -637,6 +710,8 @@ def save_report(args):
         save_task_section(args, text, directory, suffix, first)
     else:
         save_report_file(args, text, directory, suffix, first)
+    if inbox_path:
+        archive_inbox(inbox_path)
 
 
 def anchor_stem(agent, kind):
@@ -1486,7 +1561,7 @@ def main():
     save_cmd = commands.add_parser("save-report", help="append an agent report to reports/<task>.md "
                                                         "(or <task>-<agent>-r<round>.md in the per-file layout)")
     save_cmd.add_argument("--task", required=True)
-    save_cmd.add_argument("--agent", required=True)
+    save_cmd.add_argument("--agent", help="required except with --from-inbox, which reads it from the LEDGER line")
     save_cmd.add_argument("--round", default="auto", help="'auto' (next free round) or a number")
     save_cmd.add_argument("--role", choices=sorted(ROLES),
                           help="required for db outside the spec task; inferred for the other agents")
@@ -1498,6 +1573,9 @@ def main():
     source = save_cmd.add_mutually_exclusive_group(required=True)
     source.add_argument("--stdin", action="store_true")
     source.add_argument("--file")
+    source.add_argument("--from-inbox", metavar="FILE", help="a report the SubagentStop hook captured in "
+                                                             "reports/inbox/; moved to inbox/saved/ once saved")
+    source.add_argument("--latest-inbox", action="store_true", help="the newest inbox report of --agent")
     save_cmd.set_defaults(run=save_report)
 
     repair_cmd = commands.add_parser("repair-reports", help="show, and with --yes drop, the unrecorded bytes an "

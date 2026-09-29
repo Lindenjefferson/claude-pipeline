@@ -1,8 +1,8 @@
-import os, subprocess, sys, tempfile, time
+import os, subprocess, sys, tempfile
 
 PACKAGE_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "package.py")
-repo = os.path.join(tempfile.gettempdir(), f"packagetest_{int(time.time())}")
-os.makedirs(repo)
+repo = tempfile.mkdtemp(prefix="packagetest_")
+os.makedirs(repo, exist_ok=True)
 results = []
 
 

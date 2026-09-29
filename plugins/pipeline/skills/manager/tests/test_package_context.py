@@ -1,7 +1,7 @@
-import json, os, re, subprocess, sys, tempfile, time
+import json, os, re, subprocess, sys, tempfile
 
 PACKAGE_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "package.py")
-repo = os.path.join(tempfile.gettempdir(), f"packagecontext_{int(time.time() * 1000)}")
+repo = tempfile.mkdtemp(prefix="packagecontext_")
 BRIEFS = os.path.join(repo, ".superpowers", "briefs")
 GLOBAL = os.path.join(repo, "global-lessons")
 DELIVERY = os.path.join(repo, ".superpowers", "lessons.jsonl")

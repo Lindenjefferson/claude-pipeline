@@ -1,7 +1,7 @@
-import re, json, os, subprocess, sys, tempfile, time
+import re, json, os, subprocess, sys, tempfile
 
 LEDGER_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ledger.py")
-repo = os.path.join(tempfile.gettempdir(), f"ledgerreports_{int(time.time() * 1000)}")
+repo = tempfile.mkdtemp(prefix="ledgerreports_")
 os.makedirs(os.path.join(repo, "src"))
 LEDGER = os.path.join(repo, ".superpowers", "ledger.jsonl")
 REPORTS = os.path.join(repo, ".superpowers", "reports")
