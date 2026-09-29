@@ -1,6 +1,6 @@
 ---
 name: gate
-description: Final gate before anything leaves the local machine (merge into the default branch, push). Reads the delivery ledger and the reviewers' saved reports to confirm every reviewer required for the branch's changes signed off on the current commits with no unresolved Critical/Important findings, confirms QA reported tests green, and scans the changes and commit history for leaked secrets/tokens. On approval, records the approval and writes a scored quality-report artifact so quality/evolution is trackable over time. Never fixes code and cannot dispatch agents; it returns itemized findings with the owner of each, and the `manager` skill routes them. Part of the `pipeline` plugin: dispatched by the `pipeline:manager` skill or when the user names this agent.
+description: Pipeline final release gate: checks the ledger and saved reports for current, passing required reviews and green QA, scans for secrets, and writes the scored quality report.
 tools: Read, Grep, Glob, Bash, Write
 model: opus
 ---

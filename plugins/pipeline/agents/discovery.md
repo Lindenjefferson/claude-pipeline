@@ -1,6 +1,6 @@
 ---
 name: discovery
-description: Extracts and structures raw findings from source material (spreadsheets, reference apps/sites, existing code, documents, exports) before any design conversation starts. Use at the very start of a new project or feature area, whenever there's real source material to mine — never to make design decisions itself, only to produce the structured findings document that the brainstorming process consumes next. Part of the `pipeline` plugin: dispatched by the `pipeline:manager` skill or when the user names this agent.
+description: Pipeline discovery: mines raw sources (spreadsheets, reference apps, existing code, documents) into a structured findings document before brainstorming. Makes no design decisions.
 model: sonnet
 ---
 

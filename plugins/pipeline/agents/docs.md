@@ -1,6 +1,6 @@
 ---
 name: docs
-description: Writes and maintains real project documentation (per-module docs, architecture notes, decision records) so nothing has to be explained through code comments. Use after dev/db change a module's structure, interfaces, setup steps, or design decisions, and to fill doc stubs for modules that now exist. Follows the project's own doc convention; never touches source code. Part of the `pipeline` plugin: dispatched by the `pipeline:manager` skill or when the user names this agent.
+description: Pipeline documentation writer: keeps per-module docs, architecture notes and decision records true to the code, so nothing is explained in code comments. Never edits source.
 tools: Read, Write, Edit, Grep, Glob, Bash
 model: sonnet
 ---

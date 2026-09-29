@@ -51,9 +51,71 @@ Um erro de design (uma política de acesso no escopo errado, um convite que atra
 - Evidência: relatórios em `.superpowers/reports/spec-<agente>-r<rodada>.md` e entradas no ledger com a tarefa `spec` e o caminho do spec revisado. Esses achados ficam fora das notas de qualidade (foram pegos antes do código) e aparecem à parte no relatório do `gate`.
 - O `gate` bloqueia a entrega que toca esses domínios sem revisão de spec aprovada nem nota explicando a ausência, e pede nova revisão se o spec mudou depois dela.
 
+O spec responde, antes da revisão, às seções de [`skills/manager/templates/spec-checklist.md`](plugins/pipeline/skills/manager/templates/spec-checklist.md): trilha de auditoria das escritas sensíveis, estados de UI, concorrência e invariantes, auth (oráculos de conta, pré-cadastro, confirmar ≠ logar, sessões), privilégios padrão, tabela de códigos de erro e plano de testes com alvos de mutação. Seção sem resposta no domínio de um revisor é achado.
+
 ### Ledger
 
 Cada entrega tem um ledger em `.superpowers/ledger.jsonl`, escrito só pelo `ledger.py`. Ele registra, por tarefa e agente, o intervalo de commits revisado, o veredito, os problemas encontrados e em aberto e as decisões tomadas. Linhas inválidas são recusadas na entrada, e `status --head HEAD` aponta revisões que ficaram para trás de commits novos (para a tarefa `spec`, só quando o próprio spec mudou).
+
+- `save-report` grava o relatório do agente, sem transcrição à mão, em `.superpowers/reports/<tarefa>-<agente>-r<N>.md` (rodada automática, nunca sobrescreve) e imprime o caminho para o `append`.
+- `--head`/`--from` aceitam qualquer ref (`HEAD`) e gravam o SHA.
+- O `append` valida o relatório de `dev`, `db` e `docs`: recusa relatório sem linha `LEDGER`, curto demais ou "placeholder", relatório de `dev`/`db` sem o SHA do commit, e arquivo citado que não está em `git diff FROM..HEAD` (`--allow-unlisted` com nota para exceções).
+
+### Briefs, adendos e lições
+
+- `package.py brief` aceita ids como `T1.2`, `3` e `A-1`, e anexa ao texto da tarefa os adendos de `.superpowers/briefs/<tarefa>.addenda/*.md` e `.superpowers/briefs/all.addenda/*.md`. O manager nunca edita um brief gerado, então reextrair não perde nada.
+- **Lições**: regras atômicas (até 280 caracteres) que teriam evitado um achado. As globais ficam versionadas no plugin, em `plugins/pipeline/lessons/<stack>.jsonl` (`postgres-supabase`, `nextjs-react`, `auth`, `general`), e as da entrega em `.superpowers/lessons.jsonl`, escritas só por `ledger.py lesson add|mark|list|promote`. O `brief` injeta até 6 lições (8000 caracteres) cujos `paths` casam com os arquivos da tarefa, ordenadas por `held - 2*recurred` com bônus para as da entrega. Cada lição conta `injected`, `held` (preveniu) e `recurred` (reincidiu). No fechamento, o manager mostra cada lição da entrega e só promove para o global as que o usuário aprovar, uma a uma.
+
+### Checklists por stack
+
+`plugins/pipeline/checklists/{postgres-supabase,nextjs-react,auth}.md`, cada um com frontmatter `stack`, `paths` e `agents`. O `package.py review` lista no cabeçalho do pacote os checklists cujos `paths` casam com os arquivos alterados (lockfiles ficam só no stat), e cada revisor abre os que citam o seu papel. Item não atendido é achado como outro qualquer.
+
+### Revisores e implementadores
+
+- Revisores (`code-review`, `security`, `db` revisor, `audit`, `design`) passam por um *pre-report gate*: Critical/Important exigem prova (arquivo:linha e cenário concreto ou reprodução), zero achados é resultado válido, sem enchimento de estilo.
+- O `code-review` sempre roda mutação independente em tarefas com migrations, funções SQL ou módulos de regra pura (NULL, fronteira `>=`/`>`, janela de tempo, filtro de escopo, auditoria em laço, checagem de permissão) e relata as sobreviventes.
+- `dev` e `db` seguem RED primeiro (o teste rodou e falhou pelo motivo certo antes da correção), listam os arquivos a partir de `git show --stat`, gravam só UTF-8, sobem servidores só em background ou com `timeout`, e o `db` entrega a tabela mutação → teste que falhou.
+
+### Falso positivo no scan de segredos
+
+O hook bloqueia o commit (ou o push) e lista cada achado com o arquivo e uma impressão digital (fingerprint), por exemplo:
+
+```
+- possible generic API key/secret/token assignment in supabase/seed.sql (fingerprint ed29c450272198d3fe54a8f66fa145022361507670c0ce8f2e0cac0cad46ca03)
+```
+
+Se aquela linha **não** é um segredo, libere só ela:
+
+1. Copie o fingerprint da mensagem de bloqueio. Para listar os fingerprints das linhas sinalizadas, rode na raiz do repositório:
+   ```
+   git diff --cached | python "<clone>/plugins/pipeline/hooks/pre-commit-secret-scan.py" --fingerprint
+   ```
+   Para commits já feitos, use `git show <commit>`; para um arquivo inteiro, use `python ... --fingerprint < arquivo`.
+2. Acrescente uma linha em `.pipeline-secrets-allow` na raiz do repositório, com o motivo:
+   ```
+   ed29c450272198d3fe54a8f66fa145022361507670c0ce8f2e0cac0cad46ca03  # seed de teste, não é credencial
+   ```
+3. Faça o commit de novo, incluindo o `.pipeline-secrets-allow`.
+
+Regras:
+- O fingerprint é o sha256 da linha com os espaços normalizados. Mudar o conteúdo da linha exige uma nova entrada; só reindentar não exige.
+- Cada entrada libera só aquela linha exata. As outras continuam sendo verificadas.
+- Não existe supressão por comentário no código.
+- Quem adiciona entradas é você, não o agente. O arquivo é versionado e aparece no diff para os revisores e o `gate`.
+- Um segredo de verdade nunca vai para a allowlist: remova-o e troque-o (rotacione).
+
+O scan já não sinaliza auto-atribuição de uma coluna a ela mesma, nomes qualificados (`t.col`, `excluded.col`), palavras-chave SQL, identificadores (`new_password`, `hashedPassword`) e referências a variáveis de ambiente (`process.env.X`, `${VAR}`, `$VAR`, `os.environ[...]`, `os.getenv(...)`, `import.meta.env.X`, `%VAR%`). Valores literais entre aspas com cara de segredo continuam bloqueando.
+
+### Kickoff: complementos por stack e allowlist de comandos
+
+O `kickoff` sempre instala o núcleo (hooks, `.gitignore`, `docs/`, `CLAUDE.md`, grafo de conhecimento). Depois detecta o stack pelos arquivos do projeto e acrescenta convenções específicas só para o que encontrar, para o contexto dos agentes ficar pequeno:
+
+- **Allowlist de comandos.** Junta os comandos do próprio projeto (seção "Comandos" do `CLAUDE.md` e scripts do `package.json`) em `permissions.allow` do `.claude/settings.json`, para os agentes não serem barrados pelo classificador do auto mode em lint, testes, build ou comandos de banco. Nunca sobrescreve nem remove permissões existentes, mostra o diff antes e nunca libera comandos remotos ou destrutivos (`db push`, deploys, `git push`).
+- **Next.js 16 ou superior.** Põe `agentRules: false` para o `next dev` não reescrever o `CLAUDE.md`, registra que a interceptação vive em `proxy.ts` e, em projetos mobile-first, dá aos primitivos do shadcn alvos de toque de 44px no mobile (`h-11 md:h-N`).
+- **Supabase.** Acrescenta uma migration base de privilégios (`anon` sem acesso a tabelas; `authenticated` sem truncate, references, trigger e maintain; sem privilégios em sequências; `EXECUTE` de funções revogado por padrão, inclusive para objetos futuros) e uma varredura pgTAP que falha se `anon` ou `authenticated` puderem executar função fora de uma allowlist por assinatura exata, ou se alguma tabela do `public` estiver sem RLS.
+- **Versões atuais.** Antes de escrever comandos de scaffold, o kickoff e os planos conferem as versões e flags atuais (`npm view`, documentação) em vez de confiar na memória.
+
+O kickoff é idempotente: rode de novo depois do scaffold de um projeto novo para aplicar os complementos.
 
 ### Relatórios de qualidade
 
@@ -112,7 +174,9 @@ plugins/pipeline/
   .claude-plugin/plugin.json        manifesto e dependências
   agents/                           os 10 agentes
   skills/kickoff/                   skill e templates do kickoff
-  skills/manager/                   skill, ledger.py, package.py e testes
+  skills/manager/                   skill, ledger.py, package.py, templates/spec-checklist.md e testes
+  checklists/                       checklists por stack, listados no pacote de revisão
+  lessons/                          lições globais por stack (JSONL), injetadas nos briefs
   hooks/                            hooks.json, scanner de segredos e testes
 ```
 
