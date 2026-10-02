@@ -2,7 +2,7 @@
 
 Each item: the check — why — how to verify. An unmet item is a finding, with evidence like any other. Rules for the project's own stack live in its `CLAUDE.md` and `docs/lessons.md`, not here.
 
-## Invariantes (also in spec mode)
+## Invariantes (every review mode: spec, plan and diff)
 - **A rule whose violation breaks reading or rendering the data is enforced in the data layer** — app validation can be bypassed (a direct API call, a script, a second client); it exists to give a good message, not the guarantee. Verify: ask "if someone calls the API directly, does it hold?"; a constraint, trigger or policy enforces it and a test writes the bad value without the app and sees it refused.
 - **A check that reads one row and decides to write another is a race until proven otherwise** — two sessions both read the old state and both write. Verify: an explicit lock on what was read (taken in one global order, with namespaced keys when the lock is advisory) and a two-session test in both orders.
 - **Validate the value that reaches each column or field, not only the typed one** — a derived value (sum, product, concatenation, count) can overflow a limit that every typed input respects. Verify: each derived value has its own limit and a boundary test at that limit.

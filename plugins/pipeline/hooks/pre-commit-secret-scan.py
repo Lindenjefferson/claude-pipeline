@@ -11,10 +11,27 @@
   --fingerprint         prints the fingerprints of the flagged lines read from stdin (a diff, or a
                         file with --path <path>).
 
-A flagged line whose fingerprint (sha256 of its file path and the line with whitespace collapsed) is
-listed in .pipeline-secrets-allow at the repo root is not reported; the list is read from the index,
-so only staged entries count. This stops accidental leaks, not a determined bypass (git commit
---no-verify skips it); server-side push protection (e.g. GitHub secret scanning) is the last line."""
+The hook stores no path: it finds this scanner through CLAUDE_PIPELINE_HOME or `git config pipeline.home`
+(the plugin root, <clone>/plugins/pipeline; set once per machine with git config --global) and blocks the
+commit when neither resolves.
+
+Not flagged: a column assigned to itself, qualified names (t.col, excluded.col), SQL keywords, written-out
+identifiers (with _, or camelCase whose parts each have two lower-case letters and a vowel, up to 40
+characters) and environment references (process.env.X, ${VAR}, $VAR, os.environ[...], os.getenv(...),
+import.meta.env.X, %VAR%). Still blocked: secret-looking quoted literals (a placeholder passes only as the whole
+value, such as changeme, example, xxxx, or starting with your_, your- or <); runs of 16+ characters without _
+in one case or alternating case; values where almost every character is unique (Shannon entropy of 3.5
+bits/character or more, near the maximum for the length); and, under password/passwd/secret keys, phrases with
+_ that name no code word.
+
+False positive: the user (never an agent: kickoff denies agents edits to the file) adds the line
+`<fingerprint>  # reason` to .pipeline-secrets-allow at the repo root and stages it; the block message gives
+the fingerprint, and --fingerprint lists them (git diff --cached | python <this file> --fingerprint; for a
+whole file, --fingerprint --path <path> < <path>). A fingerprint is the sha256 of the file path and the line
+with whitespace collapsed: it frees only that exact line in that file, and editing either needs a new entry.
+The list is read from the index, so only staged entries count; there is no in-code suppression, and a real
+secret is removed and rotated, never allowlisted. This stops accidental leaks, not a determined bypass (git
+commit --no-verify skips it); server-side push protection (e.g. GitHub secret scanning) is the last line."""
 import base64
 import collections
 import hashlib
