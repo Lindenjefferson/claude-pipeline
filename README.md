@@ -6,9 +6,9 @@ O objetivo é que nada errado saia da máquina sem que você precise acompanhar 
 
 ## Propósito e princípios
 
-- **Só orquestração.** O plugin conduz e gere o desenvolvimento de um projeto (o `manager`, os agentes, o ledger, o gate e os princípios gerais de qualidade); não traz código de produto.
-- **Independente de stack.** Nenhuma regra de framework, fornecedor ou linguagem: isso fica no `CLAUDE.md` e no `docs/lessons.md` de cada projeto.
-- **Enxuto.** Cada mudança tira o que ficou desnecessário, duplicado ou sem uso; uma regra geral curta vale mais que muitas específicas.
+- **Só orquestração.** O plugin conduz e gere o desenvolvimento (skills, agentes, `ledger.py`, `gate.py`, princípios gerais). Não traz código, template nem configuração de produto.
+- **Independente de stack.** Nada de framework, fornecedor ou linguagem. Regra de stack ou de projeto mora no `CLAUDE.md` e no `docs/lessons.md` de cada projeto.
+- **Enxuto.** Toda mudança remove o que ficou desnecessário, duplicado ou sem uso. Uma regra geral curta vale mais que várias específicas.
 
 As regras para mudar o plugin estão no [`CLAUDE.md`](CLAUDE.md).
 
