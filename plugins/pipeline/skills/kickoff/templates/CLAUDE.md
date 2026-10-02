@@ -12,7 +12,7 @@
 
 ## Comandos
 
-Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o `gate.py` roda as linhas Build, Typecheck, Lint e Testes antes de qualquer merge. Preencher assim que a stack existir, com o comando entre crases (ex.: `- Testes:` seguido do comando de testes entre crases):
+Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o `gate.py` roda as linhas Build, Typecheck, Lint, Testes e Auditoria antes de qualquer merge (só Testes é obrigatória). Preencher assim que a stack existir, com o comando entre crases (ex.: `- Testes:` seguido do comando de testes entre crases):
 
 - Instalar dependências: _(comando)_
 - Rodar em desenvolvimento: _(comando)_
@@ -20,12 +20,23 @@ Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o
 - Typecheck: _(comando)_
 - Lint: _(comando)_
 - Testes: _(comando)_
+- Testes afetados (um arquivo ou filtro, para o `dev`): _(comando)_
+- Arquivos de teste (globs separados por espaço; o `gate.py` procura neles o id de cada critério de aceite): _(globs)_
+- Auditoria (vulnerabilidades das dependências; opcional): _(comando)_
 - Verificação de interface (se houver tela): _(comando)_
 - Migrations (aplicar/criar): _(comando)_
 
+## Execução em paralelo
+
+O `manager` roda em paralelo, cada uma numa worktree do git, as tarefas que não dependem uma da outra nem tocam os mesmos arquivos. Sem esta seção preenchida, as tarefas rodam uma de cada vez.
+
+- Como rodar N cópias ao mesmo tempo (o que muda por worktree): _(porta, banco ou esquema, dados de teste, variáveis de ambiente)_
+- Recursos que não dá para isolar (a verificação que os usa roda uma tarefa por vez): _(ex.: limite de taxa de um serviço externo, um serviço único)_
+- Números sequenciais reservados no plano: _(ex.: migrations)_
+
 ## Fluxo de entrega
 
-A skill `manager` classifica o pedido (pequeno, padrão, grande) e conduz em ciclos curtos: spec (só nos grandes) → plano (aprovado pelo usuário) → ciclos de até ~6 tarefas (`dev` em cada tarefa, depois um `reviewer` e um `qa` sobre o ciclo inteiro e uma rodada de correção) → `gate.py` (build, tipos, lint, testes e scan de segredos, tudo local) → merge e push só quando o usuário aprovar.
+A skill `manager` classifica o pedido (pequeno, padrão, grande) e conduz em ciclos curtos: spec (só nos grandes) → plano (revisado pelo `reviewer` e aprovado pelo usuário) → ciclos de até ~6 tarefas (`dev` em cada tarefa, as independentes em paralelo; depois `reviewer` e `qa` juntos sobre o ciclo inteiro e uma rodada de correção) → limpeza → `gate.py` (ledger, critérios de aceite com teste, build, tipos, lint, testes, auditoria e scan de segredos, tudo local) → merge e push só quando o usuário aprovar.
 
 - O trabalho acontece numa branch `feat/...` ou `fix/...`; nada vai para a branch principal sem aprovação.
 - O ledger (`.superpowers/ledger.jsonl`) registra o que cada agente concluiu e o que falta.
@@ -33,6 +44,7 @@ A skill `manager` classifica o pedido (pequeno, padrão, grande) e conduz em cic
 - Erros que uma regra teria evitado viram uma checagem automática (teste, helper, lint) sempre que possível; o que não dá para automatizar vira uma linha em `docs/lessons.md`, que o `dev` e o `reviewer` leem.
 - O hook `pre-commit` do git (instalado pelo `kickoff`) bloqueia commits com arquivos `.env` ou linhas com cara de segredo. Nunca usar `--no-verify` nem mexer em `.git/hooks`: um segredo commitado fica no histórico.
 - Cada entrega aprovada pelo `gate.py` gera um relatório em `docs/quality-reports/`.
+- Ambiente de testes antes de produção: _(onde a entrega é publicada primeiro, como as migrations passam por ele, como fazer backup e reverter)_
 
 ## Regras que valem sempre
 
