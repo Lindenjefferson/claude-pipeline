@@ -12,7 +12,7 @@
 
 ## Comandos
 
-Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o `gate.py` roda as linhas Build, Typecheck, Lint e Testes antes de qualquer merge. Preencher assim que a stack existir, com o comando entre crases (ex.: `- Testes:` seguido de `npm test` entre crases):
+Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o `gate.py` roda as linhas Build, Typecheck, Lint e Testes antes de qualquer merge. Preencher assim que a stack existir, com o comando entre crases (ex.: `- Testes:` seguido do comando de testes entre crases):
 
 - Instalar dependências: _(comando)_
 - Rodar em desenvolvimento: _(comando)_

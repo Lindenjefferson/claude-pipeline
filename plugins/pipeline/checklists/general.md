@@ -1,8 +1,3 @@
----
-stack: general
-paths: ["**"]
----
-
 # General checklist
 
 Each item: the check — why — how to verify. An unmet item is a finding, with evidence like any other. Rules for the project's own stack live in its `CLAUDE.md` and `docs/lessons.md`, not here.

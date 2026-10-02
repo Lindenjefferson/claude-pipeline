@@ -4,7 +4,7 @@
   gate.py [--base <rev>] [--ledger <path>] [--cmd Name=command ...] [--report <slug>]
 
 Checks, in order: the ledger's current cycle is closed, the tree is clean, every command in the "Comandos"
-section of CLAUDE.md passes (lines like "- Testes: `npm test`"; Build, Typecheck, Lint and Testes are run, and
+section of CLAUDE.md passes (lines like "- Testes: `<command>`"; Build, Typecheck, Lint and Testes are run, and
 --cmd adds or overrides one), and no secret or .env file is added anywhere in <base>..HEAD, the whole history
 that a push would send. Prints READY or NOT READY and exits 0 or 1. With --report and READY, writes
 docs/quality-reports/<date>-<slug>.md (checks, commits, ledger notes and the delivery metrics: findings per cycle,

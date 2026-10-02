@@ -2,7 +2,17 @@
 
 Backlog vivo do plugin. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin ou ideia adaptada do ECC) e o esforço estimado (P, M, G). Ao entregar um item, mover para a seção da versão correspondente com o PR.
 
-## 2.1.0 — em andamento (branch `refactor/cycle-review`)
+## 2.2.0 — lições da fatia 2 (branch `feat/lessons-from-etapa-2`)
+
+Objetivo: o plugin só orquestra e gere o desenvolvimento; tudo o que é de stack ou de projeto sai dele.
+
+- [x] **Ledger**: `fix-N` fica no ciclo corrente (reviewer na correção; qa de novo só se o último qa do ciclo reprovou); `start --archive`; saída UTF-8; achados por severidade (`--critical`, `--important`, `--minor`) e o comando `lesson`.
+- [x] **Métricas da entrega** no relatório do `gate.py`: achados por ciclo e severidade, rodadas de correção, lições adicionadas e automatizadas.
+- [x] **Manager**: seção `## Errata` no plano (a única parte que o manager edita; o brief do dev manda ler); granularidade do plano (código completo só em regras puras e camada de dados); "isso pode ser uma checagem?" antes de escrever uma lição; promoção de lição repetida em dois projetos para o plugin.
+- [x] **Invariantes** no `reviewer` e no `checklists/general.md`, aplicadas também no modo spec; o checklist geral absorve as regras sem stack de `auth`, `nextjs-react` e `postgres-supabase`, que saem; mutação como evidência no relatório do dev; mensagens de erro específicas; controle de edição concorrente; regras de domínio (dinheiro, tempo, identidade) no `spec-checklist`.
+- [x] **Kickoff sem stack**: saem `templates/nextjs/` e `templates/supabase/`; a allowlist vem dos "Comandos" do `CLAUDE.md`; novo `docs/lessons.md`.
+
+## 2.1.0 — entregue (PR #7)
 
 Objetivo: menos tempo por módulo (o fluxo 1.x levou 4 a 5 horas e mais de 20 relatórios num módulo).
 
@@ -24,7 +34,7 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 ## Próximos
 
 - [ ] **Retomada depois de compactação** (ECC `session-start`): hook `SessionStart` com matcher `compact|resume` mostra o `ledger.py status` quando há ledger. P.
-- [ ] **Bloquear servidor de dev solto** (ECC `pre-bash-dev-server-block`): negar `npm run dev` / `next dev` fora do modo background, com a forma certa na mensagem. Custou uma rodada de QA e um processo órfão no Módulo 1. P.
+- [ ] **Bloquear servidor de dev solto** (ECC `pre-bash-dev-server-block`): negar o servidor de dev do projeto fora do modo background, com a forma certa na mensagem. Custou uma rodada de QA e um processo órfão no Módulo 1. P.
 - [ ] **Encoding no commit**: o `pre-commit` recusa linhas adicionadas que não decodificam como UTF-8. P.
 - [ ] **Âncora de teste por requisito** (ECC `spec-miner`): cada critério de aceite do plano aponta o teste que o cobre; o `qa` confere. P.
 
