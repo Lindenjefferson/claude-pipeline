@@ -49,11 +49,15 @@ def check(name, ok, detail=""):
     print("PASS" if ok else "FAIL", name, "" if ok else f"| {str(detail)[-500:]}")
 
 
-def claude_md(lint_ok=True, tests=True):
+def claude_md(lint_ok=True, tests=True, audit=None, test_files=None):
     lines = ["# p", "", "## Comandos", "", f"- Build: `{PY} -c \"print('built')\"`",
              f"- Lint: `{PY} -c \"import sys; sys.exit({0 if lint_ok else 1})\"`"]
     if tests:
         lines.append(f"- Testes: `{PY} -c \"print('3 passed')\"`")
+    if audit is not None:
+        lines.append(f"- Auditoria: `{PY} -c \"import sys; print('audit'); sys.exit({0 if audit else 1})\"`")
+    if test_files:
+        lines.append(f"- Arquivos de teste: `{test_files}`")
     return "\n".join(lines + ["", "## Outra seção", "- Testes: `false`", ""])
 
 
@@ -120,7 +124,7 @@ ledger("--agent", "dev", "--task", "fix-1", "--verdict", "DONE")
 r = gate("--base", "main")
 check("a fix round after the closed cycle needs its review: NOT READY",
       r.returncode == 1 and "reviewer has not reviewed" in r.stdout, r.stdout)
-ledger("--agent", "reviewer", "--verdict", "PASS", "--minor", "2")
+ledger("--agent", "reviewer", "--verdict", "PASS", "--minor", "2", "--origin", "execution=2")
 subprocess.run([sys.executable, LEDGER, "lesson", "--text", "lock before checking", "--check", "tests/race.sql"],
                cwd=repo, check=True, capture_output=True)
 r = gate("--base", "main")
@@ -135,5 +139,63 @@ text = open(os.path.join(repo, "docs", "quality-reports", report[0]), encoding="
 check("the report carries the delivery metrics from the ledger",
       "## Metrics" in text and "- Cycle 1: 0 Critical, 0 Important, 2 Minor; 1 fix round" in text
       and "Lessons: 1 (1 automated)" in text and "- lock before checking (check: tests/race.sql)" in text, text)
+check("no audit command: the audit is skipped with a note",
+      "Auditoria:  SKIP" in r.stdout and "not configured" in r.stdout, r.stdout)
+check("no plan in the ledger: traceability is skipped", "Criteria:   SKIP" in r.stdout, r.stdout)
+sh("git", "commit", "-q", "--no-verify", "-m", "docs: quality report")
+
+
+def ledger_cmd(*args):
+    return subprocess.run([sys.executable, LEDGER, *args], cwd=repo, capture_output=True, text=True,
+                          encoding="utf-8")
+
+
+os.makedirs(os.path.join(repo, "tests"), exist_ok=True)
+os.makedirs(os.path.join(repo, "src"), exist_ok=True)
+commit("plan.md", "# plan\n- AC-T1-1 Given a, When b, Then c.\n- AC-T1-2 Given x.\n- AC-T1.3 Given y.\n## Errata\n",
+       "docs: plan")
+commit("tests/a.test.txt", "test('AC-T1-1 given a when b then c')\ntest('AC-T1.30 other')\n", "test: a")
+commit("src/x.txt", "AC-T1-2\n", "feat: x")
+ledger_cmd("start", "--slug", "y", "--base", "main", "--plan", "plan.md", "--archive")
+ledger_cmd("add", "--agent", "dev", "--task", "T1", "--verdict", "DONE", "--seconds", "5m")
+ledger_cmd("add", "--agent", "reviewer", "--verdict", "PASS", "--minor", "1", "--origin", "design=1",
+           "--seconds", "1m")
+ledger_cmd("add", "--agent", "qa", "--verdict", "PASS", "--seconds", "2m")
+r = gate("--base", "main")
+trace = r.stdout.split("Criteria:")[1].split("\n    ")[1] if "Criteria:" in r.stdout else ""
+check("a criterion of the plan with no test: NOT READY, naming only that id",
+      r.returncode == 1 and "Criteria:   FAIL" in r.stdout and "AC-T1.3" in trace and "AC-T1-1" not in trace,
+      r.stdout)
+commit("tests/b.test.txt", "test('AC-T1.3 given y')\n", "test: b")
+r = gate("--base", "main")
+check("every criterion id found in a tracked non-markdown file: traceability passes",
+      "Criteria:   PASS" in r.stdout, r.stdout)
+commit("CLAUDE.md", claude_md(test_files="tests/*"), "docs: test files")
+r = gate("--base", "main")
+check("declared test files limit the search: an id only in source code is missing",
+      r.returncode == 1 and "AC-T1-2" in r.stdout, r.stdout)
+commit("tests/c.test.txt", "test('AC-T1-2 given x')\n", "test: c")
+
+commit("CLAUDE.md", claude_md(test_files="tests/*", audit=False), "docs: audit")
+r = gate("--base", "main")
+check("a failing audit command blocks", r.returncode == 1 and "Auditoria:  FAIL" in r.stdout, r.stdout)
+commit("CLAUDE.md", claude_md(test_files="tests/*", audit=True), "docs: audit fixed")
+
+ledger_cmd("defer", "--text", "wrap long names")
+r = gate("--base", "main")
+check("a deferred item with no decision: NOT READY",
+      r.returncode == 1 and "Ledger:     FAIL" in r.stdout and "deferred D1" in r.stdout, r.stdout)
+ledger_cmd("resolve", "--id", "D1", "--decision", "user: next delivery")
+r = gate("--base", "main", "--report", "feature-y")
+check("all criteria traced, audit passes, deferred decided: READY",
+      r.returncode == 0 and "Auditoria:  PASS" in r.stdout and "Criteria:   PASS" in r.stdout, r.stdout)
+name = [entry for entry in os.listdir(os.path.join(repo, "docs", "quality-reports")) if "feature-y" in entry]
+text = open(os.path.join(repo, "docs", "quality-reports", name[0]), encoding="utf-8").read() if name else ""
+check("the report shows time per cycle, task and agent",
+      "## Time" in text and "- Cycle 1: 8m agent time, 5m elapsed (dev 5m, reviewer 1m, qa 2m)" in text
+      and "- Tasks: T1 5m" in text, text)
+check("the report shows findings by origin and the deferred decisions",
+      "Origins: design 1, assumption 0, plan 0, execution 0, environment 0" in text
+      and "- D1 wrap long names -> user: next delivery" in text, text)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

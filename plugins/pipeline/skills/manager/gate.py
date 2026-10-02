@@ -3,14 +3,19 @@
 
   gate.py [--base <rev>] [--ledger <path>] [--cmd Name=command ...] [--report <slug>]
 
-Checks, in order: the ledger's current cycle is closed, the tree is clean, every command in the "Comandos"
-section of CLAUDE.md passes (lines like "- Testes: `<command>`"; Build, Typecheck, Lint and Testes are run, and
---cmd adds or overrides one), and no secret or .env file is added anywhere in <base>..HEAD, the whole history
-that a push would send. Prints READY or NOT READY and exits 0 or 1. With --report and READY, writes
-docs/quality-reports/<date>-<slug>.md (checks, commits, ledger notes and the delivery metrics: findings per cycle,
-fix rounds, lessons added and automated) and stages it."""
+Checks, in order: nothing is pending in the ledger (the current cycle is closed and every deferred item has a final
+decision); the tree is clean; every acceptance-criterion id of the plan recorded in the ledger (tokens like AC-T3-2)
+appears in a tracked test file (the globs on the "Arquivos de teste" line of the CLAUDE.md "Comandos" section,
+space-separated, fnmatch style; without that line, every tracked file that is not Markdown); every command of that
+section passes (lines like "- Testes: `<command>`"; Build, Typecheck, Lint, Testes and the optional Auditoria are run,
+and --cmd adds or overrides one); and no secret or .env file is added anywhere in <base>..HEAD, the whole history
+that a push would send. A check that does not apply is SKIP with the reason; only Testes is required. Prints READY or
+NOT READY and exits 0 or 1. With --report and READY, writes docs/quality-reports/<date>-<slug>.md (checks, commits,
+ledger notes, deferred decisions and the delivery metrics: findings per cycle and origin, fix rounds, time per cycle,
+task and agent, lessons added and automated) and stages it."""
 import argparse
 import datetime
+import fnmatch
 import importlib.util
 import json
 import os
@@ -21,8 +26,10 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCANNER = os.path.join(HERE, "..", "..", "hooks", "pre-commit-secret-scan.py")
 COMMANDS = {"build": "Build", "typecheck": "Typecheck", "tipos": "Typecheck", "lint": "Lint", "testes": "Testes",
-            "tests": "Testes", "test": "Testes"}
-ORDER = ["Build", "Typecheck", "Lint", "Testes"]
+            "tests": "Testes", "test": "Testes", "auditoria": "Auditoria", "audit": "Auditoria"}
+ORDER = ["Build", "Typecheck", "Lint", "Testes", "Auditoria"]
+TEST_FILES = "arquivos de teste"
+CRITERION = re.compile(r"(?<![\w-])AC-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*")
 TIMEOUT = 900
 
 
@@ -39,15 +46,20 @@ def default_base():
     return None
 
 
+def comandos():
+    if not os.path.exists("CLAUDE.md"):
+        return []
+    text = open("CLAUDE.md", encoding="utf-8").read()
+    section = re.search(r"(?ms)^##\s+Comandos\s*$(.*?)(?=^##\s|\Z)", text)
+    return [(label.strip().lower(), value.strip())
+            for label, value in re.findall(r"(?m)^\s*[-*]\s*([^:\n]+):\s*`([^`]+)`", section.group(1) if section else "")]
+
+
 def project_commands(overrides):
     commands = {}
-    if os.path.exists("CLAUDE.md"):
-        text = open("CLAUDE.md", encoding="utf-8").read()
-        section = re.search(r"(?ms)^##\s+Comandos\s*$(.*?)(?=^##\s|\Z)", text)
-        for label, command in re.findall(r"(?m)^\s*[-*]\s*([^:\n]+):\s*`([^`]+)`", section.group(1) if section else ""):
-            name = COMMANDS.get(label.strip().lower())
-            if name:
-                commands[name] = command.strip()
+    for label, command in comandos():
+        if label in COMMANDS:
+            commands[COMMANDS[label]] = command
     for item in overrides:
         name, _, command = item.partition("=")
         commands[COMMANDS.get(name.strip().lower(), name.strip())] = command.strip()
@@ -75,12 +87,59 @@ def secret_findings(base):
     return scanner.scan(diff, sorted(set(names.split())), scanner.load_allowlist(cwd, "HEAD"))
 
 
+def traceability(plan):
+    if not plan:
+        return True, "no plan in the ledger (start --plan)"
+    if not os.path.exists(plan):
+        return False, f"plan not found: {plan}"
+    ids = sorted(set(CRITERION.findall(open(plan, encoding="utf-8").read())))
+    if not ids:
+        return False, f"{plan} lists no acceptance-criterion ids (AC-...)"
+    globs = next((value.split() for label, value in comandos() if label == TEST_FILES), None)
+    names = [name for name in git("ls-files", "-z")[1].split("\0") if name and os.path.isfile(name)]
+    if globs:
+        names = [name for name in names if any(fnmatch.fnmatch(name, pattern) for pattern in globs)]
+    else:
+        names = [name for name in names if not name.lower().endswith(".md")]
+    found = set()
+    for name in names:
+        if os.path.getsize(name) < 2_000_000:
+            found.update(CRITERION.findall(open(name, encoding="utf-8", errors="ignore").read()))
+    missing = [item for item in ids if item not in found]
+    return not missing, ("criteria with no test: " + ", ".join(missing)) if missing else ""
+
+
 def ledger_state(path):
     result = subprocess.run([sys.executable, os.path.join(HERE, "ledger.py"), "--ledger", path, "status", "--json"],
                             capture_output=True, text=True, encoding="utf-8")
     if result.returncode != 0:
         return None, result.stderr.strip() or "no ledger"
     return json.loads(result.stdout), None
+
+
+def duration(seconds):
+    if seconds < 60:
+        return f"{seconds}s"
+    hours, minutes = divmod(round(seconds / 60), 60)
+    return f"{hours}h{minutes}m" if hours else f"{minutes}m"
+
+
+def time_lines(metrics):
+    time = metrics.get("time")
+    if not time or not time["agents"]:
+        return []
+    unmeasured = time["unmeasured"]
+    lines = ["## Time", "", "Agent time adds up every run; elapsed is wall-clock, so parallel runs count once. "
+             f"{unmeasured} run{'' if unmeasured == 1 else 's'} unmeasured.", ""]
+    for cycle in metrics["cycles"]:
+        agents = ", ".join(f"{agent} {duration(seconds)}" for agent, seconds in cycle["agents"].items())
+        elapsed = f", {duration(cycle['elapsed'])} elapsed" if cycle.get("elapsed") is not None else ""
+        lines.append(f"- Cycle {cycle['cycle']}: {duration(cycle['seconds'])} agent time{elapsed}"
+                     + (f" ({agents})" if agents else ""))
+    tasks = ", ".join(f"{task} {duration(seconds)}" for task, seconds in time["tasks"].items())
+    lines.append(f"- Tasks: {tasks or '-'}")
+    lines.append("- Agents: " + ", ".join(f"{agent} {duration(seconds)}" for agent, seconds in time["agents"].items()))
+    return lines + [""]
 
 
 def metrics_lines(metrics):
@@ -93,11 +152,20 @@ def metrics_lines(metrics):
         lines.append(f"- Cycle {cycle['cycle']}: {cycle['critical']} Critical, {cycle['important']} Important, "
                      f"{cycle['minor']} Minor" + (f" (+{unsplit} blocking, unsplit)" if unsplit > 0 else "")
                      + f"; {rounds} fix round{'' if rounds == 1 else 's'}")
+    origins = dict(metrics.get("origins") or {})
+    if origins:
+        unclassified = origins.pop("unclassified", 0)
+        lines += ["", "Origins: " + ", ".join(f"{name} {count}" for name, count in origins.items())
+                  + (f" (unclassified {unclassified})" if unclassified else "")]
     automated = sum(1 for lesson in metrics["lessons"] if lesson["check"])
     lines += ["", f"Lessons: {len(metrics['lessons'])} ({automated} automated)"]
     lines += [f"- {lesson['text']}" + (f" (check: {lesson['check']})" if lesson["check"] else "")
               for lesson in metrics["lessons"]]
-    return lines + [""]
+    return lines + [""] + time_lines(metrics)
+
+
+def verdict(ok, detail):
+    return "SKIP" if ok and detail else "PASS" if ok else "FAIL"
 
 
 def write_report(slug, base, head, checks, ledger):
@@ -107,11 +175,14 @@ def write_report(slug, base, head, checks, ledger):
     path = os.path.join(folder, f"{today}-{slug}.md")
     code, log = git("log", "--format=- %h %s", f"{base}..HEAD")
     lines = [f"# {slug}", "", f"{today} · {base[:7]}..{head[:7]}", "", "## Checks", ""]
-    lines += [f"- {name}: {'PASS' if ok else 'FAIL'}" for name, ok, _ in checks]
+    lines += [f"- {name}: {verdict(ok, detail)}" for name, ok, detail in checks]
     lines += ["", "## Commits", "", log.strip() or "-", ""]
     if ledger:
         lines += ["## Ledger", "", f"Cycles: {ledger['cycle']}"]
         lines += [f"- note: {text}" for text in ledger["notes"]]
+        if ledger.get("deferred"):
+            lines += ["", "## Deferred", ""]
+            lines += [f"- {item['id']} {item['text']} -> {item['decision']}" for item in ledger["deferred"]]
         lines += [""] + metrics_lines(ledger.get("metrics"))
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write("\n".join(lines))
@@ -143,6 +214,9 @@ def main():
     dirty = git("status", "--porcelain")[1].strip()
     checks.append(("Clean tree", not dirty, dirty))
 
+    if ledger:
+        checks.append(("Criteria", *traceability(ledger.get("plan"))))
+
     commands = project_commands(args.cmd)
     for name in ORDER + [name for name in commands if name not in ORDER]:
         if name not in commands:
@@ -158,8 +232,7 @@ def main():
     ready = all(ok for _, ok, _ in checks)
     print(f"\nGATE {base[:7]}..{head[:7]}")
     for name, ok, detail in checks:
-        verdict = "SKIP" if ok and detail.startswith("not configured") else "PASS" if ok else "FAIL"
-        print(f"{name + ':':12}{verdict}" + ("\n    " + detail.replace("\n", "\n    ") if detail else ""))
+        print(f"{name + ':':12}{verdict(ok, detail)}" + ("\n    " + detail.replace("\n", "\n    ") if detail else ""))
     print("Overall:    READY" if ready else "Overall:    NOT READY")
     if ready and args.report:
         print(f"report staged: {write_report(args.report, base, head, checks, ledger)}")
