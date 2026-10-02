@@ -4,10 +4,11 @@
   gate.py [--base <rev>] [--ledger <path>] [--cmd Name=command ...] [--report <slug>]
 
 Checks, in order: the ledger's current cycle is closed, the tree is clean, every command in the "Comandos"
-section of CLAUDE.md passes (lines like "- Testes: `npm test`"; Build, Typecheck, Lint and Testes are run, and
+section of CLAUDE.md passes (lines like "- Testes: `<command>`"; Build, Typecheck, Lint and Testes are run, and
 --cmd adds or overrides one), and no secret or .env file is added anywhere in <base>..HEAD, the whole history
 that a push would send. Prints READY or NOT READY and exits 0 or 1. With --report and READY, writes
-docs/quality-reports/<date>-<slug>.md and stages it."""
+docs/quality-reports/<date>-<slug>.md (checks, commits, ledger notes and the delivery metrics: findings per cycle,
+fix rounds, lessons added and automated) and stages it."""
 import argparse
 import datetime
 import importlib.util
@@ -82,6 +83,23 @@ def ledger_state(path):
     return json.loads(result.stdout), None
 
 
+def metrics_lines(metrics):
+    if not metrics:
+        return []
+    lines = ["## Metrics", ""]
+    for cycle in metrics["cycles"]:
+        unsplit = cycle["open"] - cycle["critical"] - cycle["important"]
+        rounds = cycle["fix_rounds"]
+        lines.append(f"- Cycle {cycle['cycle']}: {cycle['critical']} Critical, {cycle['important']} Important, "
+                     f"{cycle['minor']} Minor" + (f" (+{unsplit} blocking, unsplit)" if unsplit > 0 else "")
+                     + f"; {rounds} fix round{'' if rounds == 1 else 's'}")
+    automated = sum(1 for lesson in metrics["lessons"] if lesson["check"])
+    lines += ["", f"Lessons: {len(metrics['lessons'])} ({automated} automated)"]
+    lines += [f"- {lesson['text']}" + (f" (check: {lesson['check']})" if lesson["check"] else "")
+              for lesson in metrics["lessons"]]
+    return lines + [""]
+
+
 def write_report(slug, base, head, checks, ledger):
     folder = os.path.join("docs", "quality-reports")
     os.makedirs(folder, exist_ok=True)
@@ -94,7 +112,7 @@ def write_report(slug, base, head, checks, ledger):
     if ledger:
         lines += ["## Ledger", "", f"Cycles: {ledger['cycle']}"]
         lines += [f"- note: {text}" for text in ledger["notes"]]
-        lines.append("")
+        lines += [""] + metrics_lines(ledger.get("metrics"))
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write("\n".join(lines))
     git("add", path)
@@ -102,6 +120,9 @@ def write_report(slug, base, head, checks, ledger):
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--base")
     parser.add_argument("--ledger", default=".superpowers/ledger.jsonl")
