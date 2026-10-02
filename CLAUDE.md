@@ -35,7 +35,7 @@ O `kickoff` prepara o projeto uma vez. A cada pedido, o `manager` dimensiona o t
 ## Regras para mudar o plugin
 
 - **Feedback de entregas entra só como regra geral** que garante um bom produto em qualquer stack. O que é de stack ou de projeto volta para o projeto. Uma lição que se repete em dois projetos é candidata a princípio em `checklists/general.md`.
-- **Fonte única por componente.** Comportamento novo vai para o arquivo do componente; README e este `CLAUDE.md` ganham no máximo uma linha com link. Ao mudar um componente, conferir que README, `CLAUDE.md`, `docs/roadmap.md` e os outros componentes que o citam continuam consistentes (mesmos termos, nenhuma cópia).
+- **Fonte única por componente.** Comportamento novo vai para o arquivo do componente; README e este `CLAUDE.md` ganham no máximo uma linha com link. Ao mudar um componente, conferir que README, `CLAUDE.md`, `docs/roadmap.md` e os outros componentes que o citam continuam consistentes (mesmos termos, nenhuma cópia). Única cópia permitida: os três princípios acima, idênticos palavra por palavra na seção "Propósito e princípios" do README; as duas cópias mudam juntas, no mesmo commit.
 - **Enxugar ao tocar.** Ao editar um arquivo, remover o que ficou obsoleto, duplicado ou sem uso, e listar o que saiu no PR.
 - **Teste primeiro** para `ledger.py`, `gate.py` e o hook: o teste novo falha antes da mudança. Ledgers de versões anteriores continuam legíveis, ou a quebra vai para as notas de atualização.
 - Arquivos em UTF-8 e LF (`.gitattributes`). Prompts de skills e agentes em inglês; README, este arquivo e o roadmap em português.
