@@ -3,9 +3,10 @@
 
   start  --slug <slug> [--base <rev>] [--archive]           once per delivery
   add    --agent dev --task <id> --verdict <v> [--summary <text>]   (task fix-N for a fix round)
-  add    --agent reviewer|qa --verdict PASS|FAIL [--open N] [--summary <text>]
+  add    --agent reviewer|qa --verdict PASS|FAIL [--critical N --important N | --open N] [--minor N]
   note   --text <text>                                      a decision taken on the user's behalf
-  status [--json] [--check]                                 the current cycle and what it still needs
+  lesson --text <rule> [--check <test or lint rule>]        a lesson, automated when --check names the check
+  status [--json] [--check]                                 the current cycle, what it still needs, and metrics
 
 A cycle is a few dev tasks followed by one reviewer pass over their diff and one qa pass. It closes when the latest
 reviewer PASS came after the latest dev run and qa PASSed after the cycle's latest regular task; the next regular
@@ -140,10 +141,15 @@ def add(args):
         sys.exit(f"{args.agent} verdict must be one of {', '.join(sorted(VERDICTS[args.agent]))}")
     if args.agent == "dev" and not args.task:
         sys.exit("dev runs need --task")
-    if args.agent in ("reviewer", "qa") and (args.verdict == "FAIL") != (args.open > 0):
-        sys.exit("FAIL needs --open > 0 (open Critical/Important findings) and PASS needs --open 0")
+    blocking = args.critical + args.important
+    if args.open is not None and blocking and args.open != blocking:
+        sys.exit("--open must equal --critical + --important")
+    open_count = blocking if args.open is None else args.open
+    if args.agent in ("reviewer", "qa") and (args.verdict == "FAIL") != (open_count > 0):
+        sys.exit("FAIL needs open Critical/Important findings (--critical, --important or --open > 0) and PASS none")
     write(args.ledger, {"type": "run", "agent": args.agent, "task": args.task, "verdict": args.verdict,
-                        "open": args.open, "head": git_head() or "", "summary": args.summary})
+                        "open": open_count, "critical": args.critical, "important": args.important,
+                        "minor": args.minor, "head": git_head() or "", "summary": args.summary})
     print(f"{args.agent}{' ' + args.task if args.task else ''}: {args.verdict} (cycle {len(cycles(read(args.ledger)))})")
 
 
@@ -152,6 +158,26 @@ def note(args):
         sys.exit("no delivery started: run start first")
     write(args.ledger, {"type": "note", "text": args.text})
     print("noted")
+
+
+def lesson(args):
+    if not read(args.ledger):
+        sys.exit("no delivery started: run start first")
+    write(args.ledger, {"type": "lesson", "text": args.text, "check": args.check})
+    print("lesson recorded" + (f" (automated: {args.check})" if args.check else ""))
+
+
+def metrics(entries):
+    per_cycle = []
+    for number, cycle in enumerate(cycles(entries), 1):
+        passes = [entry for entry in cycle if entry["agent"] in ("reviewer", "qa")]
+        counts = {key: sum(entry.get(key, 0) for entry in passes)
+                  for key in ("critical", "important", "minor", "open")}
+        fixes = {entry["task"] for entry in cycle if is_fix(entry)}
+        per_cycle.append({"cycle": number, **counts, "fix_rounds": len(fixes)})
+    lessons = [{"text": entry["text"], "check": entry.get("check", "")} for entry in entries
+               if entry["type"] == "lesson"]
+    return {"cycles": per_cycle, "lessons": lessons}
 
 
 def status(args):
@@ -164,7 +190,7 @@ def status(args):
               "tasks": {task: entry["verdict"] for task, entry in state["tasks"].items()},
               "reviewer": state["reviewer"], "qa": state["qa"], "pending": pending,
               "notes": [entry["text"] for entry in entries if entry["type"] == "note"],
-              "ready_for_gate": not pending}
+              "metrics": metrics(entries), "ready_for_gate": not pending}
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:
@@ -199,12 +225,19 @@ def main():
     command.add_argument("--agent", required=True, choices=sorted(VERDICTS))
     command.add_argument("--task", default="")
     command.add_argument("--verdict", required=True)
-    command.add_argument("--open", type=int, default=0)
+    command.add_argument("--open", type=int)
+    command.add_argument("--critical", type=int, default=0)
+    command.add_argument("--important", type=int, default=0)
+    command.add_argument("--minor", type=int, default=0)
     command.add_argument("--summary", default="")
     command.set_defaults(run=add)
     command = commands.add_parser("note")
     command.add_argument("--text", required=True)
     command.set_defaults(run=note)
+    command = commands.add_parser("lesson")
+    command.add_argument("--text", required=True)
+    command.add_argument("--check", default="")
+    command.set_defaults(run=lesson)
     command = commands.add_parser("status")
     command.add_argument("--json", action="store_true")
     command.add_argument("--check", action="store_true")
