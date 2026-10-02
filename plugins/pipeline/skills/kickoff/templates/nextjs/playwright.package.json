@@ -1,8 +1,0 @@
-{
-  "devDependencies": {
-    "@playwright/test": "<current version from npm view @playwright/test version>"
-  },
-  "scripts": {
-    "e2e:smoke": "playwright test --grep @smoke"
-  }
-}

@@ -1,26 +1,5 @@
 {
-  "core": [
-    "Bash(npm ci)",
-    "Bash(npm install)"
-  ],
-  "nextjs": [
-    "Bash(npx next info)"
-  ],
-  "supabase": [
-    "Bash(npx supabase status)",
-    "Bash(npx supabase start)",
-    "Bash(npx supabase stop)",
-    "Bash(npx supabase db reset)",
-    "Bash(npx supabase test db)",
-    "Bash(npx supabase migration new:*)",
-    "Bash(npx supabase migration list --local)"
-  ],
-  "script_name_globs": {
-    "core": ["lint", "lint:*", "typecheck", "typecheck:*", "test", "test:*", "build"],
-    "nextjs": ["dev", "e2e:smoke"],
-    "supabase": ["db:*"]
-  },
-  "script_entry": "Bash(npm run <script>)",
+  "entry": "Bash(<command>)",
   "deny": [
     "Edit(.pipeline-secrets-allow)",
     "Write(.pipeline-secrets-allow)",
@@ -36,6 +15,7 @@
     "migration repair",
     "secrets set",
     "deploy",
+    "publish",
     "vercel",
     "git push",
     "rm -rf"
