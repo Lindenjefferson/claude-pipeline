@@ -12,7 +12,7 @@
 
 ## Comandos
 
-Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o `gate.py` roda as linhas Build, Typecheck, Lint e Testes antes de qualquer merge. Preencher assim que a stack existir, com o comando entre crases (ex.: `- Testes:` seguido de `npm test` entre crases):
+Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o `gate.py` roda as linhas Build, Typecheck, Lint e Testes antes de qualquer merge. Preencher assim que a stack existir, com o comando entre crases (ex.: `- Testes:` seguido do comando de testes entre crases):
 
 - Instalar dependências: _(comando)_
 - Rodar em desenvolvimento: _(comando)_
@@ -20,6 +20,7 @@ Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o
 - Typecheck: _(comando)_
 - Lint: _(comando)_
 - Testes: _(comando)_
+- Verificação de interface (se houver tela): _(comando)_
 - Migrations (aplicar/criar): _(comando)_
 
 ## Fluxo de entrega
@@ -29,11 +30,12 @@ A skill `manager` classifica o pedido (pequeno, padrão, grande) e conduz em cic
 - O trabalho acontece numa branch `feat/...` ou `fix/...`; nada vai para a branch principal sem aprovação.
 - O ledger (`.superpowers/ledger.jsonl`) registra o que cada agente concluiu e o que falta.
 - Achados do `reviewer` e do `qa` voltam para o `dev` numa rodada só; se ainda sobrar algo, o `manager` pergunta.
-- Erros que uma regra escrita teria evitado viram uma linha em `docs/lessons.md`, que o `dev` e o `reviewer` leem.
+- Erros que uma regra teria evitado viram uma checagem automática (teste, helper, lint) sempre que possível; o que não dá para automatizar vira uma linha em `docs/lessons.md`, que o `dev` e o `reviewer` leem.
 - O hook `pre-commit` do git (instalado pelo `kickoff`) bloqueia commits com arquivos `.env` ou linhas com cara de segredo. Nunca usar `--no-verify` nem mexer em `.git/hooks`: um segredo commitado fica no histórico.
 - Cada entrega aprovada pelo `gate.py` gera um relatório em `docs/quality-reports/`.
 
 ## Regras que valem sempre
 
 - Variáveis de ambiente e segredos nunca são commitados.
+- Antes de escrever ou corrigir um comando de scaffold ou instalação (aqui, numa spec ou num plano), conferir a versão e as flags atuais no gerenciador de pacotes do stack, no `--help` e na documentação atual; nunca de memória.
 - _(adicionar aqui as regras de stack decididas no brainstorming: acesso a dados, testes, migrations, deploy)_

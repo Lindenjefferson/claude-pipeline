@@ -10,9 +10,9 @@ O plugin é habilitado **por projeto**, nunca globalmente: onde não está ativo
 tamanho → (spec) → plano ✋ → ciclo: dev por tarefa → reviewer 1× → qa 1× → correção 1× ↺ → gate.py → merge/push ✋
 ```
 
-1. **`pipeline:kickoff`** prepara o projeto: `CLAUDE.md`, `docs/`, `.gitignore`, o hook `pre-commit` de segredos, as permissões dos agentes e, conforme o stack, Playwright e a base de privilégios do Supabase.
+1. **`pipeline:kickoff`** prepara o projeto com a estrutura que não depende de stack: `CLAUDE.md` (com a seção "Comandos" que o `gate.py` lê), `docs/` com `lessons.md`, `.gitignore`, o hook `pre-commit` de segredos, as permissões dos agentes e o grafo de conhecimento. O setup do stack é do projeto.
 2. **`pipeline:manager`** classifica o pedido como pequeno, padrão ou grande, e isso decide quantas etapas rodam. Nos grandes há spec (com `discovery` quando existem fontes brutas); nos padrões e grandes, um plano que você aprova (✋ 1).
-3. O trabalho anda em **ciclos curtos** de até ~6 tarefas. Em cada tarefa só o `dev` roda: implementa em TDD (red, green, refactor), atualiza a doc do módulo, roda a suíte e commita na branch da feature. No fim do ciclo, **um** `reviewer` revisa o diff do ciclo inteiro com os checklists do stack e **um** `qa` confere os critérios de aceite. O `dev` corrige todos os achados numa rodada só, e o reviewer confere só a correção; se ainda sobrar algo, o `manager` pergunta a você. Ciclo pequeno quer dizer diff pequeno, poucos achados e uma correção, e o que deu errado vira uma linha em `docs/lessons.md` para o ciclo seguinte não repetir.
+3. O trabalho anda em **ciclos curtos** de até ~6 tarefas. Em cada tarefa só o `dev` roda: implementa em TDD (red, green, refactor), atualiza a doc do módulo, roda a suíte e commita na branch da feature. No fim do ciclo, **um** `reviewer` revisa o diff do ciclo inteiro com o checklist geral e as regras do projeto e **um** `qa` confere os critérios de aceite. O `dev` corrige todos os achados numa rodada só (tarefa `fix-N`, que fica no mesmo ciclo), e o reviewer confere só a correção; se ainda sobrar algo, o `manager` pergunta a você. Ciclo pequeno quer dizer diff pequeno, poucos achados e uma correção, e o que deu errado vira uma checagem automática (ou, se não der, uma linha em `docs/lessons.md`) para o ciclo seguinte não repetir.
 4. O **`gate.py`** é um script, não um agente: confere o ledger e a árvore limpa, roda os comandos Build, Typecheck, Lint e Testes do `CLAUDE.md` e o scan de segredos em todo o histórico da branch. Responde READY ou NOT READY em segundos ou minutos e, se READY, grava o relatório de qualidade.
 5. Você decide o merge e o push (✋ 2). Nada sai da máquina sem esse pedido.
 
@@ -24,17 +24,29 @@ tamanho → (spec) → plano ✋ → ciclo: dev por tarefa → reviewer 1× → 
 | `pipeline:manager` | Conduz a entrega em ciclos, mantém o ledger (`ledger.py`) e roda o `gate.py`. |
 | `pipeline:discovery` | Extrai fatos das fontes brutas (planilhas, apps de referência, documentos) antes do design. |
 | `pipeline:dev` | Implementa uma tarefa: código, migrations e a doc do módulo, sempre com o teste primeiro. |
-| `pipeline:reviewer` | Revisa o diff do ciclo (ou o spec, antes do código): corretude, testes, segurança, banco/RLS, trilha de auditoria e UI. Só reporta o que consegue provar, com arquivo e linha e o cenário de falha; zero achados é um resultado válido. |
+| `pipeline:reviewer` | Revisa o diff do ciclo (ou o spec, antes do código): corretude, testes, segurança, acesso a dados, trilha de auditoria e UI, com as Invariantes (também no modo spec). Só reporta o que consegue provar, com arquivo e linha e o cenário de falha; zero achados é um resultado válido. |
 | `pipeline:qa` | Roda os testes de verdade e confere os critérios de aceite do ciclo, no navegador quando há tela. |
 | Hook de segredos | `pre-commit` nativo do git, instalado pelo `kickoff`: bloqueia arquivos `.env` e linhas com cara de segredo (chaves de nuvem, tokens, chaves privadas, JWT que não seja a chave pública `anon`, `password`/`secret` com valor literal). É uma trava contra acidente: `git commit --no-verify` pula o hook, e o `kickoff` nega esse comando aos agentes. |
 
 ### Ledger
 
-`.superpowers/ledger.jsonl` (fora do git) guarda uma linha por execução de agente: agente, tarefa, veredito, achados abertos e commit, agrupadas em ciclos. `ledger.py status` mostra o que falta no ciclo atual: uma tarefa do dev sem concluir, o reviewer que ainda não viu as últimas mudanças, o qa que ainda não rodou depois da revisão, uma reprovação que voltou para o dev, ou uma correção que não resolveu. O ciclo fecha quando o qa aprova, e `status --check` é o que o `gate.py` usa para saber disso. As decisões que o `manager` toma no seu lugar (um achado descartado, um Minor adiado) ficam como notas.
+`.superpowers/ledger.jsonl` (fora do git) guarda uma linha por execução de agente: agente, tarefa, veredito, achados (Critical, Important, Minor) e commit, agrupadas em ciclos. `ledger.py status` mostra o que falta no ciclo atual: uma tarefa do dev sem concluir, o reviewer que ainda não viu as últimas mudanças, o qa que ainda não rodou depois da revisão, uma reprovação que voltou para o dev, ou uma correção que não resolveu. O ciclo fecha quando o qa aprova, e `status --check` é o que o `gate.py` usa para saber disso.
 
-### Checklists e lições
+- Uma rodada de correção (`add --agent dev --task fix-N`) fica no ciclo corrente, mesmo num ciclo já fechado: exige um reviewer sobre a correção, e o qa de novo só quando o último qa do ciclo reprovou.
+- `start --archive` move uma entrega anterior para `ledger-<slug-antigo>.jsonl` ao lado e começa outra; sem a flag, o `start` recusa e diz isso.
+- As decisões que o `manager` toma no seu lugar (um achado descartado, um Minor adiado) ficam como notas (`note`), e cada lição como `lesson`, com `--check` quando virou checagem automática.
+- `status --json` traz as métricas da entrega (achados por ciclo e severidade, rodadas de correção, lições e quantas viraram checagem), que o relatório de qualidade publica.
+- A saída é sempre UTF-8, inclusive no console do Windows.
 
-`checklists/` tem as regras por stack (`auth`, `nextjs-react`, `postgres-supabase`, `general`), cada uma com os caminhos a que se aplica. O `dev` segue as que batem com os arquivos da tarefa e o `reviewer` confere. Quando um erro Critical ou Important vem de algo que uma regra escrita teria evitado, o `manager` acrescenta uma linha em `docs/lessons.md` do projeto, que o `dev` e o `reviewer` leem a cada tarefa.
+### Checklist, Invariantes e lições
+
+O plugin carrega só princípios gerais, que valem para qualquer stack: `checklists/general.md` (Invariantes, acesso e dados, testes, auth e sessões, web e UI, auditoria) e a seção Invariantes do `reviewer`, aplicada também ao revisar a spec. As regras do stack e do projeto ficam no `CLAUDE.md` e no `docs/lessons.md` de cada projeto, que o `dev` e o `reviewer` leem a cada tarefa.
+
+Quando um erro Critical ou Important vem de algo que uma regra teria evitado, o `manager` pergunta primeiro "isso pode ser uma checagem?" (teste, helper de teste, regra de lint); só o que não dá para automatizar vira uma linha em `docs/lessons.md`. Uma lição que se repete em dois projetos é proposta para o plugin, como princípio geral, no relatório de fechamento.
+
+### Plano vivo
+
+O plano traz código completo só nas regras puras e nas migrations e camada de dados; as tarefas de tela levam interfaces, critérios de aceite e testes, e o `dev` segue o padrão que já existe no código. Quando o código diverge do plano com razão (migration renumerada, contagem de testes, um padrão adotado), o `manager` acrescenta uma linha na seção `## Errata` no fim do plano, a única parte que ele edita, e todo brief do `dev` manda ler a errata.
 
 ### Hook de segredos no commit
 
@@ -48,7 +60,7 @@ tamanho → (spec) → plano ✋ → ciclo: dev por tarefa → reviewer 1× → 
 O hook bloqueia o commit e lista cada achado com o arquivo e uma impressão digital (fingerprint), por exemplo:
 
 ```
-- possible generic API key/secret/token assignment in supabase/seed.sql (fingerprint ed29c450272198d3fe54a8f66fa145022361507670c0ce8f2e0cac0cad46ca03)
+- possible generic API key/secret/token assignment in db/seed.sql (fingerprint ed29c450272198d3fe54a8f66fa145022361507670c0ce8f2e0cac0cad46ca03)
 ```
 
 Se aquela linha **não** é um segredo, libere só ela:
@@ -57,7 +69,7 @@ Se aquela linha **não** é um segredo, libere só ela:
    ```
    git diff --cached | python "<clone>/plugins/pipeline/hooks/pre-commit-secret-scan.py" --fingerprint
    ```
-   Para commits já feitos, use `git show <commit>`; para um arquivo inteiro, informe o caminho dele relativo à raiz do repositório: `python ... --fingerprint --path supabase/seed.sql < supabase/seed.sql`.
+   Para commits já feitos, use `git show <commit>`; para um arquivo inteiro, informe o caminho dele relativo à raiz do repositório: `python ... --fingerprint --path db/seed.sql < db/seed.sql`.
 2. Acrescente você mesmo uma linha em `.pipeline-secrets-allow` na raiz do repositório, com o motivo:
    ```
    ed29c450272198d3fe54a8f66fa145022361507670c0ce8f2e0cac0cad46ca03  # seed de teste, não é credencial
@@ -74,20 +86,17 @@ Regras:
 
 O scan já não sinaliza auto-atribuição de uma coluna a ela mesma, nomes qualificados (`t.col`, `excluded.col`), palavras-chave SQL, identificadores escritos (`new_password_value`, `DEFAULT_API_KEY_NAME`, `hashedPasswordValue`: com `_`, ou camelCase em que cada parte tem ao menos duas minúsculas e uma vogal, até 40 caracteres) e referências a variáveis de ambiente (`process.env.X`, `${VAR}`, `$VAR`, `os.environ[...]`, `os.getenv(...)`, `import.meta.env.X`, `%VAR%`). Continuam bloqueando: valores literais entre aspas com cara de segredo (um placeholder só é aceito quando é o valor inteiro, como `changeme`, `example`, `xxxx...`, ou começa com `your_`, `your-` ou `<`); sequências sem `_` de 16 caracteres ou mais em uma só caixa ou com caixa alternada (`xKqPz...`); valores em que quase todo caractere aparece uma vez só (entropia de Shannon de 3,5 bits/caractere ou mais e perto do máximo para o tamanho); e, sob chaves `password`/`passwd`/`secret`, frases com `_` que não citam nenhuma palavra de código (`correct_horse_battery_staple` bloqueia, `user_input_value` passa).
 
-### Kickoff: complementos por stack e allowlist de comandos
+### Kickoff: núcleo e allowlist de comandos
 
-O `kickoff` sempre instala o núcleo (hook de segredos, `.gitignore`, `docs/`, `CLAUDE.md`, grafo de conhecimento). Depois detecta o stack pelos arquivos do projeto e acrescenta convenções específicas só para o que encontrar, para o contexto dos agentes ficar pequeno:
+O `kickoff` instala só o que não depende de stack: hook de segredos, `.gitignore`, `docs/` (com `lessons.md`), `CLAUDE.md` e grafo de conhecimento. Não detecta stack nem instala configuração de framework, banco ou testes de interface: o setup do stack é desenhado pelo projeto, conferindo antes as versões e flags atuais no gerenciador de pacotes, no `--help` e na documentação atual, nunca de memória.
 
-- **Allowlist de comandos.** Junta os comandos do próprio projeto (seção "Comandos" do `CLAUDE.md` e scripts do `package.json`) em `permissions.allow` do `.claude/settings.json`, para os agentes não serem barrados pelo classificador do auto mode em lint, testes, build ou comandos de banco. Cada script vira uma entrada exata (`Bash(npm run db:types)`), nunca um curinga como `Bash(npm run db:*)`, que liberaria scripts futuros e qualquer argumento. Antes de liberar um script, o kickoff lê o corpo dele (e dos scripts que ele chama) e recusa se aparecer um termo proibido: `db push`, `db dump`, `--linked`, `--db-url`, `link`, `migration repair`, `secrets set`, `deploy`, `vercel`, `git push`, `rm -rf`. Rode o kickoff de novo sempre que os scripts mudarem. Também põe `Edit(.pipeline-secrets-allow)` e `Write(.pipeline-secrets-allow)` em `permissions.deny`. Nunca sobrescreve nem remove permissões existentes e mostra o diff antes.
-- **Next.js 16 ou superior.** Põe `agentRules: false` para o `next dev` não reescrever o `CLAUDE.md`, registra que a interceptação vive em `proxy.ts` e, em projetos mobile-first, dá aos primitivos do shadcn alvos de toque de 44px no mobile (`h-11 md:h-N`). Propõe, como diff para você aprovar (igual à allowlist), o Playwright do próprio projeto: `@playwright/test` como devDependency na versão atual, o script `e2e:smoke` (`playwright test --grep @smoke`), um `playwright.config.ts` (testes em `e2e/`, só Chromium, `webServer` com `npm run dev` e `reuseExistingServer: true`; `E2E_BASE_URL=<url>` usa um `next dev` que já roda noutra porta sem subir outro), um spec de fumaça e as pastas de resultado no `.gitignore`. A allowlist ganha só a entrada exata `Bash(npm run e2e:smoke)`. O download do Chromium (`npx playwright install chromium`) fica com você. Se recusar, os "Comandos" do `CLAUDE.md` registram a verificação por script numa pasta temporária fora do projeto (`node <pasta>/check.mjs`) e nada entra no projeto.
-- **Supabase.** Acrescenta uma migration base de privilégios (`anon` sem acesso a tabelas; `authenticated` sem truncate, references, trigger e maintain; sem privilégios em sequências; `EXECUTE` de funções revogado por padrão, inclusive para objetos futuros) e uma varredura pgTAP que falha se `anon` ou `authenticated` puderem executar função fora de uma allowlist por assinatura exata, se alguma tabela estiver sem RLS, se alguma view não tiver `security_invoker=true`, ou se `anon`/`authenticated` tiverem qualquer privilégio em materialized views ou foreign tables (o RLS não vale nelas). Os schemas verificados ficam no topo do arquivo, junto do marcador `ALLOWLIST` (padrão `public`; acrescente todo schema exposto pela API).
-- **Versões atuais.** Antes de escrever comandos de scaffold, o kickoff e os planos conferem as versões e flags atuais (`npm view`, documentação) em vez de confiar na memória.
+- **Allowlist de comandos.** Cada comando completo da seção "Comandos" do `CLAUDE.md` vira uma entrada exata em `permissions.allow` do `.claude/settings.json`, para os agentes não serem barrados pelo classificador do auto mode em lint, testes ou build. Nunca um curinga (`:*`), que liberaria comandos futuros e qualquer argumento. Antes de liberar um comando, o kickoff lê o corpo dele (e dos scripts que ele chama) e recusa se aparecer um termo proibido: `db push`, `db dump`, `--linked`, `--db-url`, `link`, `migration repair`, `secrets set`, `deploy`, `publish`, `vercel`, `git push`, `rm -rf`. Também põe `Edit(.pipeline-secrets-allow)`, `Write(.pipeline-secrets-allow)` e `git commit --no-verify`/`-n` em `permissions.deny`. Nunca sobrescreve nem remove permissões existentes e mostra o diff antes.
 
-O kickoff é idempotente: rode de novo depois do scaffold de um projeto novo para aplicar os complementos.
+O kickoff é idempotente: rode de novo depois do scaffold do stack (ou quando os comandos mudarem) para preencher os "Comandos" e a allowlist.
 
 ### Relatórios de qualidade
 
-Cada entrega que o `gate.py` aprova gera `docs/quality-reports/<data>-<slug>.md`: o resultado de cada checagem, os commits da branch, o número de ciclos e as notas do ledger (Minors adiados, decisões).
+Cada entrega que o `gate.py` aprova gera `docs/quality-reports/<data>-<slug>.md`: o resultado de cada checagem, os commits da branch, o número de ciclos, as notas do ledger (Minors adiados, decisões) e as métricas da entrega (achados por ciclo e severidade, rodadas de correção, lições adicionadas e automatizadas), para ver as lições reduzindo achados de uma entrega para outra.
 
 ## Requisitos
 
@@ -143,7 +152,7 @@ plugins/pipeline/
   agents/                           discovery, dev, reviewer, qa
   skills/kickoff/                   skill e templates do kickoff
   skills/manager/                   skill, ledger.py, gate.py, templates/spec-checklist.md e testes
-  checklists/                       regras por stack (auth, nextjs-react, postgres-supabase, general)
+  checklists/general.md             princípios gerais (Invariantes, acesso, testes, auth, UI, auditoria)
   hooks/                            scanner de segredos (pre-commit) e testes
 ```
 
@@ -166,7 +175,8 @@ Observações:
 
 - O `pre-commit` que o `kickoff` instala em cada projeto não guarda caminho: localiza o scanner pela variável `CLAUDE_PIPELINE_HOME` ou por `git config pipeline.home` (raiz do plugin, isto é, `<clone>/plugins/pipeline`). Configure uma vez por máquina com `git config --global pipeline.home "<clone>/plugins/pipeline"`. Se o clone mudar de lugar, só esse valor muda. Se o scanner não for encontrado, o commit é bloqueado com uma mensagem, nunca liberado em silêncio.
 - Projetos preparados antes da 1.6.0 têm também um `pre-push` do plugin: ele passou a não fazer nada. Rode em cada um `python "<clone>/plugins/pipeline/hooks/pre-commit-secret-scan.py" --install-pre-commit`, que atualiza o `pre-commit` e remove esse `pre-push` (um `pre-push` de outra origem fica). O `git config pipeline.gate` e o arquivo `gate-approved` deixaram de ser usados e podem ser apagados.
-- A 2.0.0 e a 2.1.0 trocaram o formato do ledger: um ledger iniciado por uma versão anterior não é lido pelo `ledger.py` novo. Termine a entrega em andamento antes de atualizar, ou comece um ledger novo.
+- A 2.0.0 e a 2.1.0 trocaram o formato do ledger: um ledger iniciado por uma versão anterior não é lido pelo `ledger.py` novo. Termine a entrega em andamento antes de atualizar, ou comece um ledger novo. A 2.2.0 lê os ledgers da 2.1.0: um `fix-N` gravado depois de um ciclo fechado passa a contar nesse ciclo, e as entradas antigas só com `--open` aparecem nas métricas como achados bloqueantes sem divisão.
+- A 2.2.0 tirou os templates de stack do `kickoff` e os checklists de stack (`auth`, `nextjs-react`, `postgres-supabase`). Projetos preparados antes continuam com os arquivos que o kickoff já instalou; as regras de stack que ainda valem devem ir para o `CLAUDE.md` ou o `docs/lessons.md` do projeto.
 - Instalações feitas a partir do GitHub ficam fixas na `version` de `plugin.json`: aumente a versão a cada release para que `claude plugin update` traga as mudanças.
 - Os arquivos são mantidos em LF (`.gitattributes`).
 
