@@ -1,8 +1,19 @@
 # Roadmap do plugin `pipeline`
 
-Backlog vivo do plugin. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin ou ideia adaptada do ECC) e o esforço estimado (P, M, G). Ao entregar um item, mover para a seção da versão correspondente com o PR.
+Backlog vivo do plugin. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin ou ideia adaptada do ECC) e o esforço estimado (P, M, G). Ao entregar um item, mover para a seção da versão correspondente com o PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
-## 2.2.0 — lições da fatia 2 (branch `feat/lessons-from-etapa-2`)
+## 2.3.0 — paralelismo e prevenção de retrabalho (branch `feat/parallel-and-rework-prevention`)
+
+Origem: feedback da etapa 2 do primeiro projeto (§5 paralelismo, §6 processo de produto, §7 prevenir retrabalho). Objetivo: menos tempo por entrega e menos achados por lacuna de desenho.
+
+- [x] **Paralelismo**: `reviewer` e `qa` do ciclo em paralelo (o qa refaz só o que a correção tocou); plano como grafo de dependências (`Depends on`, `Touches`, números sequenciais reservados) e tarefas independentes em worktrees isoladas, integradas na ordem do plano; contrato "Execução em paralelo" no `CLAUDE.md` do projeto; tarefas do ciclo seguinte durante a revisão; o `dev` roda só os testes afetados.
+- [x] **Ledger**: `--seconds` por execução e tempo por agente, tarefa e ciclo (tempo de agente e tempo de relógio) nas métricas; `--origin` em cada achado (desenho, premissa, plano, execução, ambiente); `defer`/`resolve`; tarefa `cleanup`; `start --plan`.
+- [x] **Gate**: rastreabilidade critério → teste (cada `AC-...` do plano aparece num arquivo de teste); comando opcional `Auditoria`; item adiado sem decisão deixa NOT READY; tempo, origens e decisões no relatório.
+- [x] **Processo de produto**: reviewer em modo plano antes da aprovação; checkpoint visual por ciclo (capturas na menor largura e no desktop, fluxo principal gravado); casos de abuso por escrita; matriz de permissões testada por inteiro; passo de limpeza antes do gate; política de teste instável; ambiente de testes antes de produção.
+- [x] **Prevenir retrabalho**: pré-mortem por operação de escrita no `spec-checklist` e no plano; premissas técnicas provadas por spikes; plano conferido contra o código; critérios Dado/Quando/Então com id, usados como nome do teste; decisões de produto do plano listadas na aprovação.
+- [x] **Documentação**: `CLAUDE.md` na raiz (propósito, mapa, regras de mudança); README como página de apresentação; fonte única por componente.
+
+## 2.2.0 — lições da fatia 2 (PR #8)
 
 Objetivo: o plugin só orquestra e gere o desenvolvimento; tudo o que é de stack ou de projeto sai dele.
 
@@ -36,7 +47,6 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 - [ ] **Retomada depois de compactação** (ECC `session-start`): hook `SessionStart` com matcher `compact|resume` mostra o `ledger.py status` quando há ledger. P.
 - [ ] **Bloquear servidor de dev solto** (ECC `pre-bash-dev-server-block`): negar o servidor de dev do projeto fora do modo background, com a forma certa na mensagem. Custou uma rodada de QA e um processo órfão no Módulo 1. P.
 - [ ] **Encoding no commit**: o `pre-commit` recusa linhas adicionadas que não decodificam como UTF-8. P.
-- [ ] **Âncora de teste por requisito** (ECC `spec-miner`): cada critério de aceite do plano aponta o teste que o cobre; o `qa` confere. P.
 
 ## Decisões pendentes do usuário
 
@@ -48,3 +58,12 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 - **1.5.1** (PR #5): captura de relatórios por `SubagentStop`, Playwright no kickoff, correções de negações falsas do hook, testes com `mkdtemp`.
 - **1.5.0** (PR #4): rerrevisão escopada; relatório por tarefa; STALE por arquivo e domínio; revisores exigidos no `status`; ferramentas de mutação; `pre-commit` nativo; estado do remoto por `ls-remote`; `git config` fechado por padrão; sem exceção para caminhos derivados do git.
 - **1.4.0** (PR #3): lições com contadores e injeção por caminho; checklists por stack; validação do relatório do implementador; `save-report`; adendos em arquivos; kickoff com allowlist e complementos Next/Supabase; allowlist de segredos por fingerprint.
+
+## Notas de atualização
+
+Termine a entrega em andamento antes de atualizar o plugin.
+
+- **2.3.0**: lê os ledgers da 2.1 e da 2.2 (achados antigos aparecem como "unclassified" e as execuções sem `--seconds` como não medidas). `add --open` saiu: use `--critical`/`--important`; todo achado novo exige `--origin`. Sem `start --plan`, a checagem Criteria do gate fica SKIP. A seção Invariantes saiu do `reviewer` (a fonte é `checklists/general.md`). Rode o `kickoff` de novo para acrescentar ao `CLAUDE.md` do projeto a seção "Execução em paralelo" e as linhas "Testes afetados", "Arquivos de teste" e "Auditoria".
+- **2.2.0**: saíram os templates de stack do `kickoff` e os checklists `auth`, `nextjs-react` e `postgres-supabase`. Projetos preparados antes continuam com os arquivos que já têm; as regras de stack que ainda valem vão para o `CLAUDE.md` ou o `docs/lessons.md` do projeto. Lê os ledgers da 2.1 (um `fix-N` depois de um ciclo fechado passa a contar nesse ciclo).
+- **2.0.0 e 2.1.0**: mudaram o formato do ledger; um ledger de versão anterior não é lido.
+- **1.6.0**: o `pre-push` do plugin deixou de fazer qualquer coisa. Em projetos preparados antes, rode `python "<clone>/plugins/pipeline/hooks/pre-commit-secret-scan.py" --install-pre-commit`, que atualiza o `pre-commit` e remove esse `pre-push`; `git config pipeline.gate` e o arquivo `gate-approved` podem ser apagados.

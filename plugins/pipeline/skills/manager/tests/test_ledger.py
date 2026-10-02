@@ -24,8 +24,12 @@ def run(*args, ledger=None):
                           encoding="utf-8")
 
 
-def add(agent, verdict, task=None, open_count=0, ledger=None):
-    args = ["add", "--agent", agent, "--verdict", verdict, "--open", str(open_count)]
+def add(agent, verdict, task=None, open_count=0, ledger=None, seconds=None):
+    args = ["add", "--agent", agent, "--verdict", verdict]
+    if open_count:
+        args += ["--important", str(open_count), "--origin", f"execution={open_count}"]
+    if seconds is not None:
+        args += ["--seconds", str(seconds)]
     return run(*(args + (["--task", task] if task else [])), ledger=ledger)
 
 
@@ -55,16 +59,24 @@ check("reviewer PASS with open findings is refused", add("reviewer", "PASS", ope
 add("dev", "DONE", "T1")
 add("dev", "DONE", "T2")
 check("dev tasks do not need a review each: one review for the cycle",
-      status()["pending"] == ["reviewer has not reviewed the latest changes"])
+      status()["pending"][0] == "reviewer has not reviewed the latest changes")
 add("dev", "NEEDS_CONTEXT", "T3")
 check("an unfinished dev task blocks the cycle", status()["pending"] == ["dev T3: NEEDS_CONTEXT"])
 add("dev", "DONE", "T3")
+check("reviewer and qa run in parallel: both pending after the tasks",
+      status()["pending"] == ["reviewer has not reviewed the latest changes", "qa has not run on the cycle's tasks"],
+      status()["pending"])
 add("reviewer", "FAIL", open_count=3)
-check("reviewer FAIL sends one batch back to dev", "one batch" in status()["pending"][0])
+add("qa", "PASS")
+check("reviewer FAIL sends one batch back to dev while qa already passed",
+      len(status()["pending"]) == 1 and "one batch" in status()["pending"][0], status()["pending"])
 add("dev", "DONE", "fix-1")
-check("the fix needs the reviewer again", status()["pending"] == ["reviewer has not reviewed the latest changes"])
+check("the fix of a blocking finding needs the reviewer and qa on the scenarios it touched",
+      status()["pending"] == ["reviewer has not reviewed the latest changes",
+                              "qa has not re-run the scenarios the fix touched"], status()["pending"])
 add("reviewer", "PASS")
-check("after the review, qa is pending", status()["pending"] == ["qa has not run after the latest review"])
+check("after the fix review, qa still re-runs the touched scenarios",
+      status()["pending"] == ["qa has not re-run the scenarios the fix touched"], status()["pending"])
 check("status --check exits 1 while the cycle is open", run("status", "--check").returncode == 1)
 add("qa", "PASS")
 check("qa PASS closes the cycle: ready for gate", status()["ready_for_gate"] is True)
@@ -107,7 +119,7 @@ check("the fix round stays in the cycle after a qa FAIL", status(QA)["cycle"] ==
 add("reviewer", "PASS", ledger=QA)
 pending = status(QA)["pending"]
 check("qa failed in the cycle: after the fix review, qa re-runs the failed scenarios",
-      pending == ["qa has not re-run the scenarios that failed"], pending)
+      pending == ["qa has not re-run the scenarios the fix touched"], pending)
 add("qa", "PASS", ledger=QA)
 check("qa PASS after the fix closes the cycle", status(QA)["ready_for_gate"] is True)
 
@@ -116,8 +128,26 @@ run("start", "--slug", "first", ledger=FIRST)
 for agent, verdict, task, count in (("dev", "DONE", "T1", 0), ("reviewer", "FAIL", None, 1),
                                     ("dev", "DONE", "fix-1", 0), ("reviewer", "PASS", None, 0)):
     add(agent, verdict, task, count, ledger=FIRST)
-check("no qa yet in the cycle: qa still runs after the fix review",
-      status(FIRST)["pending"] == ["qa has not run after the latest review"], status(FIRST)["pending"])
+check("no qa yet in the cycle: qa still runs on the cycle's tasks",
+      status(FIRST)["pending"] == ["qa has not run on the cycle's tasks"], status(FIRST)["pending"])
+
+ORDER = ".superpowers/order.jsonl"
+run("start", "--slug", "order", ledger=ORDER)
+for agent, verdict, task in (("dev", "DONE", "T1"), ("qa", "PASS", None), ("reviewer", "PASS", None)):
+    add(agent, verdict, task, ledger=ORDER)
+check("qa may finish before the reviewer", status(ORDER)["ready_for_gate"] is True, status(ORDER)["pending"])
+for agent, verdict, task, count in (("dev", "DONE", "T2", 0), ("reviewer", "FAIL", None, 1), ("qa", "PASS", None, 0),
+                                    ("dev", "DONE", "fix-1", 0), ("reviewer", "PASS", None, 0),
+                                    ("qa", "PASS", None, 0), ("dev", "DONE", "fix-2", 0)):
+    add(agent, verdict, task, count, ledger=ORDER)
+check("a later fix of Minors only needs the reviewer, not qa",
+      status(ORDER)["pending"] == ["reviewer has not reviewed the latest changes"], status(ORDER)["pending"])
+add("dev", "DONE", "cleanup", ledger=ORDER)
+add("reviewer", "PASS", ledger=ORDER)
+state = status(ORDER)
+check("the cleanup task stays in the cycle and needs only the reviewer",
+      state["cycle"] == 2 and "cleanup" in state["tasks"] and state["ready_for_gate"] is True, state)
+check("cleanup is not a fix round", state["metrics"]["cycles"][1]["fix_rounds"] == 2, state["metrics"])
 
 ARCHIVE = ".superpowers/archive/ledger.jsonl"
 run("start", "--slug", "old/one", ledger=ARCHIVE)
@@ -138,14 +168,21 @@ check("archiving never overwrites an earlier archive",
 METRICS = ".superpowers/metrics.jsonl"
 run("start", "--slug", "metrics", ledger=METRICS)
 add("dev", "DONE", "T1", ledger=METRICS)
-r = run("add", "--agent", "reviewer", "--verdict", "FAIL", "--open", "2", "--critical", "1", "--important", "2",
-        ledger=METRICS)
-check("--open that disagrees with --critical + --important is refused", r.returncode != 0, r.stdout)
 r = run("add", "--agent", "reviewer", "--verdict", "FAIL", "--critical", "1", "--important", "2", "--minor", "3",
         ledger=METRICS)
-check("--critical and --important stand in for --open", r.returncode == 0, r.stderr)
-add("dev", "DONE", "fix-1", ledger=METRICS)
-run("add", "--agent", "reviewer", "--verdict", "PASS", "--minor", "1", ledger=METRICS)
+check("findings without an origin are refused", r.returncode != 0 and "--origin" in r.stderr, r.stderr)
+r = run("add", "--agent", "reviewer", "--verdict", "FAIL", "--critical", "1", "--important", "2", "--minor", "3",
+        "--origin", "design=2,plan=1", ledger=METRICS)
+check("origins that do not add up to the findings are refused", r.returncode != 0, r.stderr)
+r = run("add", "--agent", "reviewer", "--verdict", "FAIL", "--critical", "1", "--important", "2", "--minor", "3",
+        "--origin", "design=5,luck=1", ledger=METRICS)
+check("an unknown origin is refused", r.returncode != 0 and "luck" in r.stderr, r.stderr)
+r = run("add", "--agent", "reviewer", "--verdict", "FAIL", "--critical", "1", "--important", "2", "--minor", "3",
+        "--origin", "design=3,assumption=1,plan=1,execution=1", "--seconds", "4m", ledger=METRICS)
+check("findings split by severity and origin are recorded", r.returncode == 0, r.stderr)
+add("dev", "DONE", "fix-1", ledger=METRICS, seconds="10m30s")
+run("add", "--agent", "reviewer", "--verdict", "PASS", "--minor", "1", "--origin", "environment=1", "--seconds", "60",
+    ledger=METRICS)
 add("qa", "FAIL", open_count=1, ledger=METRICS)
 add("dev", "DONE", "fix-2", ledger=METRICS)
 add("reviewer", "PASS", ledger=METRICS)
@@ -156,13 +193,59 @@ add("qa", "PASS", ledger=METRICS)
 run("lesson", "--text", "lock the parent row before checking it", "--check", "tests/race.sql", ledger=METRICS)
 run("lesson", "--text", "name buttons with a verb", ledger=METRICS)
 metrics = status(METRICS)["metrics"]
+cycle_counts = [{key: cycle[key] for key in ("cycle", "critical", "important", "minor", "open", "fix_rounds")}
+                for cycle in metrics["cycles"]]
 check("metrics count findings and fix rounds per cycle",
-      metrics["cycles"] == [{"cycle": 1, "critical": 1, "important": 2, "minor": 4, "open": 4, "fix_rounds": 2},
-                            {"cycle": 2, "critical": 0, "important": 0, "minor": 0, "open": 0, "fix_rounds": 0}],
+      cycle_counts == [{"cycle": 1, "critical": 1, "important": 3, "minor": 4, "open": 4, "fix_rounds": 2},
+                       {"cycle": 2, "critical": 0, "important": 0, "minor": 0, "open": 0, "fix_rounds": 0}],
       metrics)
+check("metrics classify findings by origin",
+      metrics["origins"] == {"design": 3, "assumption": 1, "plan": 1, "execution": 2, "environment": 1,
+                             "unclassified": 0}, metrics["origins"])
+time = metrics["time"]
+check("metrics add up measured time per agent, task and cycle",
+      time["agents"] == {"reviewer": 300, "dev": 630} and time["tasks"] == {"fix-1": 630}
+      and metrics["cycles"][0]["seconds"] == 930 and time["unmeasured"] == 8, time)
+r = add("dev", "DONE", "T9", ledger=METRICS, seconds="soon")
+check("an unreadable duration is refused", r.returncode != 0, r.stderr)
 check("metrics list lessons, automated or written",
       metrics["lessons"] == [{"text": "lock the parent row before checking it", "check": "tests/race.sql"},
                              {"text": "name buttons with a verb", "check": ""}], metrics)
+
+DEFER = ".superpowers/defer.jsonl"
+run("start", "--slug", "defer", "--plan", "docs/plans/defer.md", ledger=DEFER)
+check("start records the plan path", status(DEFER)["plan"] == "docs/plans/defer.md", status(DEFER))
+for agent, verdict, task in (("dev", "DONE", "T1"), ("reviewer", "PASS", None), ("qa", "PASS", None)):
+    add(agent, verdict, task, ledger=DEFER)
+r = run("defer", "--text", "long names wrap badly at the smallest width", ledger=DEFER)
+check("defer gives the item an id", r.returncode == 0 and "D1" in r.stdout, r.stdout + r.stderr)
+state = status(DEFER)
+check("an undecided deferred item blocks the gate",
+      state["ready_for_gate"] is False and any("D1" in item for item in state["pending"])
+      and run("status", "--check", ledger=DEFER).returncode == 1, state)
+check("resolve refuses an unknown id",
+      run("resolve", "--id", "D7", "--decision", "x", ledger=DEFER).returncode != 0)
+run("resolve", "--id", "D1", "--decision", "user: backlog item 12", ledger=DEFER)
+state = status(DEFER)
+check("a decided deferred item no longer blocks and keeps its decision",
+      state["ready_for_gate"] is True and state["deferred"] == [
+          {"id": "D1", "text": "long names wrap badly at the smallest width", "decision": "user: backlog item 12"}],
+      state)
+
+LEGACY = os.path.join(repo, ".superpowers", "legacy.jsonl")
+with open(LEGACY, "w", encoding="utf-8", newline="\n") as handle:
+    for entry in ({"type": "start", "slug": "old", "base": "abc"},
+                  {"type": "run", "agent": "dev", "task": "T1", "verdict": "DONE", "open": 0},
+                  {"type": "run", "agent": "reviewer", "task": "", "verdict": "FAIL", "open": 2, "critical": 1,
+                   "important": 1, "minor": 1},
+                  {"type": "run", "agent": "dev", "task": "fix-1", "verdict": "DONE", "open": 0},
+                  {"type": "run", "agent": "reviewer", "task": "", "verdict": "PASS", "open": 0},
+                  {"type": "run", "agent": "qa", "task": "", "verdict": "PASS", "open": 0}):
+        handle.write(json.dumps({**entry, "head": "", "summary": "", "at": "2026-10-01T10:00:00+00:00"}) + "\n")
+state = status(".superpowers/legacy.jsonl")
+check("a 2.2 ledger is still read: closed cycle, findings unclassified, time unmeasured",
+      state["ready_for_gate"] is True and state["metrics"]["origins"]["unclassified"] == 3
+      and state["metrics"]["time"]["unmeasured"] == 5 and state["plan"] is None and state["deferred"] == [], state)
 
 run("note", "--text", "decisão não óbvia")
 raw = subprocess.run([sys.executable, LEDGER, "status"], cwd=repo, capture_output=True,
