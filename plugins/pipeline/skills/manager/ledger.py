@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 """Delivery ledger: one JSON line per agent run, grouped in cycles, so the manager sees what is pending.
 
-  start  --slug <slug> [--base <rev>]                       once per delivery
-  add    --agent dev --task <id> --verdict <v> [--summary <text>]
+  start  --slug <slug> [--base <rev>] [--archive]           once per delivery
+  add    --agent dev --task <id> --verdict <v> [--summary <text>]   (task fix-N for a fix round)
   add    --agent reviewer|qa --verdict PASS|FAIL [--open N] [--summary <text>]
   note   --text <text>                                      a decision taken on the user's behalf
   status [--json] [--check]                                 the current cycle and what it still needs
 
-A cycle is a few dev tasks followed by one reviewer pass over their diff and one qa pass. It closes when qa
-PASSes after the latest reviewer PASS, which came after the latest dev run; the next dev run opens the next
-cycle. --check exits 1 while the current cycle is open, so the gate can rely on it."""
+A cycle is a few dev tasks followed by one reviewer pass over their diff and one qa pass. It closes when the latest
+reviewer PASS came after the latest dev run and qa PASSed after the cycle's latest regular task; the next regular
+dev run opens the next cycle. A fix round (task fix-N) always stays in the current cycle, even a closed one: it needs
+a reviewer pass on the fix, and qa again only when the cycle's latest qa was a FAIL. start --archive moves an
+existing delivery to ledger-<old-slug>.jsonl next to the ledger first. --check exits 1 while the current cycle is
+open, so the gate can rely on it."""
 import argparse
 import datetime
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -24,6 +28,7 @@ VERDICTS = {
     "qa": {"PASS", "FAIL"},
 }
 FIX_ROUNDS = 2
+FIX_TASK = re.compile(r"fix-\d+", re.IGNORECASE)
 
 
 def git_head(rev="HEAD"):
@@ -50,10 +55,14 @@ def runs(entries):
     return [entry for entry in entries if entry["type"] == "run"]
 
 
+def is_fix(entry):
+    return entry["agent"] == "dev" and bool(FIX_TASK.fullmatch(entry.get("task") or ""))
+
+
 def cycles(entries):
     groups, current, closed = [], [], False
     for entry in runs(entries):
-        if closed and entry["agent"] == "dev":
+        if closed and entry["agent"] == "dev" and not is_fix(entry):
             groups.append(current)
             current, closed = [], False
         current.append(entry)
@@ -63,11 +72,13 @@ def cycles(entries):
 
 
 def cycle_state(cycle):
-    tasks, reviews, checks, last = {}, [], [], {}
+    tasks, reviews, checks, last, work = {}, [], [], {}, -1
     for index, entry in enumerate(cycle):
         last[entry["agent"]] = index
         if entry["agent"] == "dev":
             tasks[entry["task"]] = entry
+            if not is_fix(entry):
+                work = index
         elif entry["agent"] == "reviewer":
             reviews.append(entry)
         elif entry["agent"] == "qa":
@@ -82,8 +93,10 @@ def cycle_state(cycle):
         pending.append("reviewer has not reviewed the latest changes")
     elif reviews[-1]["verdict"] == "FAIL":
         pending.append(f"reviewer FAIL ({reviews[-1]['open']} open): dev fixes every finding in one batch")
-    elif last.get("qa", -1) < last["reviewer"]:
+    elif last.get("qa", -1) < work or not checks:
         pending.append("qa has not run after the latest review")
+    elif checks[-1]["verdict"] == "FAIL" and last["qa"] < last["dev"]:
+        pending.append("qa has not re-run the scenarios that failed")
     elif checks[-1]["verdict"] == "FAIL":
         pending.append(f"qa FAIL ({checks[-1]['open']} open): dev fixes every finding in one batch")
     for agent, done in (("reviewer", reviews), ("qa", checks)):
@@ -93,12 +106,28 @@ def cycle_state(cycle):
     return {"tasks": tasks, "reviewer": reviews[-1:], "qa": checks[-1:]}, pending
 
 
+def archive_path(ledger, slug):
+    name = "ledger-" + re.sub(r"[^\w.-]+", "-", slug or "delivery")
+    stem = os.path.join(os.path.dirname(os.path.abspath(ledger)), name)
+    path, number = stem + ".jsonl", 1
+    while os.path.exists(path):
+        number += 1
+        path = f"{stem}-{number}.jsonl"
+    return path
+
+
 def start(args):
-    if read(args.ledger):
-        sys.exit(f"{args.ledger} already has a delivery; use a new ledger file per delivery")
+    entries = read(args.ledger)
+    if entries and not args.archive:
+        sys.exit(f"{args.ledger} already has a delivery ({entries[0].get('slug')}); "
+                 "run start --archive to move it to ledger-<slug>.jsonl and start fresh")
     base = git_head(args.base)
     if base is None:
         sys.exit(f"not a commit: {args.base}")
+    if entries:
+        target = archive_path(args.ledger, entries[0].get("slug"))
+        os.replace(args.ledger, target)
+        print(f"archived {entries[0].get('slug')} to {target}")
     write(args.ledger, {"type": "start", "slug": args.slug, "base": base})
     print(f"started {args.slug} at {base[:12]}")
 
@@ -155,12 +184,16 @@ def status(args):
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--ledger", default=".superpowers/ledger.jsonl")
     commands = parser.add_subparsers(dest="command", required=True)
     command = commands.add_parser("start")
     command.add_argument("--slug", required=True)
     command.add_argument("--base", default="HEAD")
+    command.add_argument("--archive", action="store_true", help="move an existing delivery aside first")
     command.set_defaults(run=start)
     command = commands.add_parser("add")
     command.add_argument("--agent", required=True, choices=sorted(VERDICTS))
