@@ -135,6 +135,35 @@ check("archiving never overwrites an earlier archive",
       r.returncode == 0 and folder == ["ledger-next.jsonl", "ledger-old-one-2.jsonl", "ledger-old-one.jsonl",
                                        "ledger-third.jsonl", "ledger.jsonl"], folder)
 
+METRICS = ".superpowers/metrics.jsonl"
+run("start", "--slug", "metrics", ledger=METRICS)
+add("dev", "DONE", "T1", ledger=METRICS)
+r = run("add", "--agent", "reviewer", "--verdict", "FAIL", "--open", "2", "--critical", "1", "--important", "2",
+        ledger=METRICS)
+check("--open that disagrees with --critical + --important is refused", r.returncode != 0, r.stdout)
+r = run("add", "--agent", "reviewer", "--verdict", "FAIL", "--critical", "1", "--important", "2", "--minor", "3",
+        ledger=METRICS)
+check("--critical and --important stand in for --open", r.returncode == 0, r.stderr)
+add("dev", "DONE", "fix-1", ledger=METRICS)
+run("add", "--agent", "reviewer", "--verdict", "PASS", "--minor", "1", ledger=METRICS)
+add("qa", "FAIL", open_count=1, ledger=METRICS)
+add("dev", "DONE", "fix-2", ledger=METRICS)
+add("reviewer", "PASS", ledger=METRICS)
+add("qa", "PASS", ledger=METRICS)
+add("dev", "DONE", "T2", ledger=METRICS)
+add("reviewer", "PASS", ledger=METRICS)
+add("qa", "PASS", ledger=METRICS)
+run("lesson", "--text", "lock the parent row before checking it", "--check", "tests/race.sql", ledger=METRICS)
+run("lesson", "--text", "name buttons with a verb", ledger=METRICS)
+metrics = status(METRICS)["metrics"]
+check("metrics count findings and fix rounds per cycle",
+      metrics["cycles"] == [{"cycle": 1, "critical": 1, "important": 2, "minor": 4, "open": 4, "fix_rounds": 2},
+                            {"cycle": 2, "critical": 0, "important": 0, "minor": 0, "open": 0, "fix_rounds": 0}],
+      metrics)
+check("metrics list lessons, automated or written",
+      metrics["lessons"] == [{"text": "lock the parent row before checking it", "check": "tests/race.sql"},
+                             {"text": "name buttons with a verb", "check": ""}], metrics)
+
 run("note", "--text", "decisão não óbvia")
 raw = subprocess.run([sys.executable, LEDGER, "status"], cwd=repo, capture_output=True,
                      env={**os.environ, "PYTHONIOENCODING": "latin-1", "PYTHONUTF8": "0"})

@@ -120,7 +120,9 @@ ledger("--agent", "dev", "--task", "fix-1", "--verdict", "DONE")
 r = gate("--base", "main")
 check("a fix round after the closed cycle needs its review: NOT READY",
       r.returncode == 1 and "reviewer has not reviewed" in r.stdout, r.stdout)
-ledger("--agent", "reviewer", "--verdict", "PASS")
+ledger("--agent", "reviewer", "--verdict", "PASS", "--minor", "2")
+subprocess.run([sys.executable, LEDGER, "lesson", "--text", "lock before checking", "--check", "tests/race.sql"],
+               cwd=repo, check=True, capture_output=True)
 r = gate("--base", "main")
 check("the fix reviewed and qa passed before it: READY without another qa", r.returncode == 0, r.stdout)
 
@@ -129,5 +131,9 @@ report = [name for name in os.listdir(os.path.join(repo, "docs", "quality-report
 check("--report writes and stages the quality report on READY",
       r.returncode == 0 and report and "docs/quality-reports/" in sh("git", "diff", "--cached", "--name-only"),
       r.stdout)
+text = open(os.path.join(repo, "docs", "quality-reports", report[0]), encoding="utf-8").read() if report else ""
+check("the report carries the delivery metrics from the ledger",
+      "## Metrics" in text and "- Cycle 1: 0 Critical, 0 Important, 2 Minor; 1 fix round" in text
+      and "Lessons: 1 (1 automated)" in text and "- lock before checking (check: tests/race.sql)" in text, text)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
