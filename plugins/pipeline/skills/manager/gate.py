@@ -7,9 +7,9 @@ Checks, in order: nothing is pending in the ledger (the current cycle is closed 
 decision); the tree is clean; every acceptance-criterion id of the plan recorded in the ledger (tokens like AC-T3-2)
 appears in a tracked test file (the globs on the "Arquivos de teste" line of the CLAUDE.md "Comandos" section,
 space-separated, fnmatch style; without that line, every tracked file that is not Markdown); every command of that
-section passes (lines like "- Testes: `<command>`"; Build, Typecheck, Lint, Testes and the optional Auditoria are run,
-and --cmd adds or overrides one); and no secret or .env file is added anywhere in <base>..HEAD, the whole history
-that a push would send. A check that does not apply is SKIP with the reason; only Testes is required. Prints READY or
+section passes (lines like "- Testes: `<command>`", a parenthetical after the label ignored; Build, Typecheck, Lint,
+Testes and the optional Auditoria are run, and --cmd adds or overrides one); and no secret or .env file is added
+anywhere in <base>..HEAD, the whole history that a push would send. A check that does not apply is SKIP with the reason; only Testes is required. Prints READY or
 NOT READY and exits 0 or 1. With --report and READY, writes docs/quality-reports/<date>-<slug>.md (checks, commits,
 ledger notes, deferred decisions and the delivery metrics: findings per cycle and origin, fix rounds, time per cycle,
 task and agent, lessons added and automated) and stages it."""
@@ -51,7 +51,7 @@ def comandos():
         return []
     text = open("CLAUDE.md", encoding="utf-8").read()
     section = re.search(r"(?ms)^##\s+Comandos\s*$(.*?)(?=^##\s|\Z)", text)
-    return [(label.strip().lower(), value.strip())
+    return [(re.sub(r"\s*\(.*\)$", "", label.strip()).lower(), value.strip())
             for label, value in re.findall(r"(?m)^\s*[-*]\s*([^:\n]+):\s*`([^`]+)`", section.group(1) if section else "")]
 
 
