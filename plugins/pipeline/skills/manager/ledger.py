@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 """Delivery ledger: one JSON line per agent run, grouped in cycles, so the manager sees what is pending.
 
-  start  --slug <slug> [--base <rev>] [--archive]           once per delivery
-  add    --agent dev --task <id> --verdict <v> [--summary <text>]   (task fix-N for a fix round)
-  add    --agent reviewer|qa --verdict PASS|FAIL [--critical N --important N | --open N] [--minor N]
-  note   --text <text>                                      a decision taken on the user's behalf
-  lesson --text <rule> [--check <test or lint rule>]        a lesson, automated when --check names the check
-  status [--json] [--check]                                 the current cycle, what it still needs, and metrics
+  start   --slug <slug> [--base <rev>] [--plan <path>] [--archive]       once per delivery
+  add     --agent dev --task <id> --verdict <v> [--seconds <duration>] [--summary <text>]
+  add     --agent reviewer|qa --verdict PASS|FAIL [--critical N --important N --minor N --origin <origin>=N,...]
+          [--seconds <duration>]
+  note    --text <text>                                       a decision taken on the user's behalf
+  defer   --text <text>                                       an item left for later; prints its id (D1, D2...)
+  resolve --id <id> --decision <text>                         the final decision on a deferred item
+  lesson  --text <rule> [--check <test or lint rule>]         a lesson, automated when --check names the check
+  status  [--json] [--check]                                  the current cycle, what it still needs, and metrics
 
-A cycle is a few dev tasks followed by one reviewer pass over their diff and one qa pass. It closes when the latest
-reviewer PASS came after the latest dev run and qa PASSed after the cycle's latest regular task; the next regular
-dev run opens the next cycle. A fix round (task fix-N) always stays in the current cycle, even a closed one: it needs
-a reviewer pass on the fix, and qa again only when the cycle's latest qa was a FAIL. start --archive moves an
-existing delivery to ledger-<old-slug>.jsonl next to the ledger first. --check exits 1 while the current cycle is
-open, so the gate can rely on it."""
+A cycle is a few dev tasks followed by one reviewer pass over their diff and one qa pass; the two run in parallel.
+It closes when the latest reviewer PASS came after the latest dev run, qa PASSed after the cycle's latest regular
+task, and qa ran again after every fix of a blocking (FAIL) finding. The next regular dev run opens the next cycle.
+A fix round (task fix-N) and the cleanup task (task cleanup) stay in the current cycle, even a closed one: they need
+a reviewer pass, and qa again only when a FAIL came before them. Every finding carries its origin (design,
+assumption, plan, execution, environment); --seconds takes 90, 12m, 1h5m or 12m30s. A deferred item with no
+decision keeps the delivery from the gate. start --archive moves an existing delivery to ledger-<old-slug>.jsonl next
+to the ledger first. --check exits 1 while anything is pending, so the gate can rely on it."""
 import argparse
 import datetime
 import json
@@ -28,8 +33,12 @@ VERDICTS = {
     "reviewer": {"PASS", "FAIL"},
     "qa": {"PASS", "FAIL"},
 }
+ORIGINS = ("design", "assumption", "plan", "execution", "environment")
+SEVERITIES = ("critical", "important", "minor")
 FIX_ROUNDS = 2
 FIX_TASK = re.compile(r"fix-\d+", re.IGNORECASE)
+FOLLOW_UP = re.compile(r"fix-\d+|cleanup", re.IGNORECASE)
+DURATION = re.compile(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?")
 
 
 def git_head(rev="HEAD"):
@@ -56,14 +65,14 @@ def runs(entries):
     return [entry for entry in entries if entry["type"] == "run"]
 
 
-def is_fix(entry):
-    return entry["agent"] == "dev" and bool(FIX_TASK.fullmatch(entry.get("task") or ""))
+def is_task(entry, pattern):
+    return entry["agent"] == "dev" and bool(pattern.fullmatch(entry.get("task") or ""))
 
 
 def cycles(entries):
     groups, current, closed = [], [], False
     for entry in runs(entries):
-        if closed and entry["agent"] == "dev" and not is_fix(entry):
+        if closed and entry["agent"] == "dev" and not is_task(entry, FOLLOW_UP):
             groups.append(current)
             current, closed = [], False
         current.append(entry)
@@ -73,38 +82,44 @@ def cycles(entries):
 
 
 def cycle_state(cycle):
-    tasks, reviews, checks, last, work = {}, [], [], {}, -1
+    tasks, reviews, checks = {}, [], []
+    work = last_dev = last_review = last_qa = needs_qa = -1
     for index, entry in enumerate(cycle):
-        last[entry["agent"]] = index
         if entry["agent"] == "dev":
             tasks[entry["task"]] = entry
-            if not is_fix(entry):
+            if not is_task(entry, FOLLOW_UP):
                 work = index
+            if any(run["verdict"] == "FAIL" for run in cycle[last_dev + 1:index] if run["agent"] in ("reviewer", "qa")):
+                needs_qa = index
+            last_dev = index
         elif entry["agent"] == "reviewer":
             reviews.append(entry)
+            last_review = index
         elif entry["agent"] == "qa":
             checks.append(entry)
+            last_qa = index
+    state = {"tasks": tasks, "reviewer": reviews[-1:], "qa": checks[-1:]}
     pending = [f"dev {task}: {entry['verdict']}" for task, entry in tasks.items()
                if entry["verdict"] not in ("DONE", "DONE_WITH_CONCERNS")]
     if not tasks:
         pending.append("no dev task yet")
     if pending:
-        return {"tasks": tasks, "reviewer": reviews[-1:], "qa": checks[-1:]}, pending
-    if last.get("reviewer", -1) < last["dev"]:
+        return state, pending
+    if last_review < last_dev:
         pending.append("reviewer has not reviewed the latest changes")
     elif reviews[-1]["verdict"] == "FAIL":
         pending.append(f"reviewer FAIL ({reviews[-1]['open']} open): dev fixes every finding in one batch")
-    elif last.get("qa", -1) < work or not checks:
-        pending.append("qa has not run after the latest review")
-    elif checks[-1]["verdict"] == "FAIL" and last["qa"] < last["dev"]:
-        pending.append("qa has not re-run the scenarios that failed")
-    elif checks[-1]["verdict"] == "FAIL":
+    if not checks or last_qa < work:
+        pending.append("qa has not run on the cycle's tasks")
+    elif checks[-1]["verdict"] == "FAIL" and last_qa > last_dev:
         pending.append(f"qa FAIL ({checks[-1]['open']} open): dev fixes every finding in one batch")
+    elif last_qa < needs_qa:
+        pending.append("qa has not re-run the scenarios the fix touched")
     for agent, done in (("reviewer", reviews), ("qa", checks)):
         failed = sum(1 for entry in done if entry["verdict"] == "FAIL")
         if done and done[-1]["verdict"] == "FAIL" and failed >= FIX_ROUNDS:
             pending.append(f"{agent} still fails after a fix round: ask the user")
-    return {"tasks": tasks, "reviewer": reviews[-1:], "qa": checks[-1:]}, pending
+    return state, pending
 
 
 def archive_path(ledger, slug):
@@ -129,8 +144,28 @@ def start(args):
         target = archive_path(args.ledger, entries[0].get("slug"))
         os.replace(args.ledger, target)
         print(f"archived {entries[0].get('slug')} to {target}")
-    write(args.ledger, {"type": "start", "slug": args.slug, "base": base})
+    write(args.ledger, {"type": "start", "slug": args.slug, "base": base, "plan": args.plan})
     print(f"started {args.slug} at {base[:12]}")
+
+
+def seconds(text):
+    match = DURATION.fullmatch(text.strip()) if text and text.strip() else None
+    if not match or not any(match.groups()):
+        sys.exit(f"--seconds must look like 90, 12m, 1h5m or 12m30s, not {text!r}")
+    hours, minutes, rest = (int(part or 0) for part in match.groups())
+    return hours * 3600 + minutes * 60 + rest
+
+
+def origins(text, total):
+    counts = {}
+    for item in filter(None, (part.strip() for part in (text or "").split(","))):
+        name, _, number = (piece.strip() for piece in item.partition("="))
+        if name not in ORIGINS or not number.isdigit():
+            sys.exit(f"--origin takes <origin>=N with origin one of {', '.join(ORIGINS)}, not {item!r}")
+        counts[name] = counts.get(name, 0) + int(number)
+    if sum(counts.values()) != total:
+        sys.exit(f"--origin must classify every finding: {sum(counts.values())} classified, {total} counted")
+    return counts
 
 
 def add(args):
@@ -142,14 +177,14 @@ def add(args):
     if args.agent == "dev" and not args.task:
         sys.exit("dev runs need --task")
     blocking = args.critical + args.important
-    if args.open is not None and blocking and args.open != blocking:
-        sys.exit("--open must equal --critical + --important")
-    open_count = blocking if args.open is None else args.open
-    if args.agent in ("reviewer", "qa") and (args.verdict == "FAIL") != (open_count > 0):
-        sys.exit("FAIL needs open Critical/Important findings (--critical, --important or --open > 0) and PASS none")
-    write(args.ledger, {"type": "run", "agent": args.agent, "task": args.task, "verdict": args.verdict,
-                        "open": open_count, "critical": args.critical, "important": args.important,
-                        "minor": args.minor, "head": git_head() or "", "summary": args.summary})
+    if args.agent in ("reviewer", "qa") and (args.verdict == "FAIL") != (blocking > 0):
+        sys.exit("FAIL needs open Critical/Important findings (--critical or --important > 0) and PASS none")
+    entry = {"type": "run", "agent": args.agent, "task": args.task, "verdict": args.verdict, "open": blocking,
+             "critical": args.critical, "important": args.important, "minor": args.minor,
+             "origin": origins(args.origin, blocking + args.minor), "head": git_head() or "", "summary": args.summary}
+    if args.seconds is not None:
+        entry["seconds"] = seconds(args.seconds)
+    write(args.ledger, entry)
     print(f"{args.agent}{' ' + args.task if args.task else ''}: {args.verdict} (cycle {len(cycles(read(args.ledger)))})")
 
 
@@ -160,6 +195,33 @@ def note(args):
     print("noted")
 
 
+def deferred(entries):
+    items = {}
+    for entry in entries:
+        if entry["type"] == "defer":
+            items[entry["id"]] = {"id": entry["id"], "text": entry["text"], "decision": None}
+        elif entry["type"] == "resolve" and entry["id"] in items:
+            items[entry["id"]]["decision"] = entry["decision"]
+    return list(items.values())
+
+
+def defer(args):
+    entries = read(args.ledger)
+    if not entries:
+        sys.exit("no delivery started: run start first")
+    item = f"D{len(deferred(entries)) + 1}"
+    write(args.ledger, {"type": "defer", "id": item, "text": args.text})
+    print(f"deferred {item}: needs a final decision before the gate (resolve --id {item})")
+
+
+def resolve(args):
+    entries = read(args.ledger)
+    if args.id not in {item["id"] for item in deferred(entries)}:
+        sys.exit(f"no deferred item {args.id}")
+    write(args.ledger, {"type": "resolve", "id": args.id, "decision": args.decision})
+    print(f"{args.id} resolved")
+
+
 def lesson(args):
     if not read(args.ledger):
         sys.exit("no delivery started: run start first")
@@ -167,17 +229,45 @@ def lesson(args):
     print("lesson recorded" + (f" (automated: {args.check})" if args.check else ""))
 
 
+def elapsed(cycle):
+    measured = [entry for entry in cycle if entry.get("seconds") is not None and entry.get("at")]
+    if not measured:
+        return None
+    ends = [datetime.datetime.fromisoformat(entry["at"]) for entry in measured]
+    starts = [end - datetime.timedelta(seconds=entry["seconds"]) for end, entry in zip(ends, measured)]
+    return int((max(ends) - min(starts)).total_seconds())
+
+
 def metrics(entries):
-    per_cycle = []
+    per_cycle, found = [], {name: 0 for name in ORIGINS + ("unclassified",)}
     for number, cycle in enumerate(cycles(entries), 1):
         passes = [entry for entry in cycle if entry["agent"] in ("reviewer", "qa")]
-        counts = {key: sum(entry.get(key, 0) for entry in passes)
-                  for key in ("critical", "important", "minor", "open")}
-        fixes = {entry["task"] for entry in cycle if is_fix(entry)}
-        per_cycle.append({"cycle": number, **counts, "fix_rounds": len(fixes)})
+        counts = {key: sum(entry.get(key, 0) for entry in passes) for key in SEVERITIES + ("open",)}
+        for entry in passes:
+            classified = entry.get("origin") or {}
+            for name, count in classified.items():
+                found[name] += count
+            total = sum(entry.get(key, 0) for key in SEVERITIES)
+            total += max(entry.get("open", 0) - entry.get("critical", 0) - entry.get("important", 0), 0)
+            found["unclassified"] += total - sum(classified.values())
+        agents = {}
+        for entry in cycle:
+            if entry.get("seconds") is not None:
+                agents[entry["agent"]] = agents.get(entry["agent"], 0) + entry["seconds"]
+        fixes = {entry["task"] for entry in cycle if is_task(entry, FIX_TASK)}
+        per_cycle.append({"cycle": number, **counts, "fix_rounds": len(fixes), "seconds": sum(agents.values()),
+                          "elapsed": elapsed(cycle), "agents": agents})
+    time = {"agents": {}, "tasks": {}, "unmeasured": 0}
+    for entry in runs(entries):
+        if entry.get("seconds") is None:
+            time["unmeasured"] += 1
+            continue
+        time["agents"][entry["agent"]] = time["agents"].get(entry["agent"], 0) + entry["seconds"]
+        if entry["agent"] == "dev":
+            time["tasks"][entry["task"]] = time["tasks"].get(entry["task"], 0) + entry["seconds"]
     lessons = [{"text": entry["text"], "check": entry.get("check", "")} for entry in entries
                if entry["type"] == "lesson"]
-    return {"cycles": per_cycle, "lessons": lessons}
+    return {"cycles": per_cycle, "origins": found, "time": time, "lessons": lessons}
 
 
 def status(args):
@@ -186,10 +276,12 @@ def status(args):
         sys.exit("no delivery started")
     groups = cycles(entries)
     state, pending = cycle_state(groups[-1])
-    report = {"slug": entries[0].get("slug"), "base": entries[0].get("base"), "cycle": len(groups),
-              "tasks": {task: entry["verdict"] for task, entry in state["tasks"].items()},
+    items = deferred(entries)
+    pending += [f"deferred {item['id']} has no decision: {item['text']}" for item in items if not item["decision"]]
+    report = {"slug": entries[0].get("slug"), "base": entries[0].get("base"), "plan": entries[0].get("plan"),
+              "cycle": len(groups), "tasks": {task: entry["verdict"] for task, entry in state["tasks"].items()},
               "reviewer": state["reviewer"], "qa": state["qa"], "pending": pending,
-              "notes": [entry["text"] for entry in entries if entry["type"] == "note"],
+              "notes": [entry["text"] for entry in entries if entry["type"] == "note"], "deferred": items,
               "metrics": metrics(entries), "ready_for_gate": not pending}
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
@@ -204,6 +296,9 @@ def status(args):
             print(f"pending: {item}")
         for text in report["notes"]:
             print(f"note: {text}")
+        for item in items:
+            if item["decision"]:
+                print(f"deferred {item['id']}: {item['text']} -> {item['decision']}")
         print("ready for gate" if report["ready_for_gate"] else "not ready for gate")
     if args.check and pending:
         sys.exit(1)
@@ -219,21 +314,29 @@ def main():
     command = commands.add_parser("start")
     command.add_argument("--slug", required=True)
     command.add_argument("--base", default="HEAD")
+    command.add_argument("--plan", help="the approved plan, whose acceptance-criterion ids the gate traces to tests")
     command.add_argument("--archive", action="store_true", help="move an existing delivery aside first")
     command.set_defaults(run=start)
     command = commands.add_parser("add")
     command.add_argument("--agent", required=True, choices=sorted(VERDICTS))
     command.add_argument("--task", default="")
     command.add_argument("--verdict", required=True)
-    command.add_argument("--open", type=int)
-    command.add_argument("--critical", type=int, default=0)
-    command.add_argument("--important", type=int, default=0)
-    command.add_argument("--minor", type=int, default=0)
+    for severity in SEVERITIES:
+        command.add_argument(f"--{severity}", type=int, default=0)
+    command.add_argument("--origin", default="", help="design=N,assumption=N,plan=N,execution=N,environment=N")
+    command.add_argument("--seconds", help="how long the run took: 90, 12m, 1h5m or 12m30s")
     command.add_argument("--summary", default="")
     command.set_defaults(run=add)
     command = commands.add_parser("note")
     command.add_argument("--text", required=True)
     command.set_defaults(run=note)
+    command = commands.add_parser("defer")
+    command.add_argument("--text", required=True)
+    command.set_defaults(run=defer)
+    command = commands.add_parser("resolve")
+    command.add_argument("--id", required=True)
+    command.add_argument("--decision", required=True)
+    command.set_defaults(run=resolve)
     command = commands.add_parser("lesson")
     command.add_argument("--text", required=True)
     command.add_argument("--check", default="")
