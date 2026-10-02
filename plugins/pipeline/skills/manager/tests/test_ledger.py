@@ -18,13 +18,15 @@ atexit.register(cleanup)
 results = []
 
 
-def run(*args):
-    return subprocess.run([sys.executable, LEDGER, *args], cwd=repo, capture_output=True, text=True, encoding="utf-8")
+def run(*args, ledger=None):
+    prefix = ["--ledger", ledger] if ledger else []
+    return subprocess.run([sys.executable, LEDGER, *prefix, *args], cwd=repo, capture_output=True, text=True,
+                          encoding="utf-8")
 
 
-def add(agent, verdict, task=None, open_count=0):
+def add(agent, verdict, task=None, open_count=0, ledger=None):
     args = ["add", "--agent", agent, "--verdict", verdict, "--open", str(open_count)]
-    return run(*(args + (["--task", task] if task else [])))
+    return run(*(args + (["--task", task] if task else [])), ledger=ledger)
 
 
 def check(name, ok, detail=""):
@@ -32,8 +34,8 @@ def check(name, ok, detail=""):
     print("PASS" if ok else "FAIL", name, "" if ok else f"| {str(detail)[-300:]}")
 
 
-def status():
-    return json.loads(run("status", "--json").stdout)
+def status(ledger=None):
+    return json.loads(run("status", "--json", ledger=ledger).stdout)
 
 
 for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t.com"), ("config", "user.name", "t"),
@@ -43,7 +45,8 @@ for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t.com"), 
 check("add before start is refused", add("dev", "DONE", "T1").returncode != 0)
 r = run("start", "--slug", "feature")
 check("start records the base", r.returncode == 0 and "started feature" in r.stdout, r.stderr)
-check("start twice is refused", run("start", "--slug", "again").returncode != 0)
+r = run("start", "--slug", "again")
+check("start twice is refused and points to --archive", r.returncode != 0 and "--archive" in r.stderr, r.stderr)
 check("unknown verdict is refused", add("dev", "PASS", "T1").returncode != 0)
 check("dev needs a task", add("dev", "DONE").returncode != 0)
 check("reviewer FAIL without open findings is refused", add("reviewer", "FAIL").returncode != 0)
@@ -78,5 +81,67 @@ check("a second failed review asks the user", any("ask the user" in item for ite
 run("note", "--text", "minor deferred")
 check("notes are listed", status()["notes"] == ["minor deferred"])
 check("text status names pending items", "pending:" in run("status").stdout)
+
+MINORS = ".superpowers/minors.jsonl"
+run("start", "--slug", "minors", ledger=MINORS)
+for agent, verdict, task in (("dev", "DONE", "T1"), ("reviewer", "PASS", None), ("qa", "PASS", None)):
+    add(agent, verdict, task, ledger=MINORS)
+add("dev", "DONE", "fix-1", ledger=MINORS)
+state = status(MINORS)
+check("a fix round after a closed cycle stays in that cycle", state["cycle"] == 1 and "fix-1" in state["tasks"], state)
+check("the fix needs a reviewer pass on it",
+      state["pending"] == ["reviewer has not reviewed the latest changes"], state["pending"])
+add("reviewer", "PASS", ledger=MINORS)
+state = status(MINORS)
+check("qa passed before the fix: the reviewer pass on the fix closes the cycle",
+      state["ready_for_gate"] is True and state["cycle"] == 1, state)
+add("dev", "DONE", "T2", ledger=MINORS)
+check("a regular task after the closed cycle opens the next cycle", status(MINORS)["cycle"] == 2)
+
+QA = ".superpowers/qa.jsonl"
+run("start", "--slug", "qa", ledger=QA)
+for agent, verdict, task, count in (("dev", "DONE", "T1", 0), ("reviewer", "PASS", None, 0), ("qa", "FAIL", None, 2),
+                                    ("dev", "DONE", "fix-1", 0)):
+    add(agent, verdict, task, count, ledger=QA)
+check("the fix round stays in the cycle after a qa FAIL", status(QA)["cycle"] == 1)
+add("reviewer", "PASS", ledger=QA)
+pending = status(QA)["pending"]
+check("qa failed in the cycle: after the fix review, qa re-runs the failed scenarios",
+      pending == ["qa has not re-run the scenarios that failed"], pending)
+add("qa", "PASS", ledger=QA)
+check("qa PASS after the fix closes the cycle", status(QA)["ready_for_gate"] is True)
+
+FIRST = ".superpowers/first.jsonl"
+run("start", "--slug", "first", ledger=FIRST)
+for agent, verdict, task, count in (("dev", "DONE", "T1", 0), ("reviewer", "FAIL", None, 1),
+                                    ("dev", "DONE", "fix-1", 0), ("reviewer", "PASS", None, 0)):
+    add(agent, verdict, task, count, ledger=FIRST)
+check("no qa yet in the cycle: qa still runs after the fix review",
+      status(FIRST)["pending"] == ["qa has not run after the latest review"], status(FIRST)["pending"])
+
+ARCHIVE = ".superpowers/archive/ledger.jsonl"
+run("start", "--slug", "old/one", ledger=ARCHIVE)
+add("dev", "DONE", "T1", ledger=ARCHIVE)
+r = run("start", "--slug", "next", "--archive", ledger=ARCHIVE)
+archived = os.path.join(repo, ".superpowers", "archive", "ledger-old-one.jsonl")
+check("start --archive moves the old delivery next to the ledger and starts fresh",
+      r.returncode == 0 and os.path.exists(archived) and status(ARCHIVE)["slug"] == "next"
+      and status(ARCHIVE)["tasks"] == {}, r.stderr)
+run("start", "--slug", "old/one", "--archive", ledger=ARCHIVE)
+run("start", "--slug", "third", "--archive", ledger=ARCHIVE)
+r = run("start", "--slug", "fourth", "--archive", ledger=ARCHIVE)
+folder = sorted(os.listdir(os.path.join(repo, ".superpowers", "archive")))
+check("archiving never overwrites an earlier archive",
+      r.returncode == 0 and folder == ["ledger-next.jsonl", "ledger-old-one-2.jsonl", "ledger-old-one.jsonl",
+                                       "ledger-third.jsonl", "ledger.jsonl"], folder)
+
+run("note", "--text", "decisão não óbvia")
+raw = subprocess.run([sys.executable, LEDGER, "status"], cwd=repo, capture_output=True,
+                     env={**os.environ, "PYTHONIOENCODING": "latin-1", "PYTHONUTF8": "0"})
+try:
+    utf8 = "decisão não óbvia" in raw.stdout.decode("utf-8")
+except UnicodeDecodeError:
+    utf8 = False
+check("status prints UTF-8 whatever the console encoding", utf8, raw.stdout[-200:])
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

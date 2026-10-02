@@ -111,6 +111,19 @@ r = gate("--base", "main")
 check("an .env file in the branch: NOT READY", r.returncode == 1 and ".env" in r.stdout, r.stdout)
 sh("git", "reset", "-q", "--hard", "HEAD~1")
 
+def ledger(*args):
+    subprocess.run([sys.executable, LEDGER, "add", *args], cwd=repo, check=True, capture_output=True)
+
+
+commit("b.txt", "minor fixed\n", "fix: minor")
+ledger("--agent", "dev", "--task", "fix-1", "--verdict", "DONE")
+r = gate("--base", "main")
+check("a fix round after the closed cycle needs its review: NOT READY",
+      r.returncode == 1 and "reviewer has not reviewed" in r.stdout, r.stdout)
+ledger("--agent", "reviewer", "--verdict", "PASS")
+r = gate("--base", "main")
+check("the fix reviewed and qa passed before it: READY without another qa", r.returncode == 0, r.stdout)
+
 r = gate("--base", "main", "--report", "feature-x")
 report = [name for name in os.listdir(os.path.join(repo, "docs", "quality-reports"))] if r.returncode == 0 else []
 check("--report writes and stages the quality report on READY",
