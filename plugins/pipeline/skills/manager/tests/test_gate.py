@@ -55,9 +55,9 @@ def claude_md(lint_ok=True, tests=True, audit=None, test_files=None):
     if tests:
         lines.append(f"- Testes: `{PY} -c \"print('3 passed')\"`")
     if audit is not None:
-        lines.append(f"- Auditoria: `{PY} -c \"import sys; print('audit'); sys.exit({0 if audit else 1})\"`")
+        lines.append(f"- Auditoria (dependências; opcional): `{PY} -c \"import sys; print('audit'); sys.exit({0 if audit else 1})\"`")
     if test_files:
-        lines.append(f"- Arquivos de teste: `{test_files}`")
+        lines.append(f"- Arquivos de teste (globs): `{test_files}`")
     return "\n".join(lines + ["", "## Outra seção", "- Testes: `false`", ""])
 
 
