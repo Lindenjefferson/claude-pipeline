@@ -9,6 +9,8 @@ Origem: ideias adaptadas do ECC (`session-start`, `pre-bash-dev-server-block`) e
 - [x] **Retomada depois de compactação**: `hooks/hooks.json` registra um `SessionStart` (`compact|resume`) que imprime o `ledger.py status` quando há ledger e nada quando não há.
 - [x] **Encoding no commit**: o `pre-commit` recusa linhas adicionadas que não são UTF-8, com arquivo, primeira linha e como corrigir; binários e linhas antigas não contam. Ficou em `pre-commit-secret-scan.py` (o shim instalado só chama esse script, então uma instalação cobre as duas checagens) e o docstring foi atualizado.
 - [x] **Servidor de dev solto**: `PreToolUse` em `Bash` que nega o comando da linha "Rodar em desenvolvimento" do `CLAUDE.md` do projeto sem `run_in_background`. Reaproveita a linha que o template já tinha, em vez de criar outra. Sem comando entre crases, não faz nada. **Por que reintroduz o `PreToolUse`**: a 1.6.0 reduziu o scan de segredos a um `pre-commit` nativo e tirou o `PreToolUse`, `pre-push` e bloqueio de gate que prendiam o fluxo do agente. Este tem outro fim e não prende nada: só nega um comando que o próprio projeto declarou, não depende de estado do plugin e, se falhar, deixa a chamada passar.
+- [x] **Ruído do graphify**: novo passo 8.6 do `kickoff` que, só quando o `.claude/settings.json` tem o hook antigo do graphify (matcher `Bash`, sem `hook-guard`), mostra o diff que estreita o matcher para `Read|Grep|Glob` e pede confirmação; edição por parse de JSON. O graphify atual já se limita sozinho.
+- [x] **Lacunas do `dev`** (comparação com `andrej-karpathy-skills` e com o `orch-pipeline` do ECC): procurar o que já existe antes de escrever helper, componente ou dependência; remover só o que a própria mudança deixou sem uso e apenas relatar código morto alheio.
 
 ## 2.3.0 — paralelismo e prevenção de retrabalho (PR #9)
 
@@ -49,10 +51,6 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 - [x] **Ledger simples** (`ledger.py`, 164 linhas): `start`, `add`, `note`, `status [--check]`.
 - [x] **Saem**: `security`, `audit`, `design`, `code-review`, `db` e `docs` como agentes; `package.py`, `findings.py`, ferramentas de mutação, lições com contadores (as globais viraram itens dos checklists), hook `SubagentStop`, worktree obrigatória, revisão de spec com várias rodadas.
 - [x] **Lições por projeto** em `docs/lessons.md`, lidas pelo `dev` e pelo `reviewer`.
-
-## Decisões pendentes do usuário
-
-- [ ] **Ruído do graphify**: o plugin graphify injeta "MANDATORY: run graphify" em quase todo Bash/Read, gastando contexto em toda chamada. Opção: o kickoff instala o hook do graphify só para `Read|Grep|Glob`. Mexe em outro plugin.
 
 ## Entregues
 
