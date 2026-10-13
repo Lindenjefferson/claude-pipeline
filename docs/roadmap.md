@@ -2,6 +2,14 @@
 
 Backlog vivo do plugin. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin ou ideia adaptada do ECC) e o esforço estimado (P, M, G). Ao entregar um item, mover para a seção da versão correspondente com o PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
+## 2.5.0 — objetivo da tarefa e tarefas em andamento (PR #)
+
+Origem: ideias adaptadas do [Paperclip](https://github.com/paperclipai/paperclip) (contexto de objetivo e checkout de tarefa), sem usar a ferramenta.
+
+- [x] **`Goal:` por tarefa**: cada tarefa do plano diz a qual item da spec serve e o que o usuário ganha; o `dev` lê o campo junto com a tarefa.
+- [x] **`claim` / `release` no ledger**: o `manager` registra o despacho do `dev`; `claim` recusa tarefa em andamento ou já concluída no ciclo, o `status` lista o que está em andamento (e o gate espera), e o `add` do `dev` libera. Não é lock entre processos: só o `manager` escreve no ledger, então o ganho é saber, depois de compactação ou `resume`, quais execuções ainda faltam reportar. Ledgers sem `claim` continuam legíveis.
+- Fora, por falta de sinal: teto de orçamento por entrega. Entra se as métricas de tempo do gate mostrarem entregas estourando.
+
 ## 2.4.0 — hooks e ruído (PR #10)
 
 Origem: ideias adaptadas do ECC (`session-start`, `pre-bash-dev-server-block`) e feedback do Módulo 1 (servidor órfão, texto em Latin-1).
@@ -62,6 +70,8 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 ## Notas de atualização
 
 Termine a entrega em andamento antes de atualizar o plugin.
+
+- **2.5.0**: lê os ledgers anteriores (sem `claim` nada fica em andamento). O `manager` passa a dar `claim` ao despachar cada `dev`; um `claim` sem `add` deixa o gate em NOT READY até o `add` ou o `release`. Planos novos trazem `Goal:` por tarefa; planos antigos continuam válidos.
 
 - **2.4.0**: os hooks novos (retomada, UTF-8 no commit e servidor de dev) chegam com o plugin. O UTF-8 no commit exige reinstalar o `pre-commit` só em projetos preparados antes da 1.6.0 (o shim atual já chama o scanner). Para o servidor de dev, rode o `kickoff` de novo e preencha a linha "Rodar em desenvolvimento" do `CLAUDE.md` com o comando entre crases; sem isso o hook não faz nada.
 - **2.3.0**: lê os ledgers da 2.1 e da 2.2 (achados antigos aparecem como "unclassified" e as execuções sem `--seconds` como não medidas). `add --open` saiu: use `--critical`/`--important`; todo achado novo exige `--origin`. Sem `start --plan`, a checagem Criteria do gate fica SKIP. A seção Invariantes saiu do `reviewer` (a fonte é `checklists/general.md`). Rode o `kickoff` de novo para acrescentar ao `CLAUDE.md` do projeto a seção "Execução em paralelo" e as linhas "Testes afetados", "Arquivos de teste" e "Auditoria".

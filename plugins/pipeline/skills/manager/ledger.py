@@ -5,11 +5,17 @@
   add     --agent dev --task <id> --verdict <v> [--seconds <duration>] [--summary <text>]
   add     --agent reviewer|qa --verdict PASS|FAIL [--critical N --important N --minor N --origin <origin>=N,...]
           [--seconds <duration>]
+  claim   --task <id>                                         a dev run dispatched; refused if the task is in flight or done
+  release --task <id>                                         frees a claim whose run was lost
   note    --text <text>                                       a decision taken on the user's behalf
   defer   --text <text>                                       an item left for later; prints its id (D1, D2...)
   resolve --id <id> --decision <text>                         the final decision on a deferred item
   lesson  --text <rule> [--check <test or lint rule>]         a lesson, automated when --check names the check
   status  [--json] [--check]                                  the current cycle, what it still needs, and metrics
+
+A claim is written when the dev is dispatched and freed by the dev's add (or release); status lists the tasks in
+flight and the gate waits for them, so a manager resuming after a compaction sees which runs it still owes a report.
+claim refuses a task that is in flight or already DONE in the current cycle, so one task never runs twice by mistake.
 
 A cycle is a few dev tasks followed by one reviewer pass over their diff and one qa pass; the two run in parallel.
 It closes when the latest reviewer PASS came after the latest dev run, qa PASSed after the cycle's latest regular
@@ -188,6 +194,39 @@ def add(args):
     print(f"{args.agent}{' ' + args.task if args.task else ''}: {args.verdict} (cycle {len(cycles(read(args.ledger)))})")
 
 
+def in_flight(entries):
+    held = {}
+    for entry in entries:
+        if entry["type"] == "claim":
+            held[entry["task"]] = entry["at"]
+        elif entry["type"] == "release" or (entry["type"] == "run" and entry["agent"] == "dev"):
+            held.pop(entry.get("task"), None)
+    return held
+
+
+def claim(args):
+    entries = read(args.ledger)
+    if not entries:
+        sys.exit("no delivery started: run start first")
+    held = in_flight(entries)
+    if args.task in held:
+        sys.exit(f"{args.task} is already claimed ({held[args.task]}): its dev run is in flight; "
+                 f"if that run was lost, release --task {args.task}")
+    groups = cycles(entries)
+    done = cycle_state(groups[-1])[0]["tasks"].get(args.task)
+    if done and done["verdict"] in ("DONE", "DONE_WITH_CONCERNS"):
+        sys.exit(f"{args.task} is already done in cycle {len(groups)}: use a new task id (fix-N for a fix round)")
+    write(args.ledger, {"type": "claim", "task": args.task})
+    print(f"claimed {args.task}")
+
+
+def release(args):
+    if args.task not in in_flight(read(args.ledger)):
+        sys.exit(f"{args.task} has no claim in flight")
+    write(args.ledger, {"type": "release", "task": args.task})
+    print(f"released {args.task}")
+
+
 def note(args):
     if not read(args.ledger):
         sys.exit("no delivery started: run start first")
@@ -277,9 +316,12 @@ def status(args):
     groups = cycles(entries)
     state, pending = cycle_state(groups[-1])
     items = deferred(entries)
+    held = in_flight(entries)
+    pending += [f"dev {task} dispatched at {at}, no report yet (add it when it reports, or release --task {task})"
+                for task, at in held.items()]
     pending += [f"deferred {item['id']} has no decision: {item['text']}" for item in items if not item["decision"]]
     report = {"slug": entries[0].get("slug"), "base": entries[0].get("base"), "plan": entries[0].get("plan"),
-              "cycle": len(groups), "tasks": {task: entry["verdict"] for task, entry in state["tasks"].items()},
+              "cycle": len(groups), "in_flight": list(held), "tasks": {task: entry["verdict"] for task, entry in state["tasks"].items()},
               "reviewer": state["reviewer"], "qa": state["qa"], "pending": pending,
               "notes": [entry["text"] for entry in entries if entry["type"] == "note"], "deferred": items,
               "metrics": metrics(entries), "ready_for_gate": not pending}
@@ -327,6 +369,10 @@ def main():
     command.add_argument("--seconds", help="how long the run took: 90, 12m, 1h5m or 12m30s")
     command.add_argument("--summary", default="")
     command.set_defaults(run=add)
+    for name, run in (("claim", claim), ("release", release)):
+        command = commands.add_parser(name)
+        command.add_argument("--task", required=True)
+        command.set_defaults(run=run)
     command = commands.add_parser("note")
     command.add_argument("--text", required=True)
     command.set_defaults(run=note)
