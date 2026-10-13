@@ -2,7 +2,7 @@
 
 Backlog vivo do plugin. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin ou ideia adaptada do ECC) e o esforço estimado (P, M, G). Ao entregar um item, mover para a seção da versão correspondente com o PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
-## 2.6.0 — endurecimento (PR #)
+## 2.6.0 — endurecimento (PR #12)
 
 Origem: leitura das regras do AgentShield (ECC) de hooks, permissões e agentes, só como referência, sem instalar nada. O que é código malicioso, MCP e pontuação ficou fora.
 
