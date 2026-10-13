@@ -57,7 +57,7 @@ O marketplace também pode vir direto do GitHub (`claude plugin marketplace add 
 | [`gate.py`](plugins/pipeline/skills/manager/gate.py) | Checagem final local, sem agente: READY ou NOT READY e o relatório de qualidade. |
 | [`general.md`](plugins/pipeline/checklists/general.md) | Princípios gerais de qualidade que o `dev` e o `reviewer` aplicam. |
 | [`spec-checklist.md`](plugins/pipeline/skills/manager/templates/spec-checklist.md) | O que toda spec e todo plano respondem, com o pré-mortem de cada escrita. |
-| [Hook de segredos](plugins/pipeline/hooks/pre-commit-secret-scan.py) | `pre-commit` do git que bloqueia `.env` e linhas com cara de segredo; o docstring explica falso positivo. |
+| [Hook de segredos e UTF-8](plugins/pipeline/hooks/pre-commit-secret-scan.py) | `pre-commit` do git que bloqueia `.env`, linhas com cara de segredo e linhas adicionadas que não são UTF-8; o docstring explica falso positivo e a correção. |
 | [Hook de retomada](plugins/pipeline/hooks/session-start.py) | `SessionStart` (`compact` e `resume`): devolve ao manager o `status` do ledger. Registrado em [`hooks.json`](plugins/pipeline/hooks/hooks.json). |
 
 ## Atualização
