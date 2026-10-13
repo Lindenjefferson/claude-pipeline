@@ -2,7 +2,7 @@
 
 Backlog vivo do plugin. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin ou ideia adaptada do ECC) e o esforço estimado (P, M, G). Ao entregar um item, mover para a seção da versão correspondente com o PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
-## 2.6.1 — `pipeline.home` quebrado (PR #)
+## 2.6.1 — `pipeline.home` quebrado (PR #13)
 
 Origem: o teste do `kickoff` no Controle Financeiro. O `pipeline.home` global apontava para uma pasta que deixou de existir (o clone foi renomeado), e o `pre-commit` instalado bloqueava todo commit com "secret scanner not found" sem que o `kickoff` percebesse.
 
