@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Secret scan for git commits, run as a native git pre-commit hook.
+"""Secret scan and UTF-8 check for git commits, run as a native git pre-commit hook.
 
   --install-pre-commit  writes a pre-commit hook that runs --pre-commit. An existing pre-commit hook
                         is kept as pre-commit.pipeline-chained and runs first. A pre-push hook left by
@@ -7,7 +7,8 @@
   --pre-commit          scans the index git is about to commit (git sets GIT_INDEX_FILE for it) and
                         blocks on .env-style files and secret-looking lines (cloud keys, tokens,
                         private keys, JWTs other than the public anon key, password/secret
-                        assignments with a literal value).
+                        assignments with a literal value), and blocks added lines that are not valid
+                        UTF-8 (see below).
   --fingerprint         prints the fingerprints of the flagged lines read from stdin (a diff, or a
                         file with --path <path>).
 
@@ -23,6 +24,13 @@ value, such as changeme, example, xxxx, or starting with your_, your- or <); run
 in one case or alternating case; values where almost every character is unique (Shannon entropy of 3.5
 bits/character or more, near the maximum for the length); and, under password/passwd/secret keys, phrases with
 _ that name no code word.
+
+UTF-8 check: the same --pre-commit run refuses added lines of text files that do not decode as UTF-8 (typically
+Latin-1 or Windows-1252 text saved by an old editor) and names each file with its first bad line; the fix is to
+re-save the file as UTF-8 (iconv -f WINDOWS-1252 -t UTF-8, or the editor's "Save with Encoding"). Only added lines
+count, so a legacy line already committed is not flagged again. Binary files (git sees a NUL byte, as in images
+and UTF-16) are skipped, and so are the lock files the secret scan skips. It lives here, not in its own module,
+because the installed pre-commit shim runs only this script. It has no allowlist: fix the file.
 
 False positive: the user (never an agent: kickoff denies agents edits to the file) adds the line
 `<fingerprint>  # reason` to .pipeline-secrets-allow at the repo root and stages it; the block message gives
@@ -299,17 +307,57 @@ exit 1
 """
 
 
+def non_utf8_files(cwd):
+    """{path: (first bad line number, count)} for added lines of text files that are not valid UTF-8."""
+    try:
+        done = subprocess.run(["git", "diff", "--cached", "--no-ext-diff", "--no-textconv", "-U0", "--"] + EXCLUDES,
+                              cwd=cwd, capture_output=True, stdin=subprocess.DEVNULL, timeout=30)
+    except Exception:
+        raise HookError("git diff failed")
+    if done.returncode != 0:
+        raise HookError("git diff failed")
+    found = {}
+    path, number, remaining = None, 0, 0
+    for raw in done.stdout.split(b"\n"):
+        if remaining == 0:
+            if raw.startswith(b"+++ "):
+                name = raw[4:].decode("utf-8", "replace").strip().strip('"')
+                path = name[2:] if name.startswith("b/") else None
+            elif raw.startswith(b"@@"):
+                hunk = re.match(rb"@@ -\S+ \+(\d+)(?:,(\d+))? @@", raw)
+                if hunk:
+                    number = int(hunk.group(1))
+                    remaining = int(hunk.group(2) if hunk.group(2) is not None else 1)
+            continue
+        if raw.startswith(b"+"):
+            try:
+                raw[1:].decode("utf-8")
+            except UnicodeDecodeError:
+                first, count = found.get(path, (number, 0))
+                found[path] = (first, count + 1)
+            number += 1
+            remaining -= 1
+    return found
+
+
 def pre_commit():
     cwd = os.getcwd()
     names = git_checked(["diff", "--cached", "--name-only"], cwd)
     diff = git_checked(["diff", "--cached", "--no-ext-diff", "--no-textconv", "--text", "--"] + EXCLUDES, cwd)
     findings = scan(diff, names.splitlines(), load_allowlist(cwd))
+    bad_encoding = non_utf8_files(cwd)
     if findings:
         sys.stderr.write("Secret scan blocked this commit. The changes being committed contain:\n- "
                          + "\n- ".join(findings) + "\nRemove the secret from the staged changes and "
                          "commit again." + ALLOW_HINT + "\n")
-        sys.exit(1)
-    sys.exit(0)
+    if bad_encoding:
+        listed = [f"{path or 'added lines'}:{first} ({count} line{'s' * (count != 1)})"
+                  for path, (first, count) in sorted(bad_encoding.items(), key=str)]
+        sys.stderr.write("UTF-8 check blocked this commit. Added lines that are not valid UTF-8:\n- "
+                         + "\n- ".join(listed) + "\nRe-save each file as UTF-8 (iconv -f WINDOWS-1252 -t UTF-8 "
+                         "<file> > <tmp>, then move <tmp> over the file; or the editor's \"Save with "
+                         "Encoding\"), stage it again and commit again.\n")
+    sys.exit(1 if findings or bad_encoding else 0)
 
 
 def owned(path):
