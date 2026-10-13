@@ -15,7 +15,7 @@
 Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o `gate.py` roda as linhas Build, Typecheck, Lint, Testes e Auditoria antes de qualquer merge (só Testes é obrigatória). Preencher assim que a stack existir, com o comando entre crases (ex.: `- Testes:` seguido do comando de testes entre crases):
 
 - Instalar dependências: _(comando)_
-- Rodar em desenvolvimento: _(comando)_
+- Rodar em desenvolvimento (o servidor de dev; o hook do plugin o nega fora do modo background): _(comando)_
 - Build: _(comando)_
 - Typecheck: _(comando)_
 - Lint: _(comando)_
