@@ -2,7 +2,7 @@
 
 Backlog vivo do plugin. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin ou ideia adaptada do ECC) e o esforço estimado (P, M, G). Ao entregar um item, mover para a seção da versão correspondente com o PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
-## 2.4.0 — hooks e ruído (PR #)
+## 2.4.0 — hooks e ruído (PR #10)
 
 Origem: ideias adaptadas do ECC (`session-start`, `pre-bash-dev-server-block`) e feedback do Módulo 1 (servidor órfão, texto em Latin-1).
 
