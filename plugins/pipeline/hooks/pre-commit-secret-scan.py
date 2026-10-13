@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Secret scan and UTF-8 check for git commits, run as a native git pre-commit hook.
+"""Secret scan, UTF-8 and invisible-character checks for git commits, run as a native git pre-commit hook.
 
   --install-pre-commit  writes a pre-commit hook that runs --pre-commit. An existing pre-commit hook
                         is kept as pre-commit.pipeline-chained and runs first. A pre-push hook left by
@@ -8,7 +8,7 @@
                         blocks on .env-style files and secret-looking lines (cloud keys, tokens,
                         private keys, JWTs other than the public anon key, password/secret
                         assignments with a literal value), and blocks added lines that are not valid
-                        UTF-8 (see below).
+                        UTF-8 or hold invisible characters (see below).
   --fingerprint         prints the fingerprints of the flagged lines read from stdin (a diff, or a
                         file with --path <path>).
 
@@ -24,6 +24,12 @@ value, such as changeme, example, xxxx, or starting with your_, your- or <); run
 in one case or alternating case; values where almost every character is unique (Shannon entropy of 3.5
 bits/character or more, near the maximum for the length); and, under password/passwd/secret keys, phrases with
 _ that name no code word.
+
+Invisible characters: added lines with a zero-width space or word joiner (U+200B, U+2060 to U+2064, U+180E), a
+direction control (U+202A to U+202E, U+2066 to U+2069), a Tag character (U+E0000 to U+E007F) or a BOM anywhere but
+the very start of a file are refused with file, first line and first code point; this is how instructions are
+hidden in prompt files. The joiner and non-joiner of emoji and of Persian or Indic text (U+200C, U+200D) and the
+direction marks (U+200E, U+200F) are not flagged. Like the UTF-8 check it reads added lines only and has no allowlist.
 
 UTF-8 check: the same --pre-commit run refuses added lines of text files that do not decode as UTF-8 (typically
 Latin-1 or Windows-1252 text saved by an old editor) and names each file with its first bad line; the fix is to
@@ -59,6 +65,12 @@ PATTERNS = [
     ("Stripe live key", r"[rs]k_live_[0-9A-Za-z]{16,}"),
     ("Supabase secret key", r"sb_secret_[A-Za-z0-9_\-]{20,}"),
     ("Anthropic API key", r"sk-ant-[A-Za-z0-9_\-]{20,}"),
+    ("OpenAI API key", r"\bsk-(?:(?:proj|svcacct|admin)-[A-Za-z0-9_\-]{20,}|[A-Za-z0-9]{40,})"),
+    ("Google API key", r"AIza[0-9A-Za-z_\-]{35}"),
+    ("xAI API key", r"\bxai-[A-Za-z0-9]{20,}"),
+    ("GitHub fine-grained token", r"github_pat_[A-Za-z0-9_]{22,}"),
+    ("Linear API key", r"lin_api_[A-Za-z0-9]{30,}"),
+    ("Stripe webhook secret", r"whsec_[A-Za-z0-9]{24,}"),
     ("credentials in a connection URL",
      r"\b[a-z][a-z0-9+.\-]*://[^\s:/@'\"]+:[^\s:/@'\"]{4,}@(?!localhost|127\.0\.0\.1)"
      r"[^\s/:'\"]*\.[^\s/'\"]+"),
@@ -307,8 +319,11 @@ exit 1
 """
 
 
-def non_utf8_files(cwd):
-    """{path: (first bad line number, count)} for added lines of text files that are not valid UTF-8."""
+INVISIBLE = re.compile(r"[\u180e\u200b\u2060-\u2064\u202a-\u202e\u2066-\u2069\ufeff\U000e0000-\U000e007f]")
+
+
+def added_lines(cwd):
+    """(path, line number, raw bytes) of every added line of the staged text files, from a -U0 diff."""
     try:
         done = subprocess.run(["git", "diff", "--cached", "--no-ext-diff", "--no-textconv", "-U0", "--"] + EXCLUDES,
                               cwd=cwd, capture_output=True, stdin=subprocess.DEVNULL, timeout=30)
@@ -316,7 +331,6 @@ def non_utf8_files(cwd):
         raise HookError("git diff failed")
     if done.returncode != 0:
         raise HookError("git diff failed")
-    found = {}
     path, number, remaining = None, 0, 0
     for raw in done.stdout.split(b"\n"):
         if remaining == 0:
@@ -330,14 +344,29 @@ def non_utf8_files(cwd):
                     remaining = int(hunk.group(2) if hunk.group(2) is not None else 1)
             continue
         if raw.startswith(b"+"):
-            try:
-                raw[1:].decode("utf-8")
-            except UnicodeDecodeError:
-                first, count = found.get(path, (number, 0))
-                found[path] = (first, count + 1)
+            yield path, number, raw[1:]
             number += 1
             remaining -= 1
-    return found
+
+
+def text_problems(cwd):
+    """({path: (first line, count)} not valid UTF-8, {path: (first line, count, first code point)} with
+    invisible characters) over the added lines."""
+    bad, hidden = {}, {}
+    for path, number, raw in added_lines(cwd):
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            first, count = bad.get(path, (number, 0))
+            bad[path] = (first, count + 1)
+            continue
+        for match in INVISIBLE.finditer(text):
+            if match.group() == "\ufeff" and number == 1 and match.start() == 0:
+                continue
+            first, count, code = hidden.get(path, (number, 0, match.group()))
+            hidden[path] = (first, count + 1, code)
+            break
+    return bad, hidden
 
 
 def pre_commit():
@@ -345,7 +374,7 @@ def pre_commit():
     names = git_checked(["diff", "--cached", "--name-only"], cwd)
     diff = git_checked(["diff", "--cached", "--no-ext-diff", "--no-textconv", "--text", "--"] + EXCLUDES, cwd)
     findings = scan(diff, names.splitlines(), load_allowlist(cwd))
-    bad_encoding = non_utf8_files(cwd)
+    bad_encoding, hidden = text_problems(cwd)
     if findings:
         sys.stderr.write("Secret scan blocked this commit. The changes being committed contain:\n- "
                          + "\n- ".join(findings) + "\nRemove the secret from the staged changes and "
@@ -357,7 +386,14 @@ def pre_commit():
                          + "\n- ".join(listed) + "\nRe-save each file as UTF-8 (iconv -f WINDOWS-1252 -t UTF-8 "
                          "<file> > <tmp>, then move <tmp> over the file; or the editor's \"Save with "
                          "Encoding\"), stage it again and commit again.\n")
-    sys.exit(1 if findings or bad_encoding else 0)
+    if hidden:
+        listed = [f"{path or 'added lines'}:{first} ({count} line{'s' * (count != 1)}, first U+{ord(code):04X})"
+                  for path, (first, count, code) in sorted(hidden.items(), key=str)]
+        sys.stderr.write("Invisible-character check blocked this commit. Added lines with invisible or "
+                         "direction-control characters (they can hide instructions in prompts and code):\n- "
+                         + "\n- ".join(listed) + "\nRemove them (delete and retype the line, or search for the "
+                         "code point), stage the file again and commit again.\n")
+    sys.exit(1 if findings or bad_encoding or hidden else 0)
 
 
 def owned(path):

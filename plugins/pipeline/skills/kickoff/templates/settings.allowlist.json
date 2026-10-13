@@ -4,7 +4,11 @@
     "Edit(.pipeline-secrets-allow)",
     "Write(.pipeline-secrets-allow)",
     "Bash(git commit --no-verify:*)",
-    "Bash(git commit -n:*)"
+    "Bash(git commit -n:*)",
+    "Bash(sudo:*)",
+    "Bash(git push --force:*)",
+    "Bash(git push -f:*)",
+    "Bash(chmod 777:*)"
   ],
   "never_allow": [
     "db push",
@@ -18,6 +22,11 @@
     "publish",
     "vercel",
     "git push",
-    "rm -rf"
+    "rm -rf",
+    "sudo",
+    "--force",
+    "chmod 777",
+    "| sh",
+    "| bash"
   ]
 }

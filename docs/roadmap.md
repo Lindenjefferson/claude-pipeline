@@ -2,6 +2,19 @@
 
 Backlog vivo do plugin. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin ou ideia adaptada do ECC) e o esforço estimado (P, M, G). Ao entregar um item, mover para a seção da versão correspondente com o PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
+## 2.6.0 — endurecimento (PR #12)
+
+Origem: leitura das regras do AgentShield (ECC) de hooks, permissões e agentes, só como referência, sem instalar nada. O que é código malicioso, MCP e pontuação ficou fora.
+
+- [x] **Caracteres invisíveis no commit**: o `pre-commit` recusa espaço de largura zero, controles de direção, caracteres Tag e BOM fora do início (a forma de esconder instruções em arquivos de prompt); ZWJ/ZWNJ de emoji e escritas legítimas passam.
+- [x] **Mais formatos de chave no scan**: OpenAI, Google, xAI, GitHub fine-grained, Linear e o segredo de webhook do Stripe.
+- [x] **Ferramentas do `discovery`**: sem `Edit`, `NotebookEdit` nem `Agent` (lia fontes não confiáveis com todas as ferramentas). Os agentes `discovery` e `qa` tratam texto de fontes, páginas e saída de ferramentas como dado, nunca como instrução.
+- [x] **Allowlist do `kickoff` mais fechada**: `deny` para `sudo`, force push e `chmod 777`; `never_allow` ganha `sudo`, `--force`, `chmod 777`, `| sh` e `| bash`.
+- [x] **Teste de integridade do plugin** (`test_plugin_integrity.py`): todo agente limita ferramentas, nenhum arquivo tem caractere invisível, os comandos do `hooks.json` não usam rede, `sudo` nem erro silenciado, e o template de allowlist mantém o `deny`.
+- [x] **Passo 9 do `kickoff`** relata, sem alterar, `env` de endpoint ou proxy, `enableAllProjectMcpServers` e hooks alheios ao adotar um projeto com `settings.json`.
+- [x] **Documentação**: o mapa do `CLAUDE.md` passa a citar os hooks de retomada e de servidor de dev.
+- Fora: checagem de revisão externa no gate (o `open-code-review` da Alibaba exige CLI Node, chave de um provedor de LLM e envia o diff para fora; o `reviewer` já cobre isso sem chave, e o gate é sem LLM de propósito). Teto de orçamento continua sem sinal nas métricas.
+
 ## 2.5.0 — objetivo da tarefa e tarefas em andamento (PR #11)
 
 Origem: ideias adaptadas do [Paperclip](https://github.com/paperclipai/paperclip) (contexto de objetivo e checkout de tarefa), sem usar a ferramenta.
@@ -71,8 +84,8 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 
 Termine a entrega em andamento antes de atualizar o plugin.
 
+- **2.6.0**: os checks novos do `pre-commit` (caracteres invisíveis e mais formatos de chave) chegam com o plugin; o `pre-commit` instalado já chama o scanner, sem reinstalar. Para a allowlist nova (`deny` de `sudo`, force push e `chmod 777`), rode o `kickoff` de novo e confirme a mudança em `.claude/settings.json`. Commits antigos com caracteres invisíveis não são reabertos.
 - **2.5.0**: lê os ledgers anteriores (sem `claim` nada fica em andamento). O `manager` passa a dar `claim` ao despachar cada `dev`; um `claim` sem `add` deixa o gate em NOT READY até o `add` ou o `release`. Planos novos trazem `Goal:` por tarefa; planos antigos continuam válidos.
-
 - **2.4.0**: os hooks novos (retomada, UTF-8 no commit e servidor de dev) chegam com o plugin. O UTF-8 no commit exige reinstalar o `pre-commit` só em projetos preparados antes da 1.6.0 (o shim atual já chama o scanner). Para o servidor de dev, rode o `kickoff` de novo e preencha a linha "Rodar em desenvolvimento" do `CLAUDE.md` com o comando entre crases; sem isso o hook não faz nada.
 - **2.3.0**: lê os ledgers da 2.1 e da 2.2 (achados antigos aparecem como "unclassified" e as execuções sem `--seconds` como não medidas). `add --open` saiu: use `--critical`/`--important`; todo achado novo exige `--origin`. Sem `start --plan`, a checagem Criteria do gate fica SKIP. A seção Invariantes saiu do `reviewer` (a fonte é `checklists/general.md`). Rode o `kickoff` de novo para acrescentar ao `CLAUDE.md` do projeto a seção "Execução em paralelo" e as linhas "Testes afetados", "Arquivos de teste" e "Auditoria".
 - **2.2.0**: saíram os templates de stack do `kickoff` e os checklists `auth`, `nextjs-react` e `postgres-supabase`. Projetos preparados antes continuam com os arquivos que já têm; as regras de stack que ainda valem vão para o `CLAUDE.md` ou o `docs/lessons.md` do projeto. Lê os ledgers da 2.1 (um `fix-N` depois de um ciclo fechado passa a contar nesse ciclo).
