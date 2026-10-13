@@ -86,4 +86,32 @@ r = commit("odd path")
 check("a path with spaces and accents is still reported", r.returncode != 0 and "UTF-8" in r.stderr and ".txt:1" in r.stderr,
       r.stderr)
 
+sh("git", "reset", "-q", "--hard")
+HIDDEN = (("a zero-width space", 0x200B), ("a bidi override", 0x202E), ("a word joiner", 0x2060),
+          ("a Tag character", 0xE0041), ("a BOM inside a line", 0xFEFF))
+for label, code in HIDDEN:
+    put("rules.md", ("# Regras\nsempre revise" + chr(code) + " o codigo\n").encode("utf-8"))
+    sh("git", "add", "-A")
+    r = commit("hidden char")
+    check(f"{label} in an added line is refused with file and line",
+          r.returncode != 0 and "rules.md:2" in r.stderr and "invisible" in r.stderr, r.stderr)
+    check(f"{label}: the message names the code point", f"U+{code:04X}" in r.stderr, r.stderr)
+    sh("git", "reset", "-q", "--hard")
+family = chr(0x1F468) + chr(0x200D) + chr(0x1F469) + chr(0x200D) + chr(0x1F467)
+put("emoji.md", ("familia " + family + " e persa " + chr(0x0645) + chr(0x200C) + chr(0x0646) + "\n").encode("utf-8"))
+sh("git", "add", "-A")
+r = commit("emoji and ZWNJ")
+check("a joiner inside an emoji sequence and a ZWNJ pass", r.returncode == 0, r.stderr)
+put("bom2.txt", b"\xef\xbb\xbfinicio com BOM\nsegunda linha\n")
+sh("git", "add", "-A")
+r = commit("bom at the start")
+check("a BOM at the very start of a file still passes", r.returncode == 0, r.stderr)
+put("legacy.md", ("linha antiga" + chr(0x200B) + "\n").encode("utf-8"))
+sh("git", "add", "-f", "legacy.md")
+sh("git", "-c", "core.hooksPath=/nonexistent", "commit", "-q", "-m", "legacy with a hidden char")
+put("legacy.md", ("linha antiga" + chr(0x200B) + "\nlinha nova\n").encode("utf-8"))
+sh("git", "add", "-A")
+r = commit("append")
+check("a legacy line already committed is not re-flagged", r.returncode == 0, r.stderr)
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
