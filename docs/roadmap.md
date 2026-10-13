@@ -2,7 +2,15 @@
 
 Backlog vivo do plugin. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin ou ideia adaptada do ECC) e o esforço estimado (P, M, G). Ao entregar um item, mover para a seção da versão correspondente com o PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
-## 2.3.0 — paralelismo e prevenção de retrabalho (branch `feat/parallel-and-rework-prevention`)
+## 2.4.0 — hooks e ruído (PR #)
+
+Origem: ideias adaptadas do ECC (`session-start`, `pre-bash-dev-server-block`) e feedback do Módulo 1 (servidor órfão, texto em Latin-1).
+
+- [x] **Retomada depois de compactação**: `hooks/hooks.json` registra um `SessionStart` (`compact|resume`) que imprime o `ledger.py status` quando há ledger e nada quando não há.
+- [x] **Encoding no commit**: o `pre-commit` recusa linhas adicionadas que não são UTF-8, com arquivo, primeira linha e como corrigir; binários e linhas antigas não contam. Ficou em `pre-commit-secret-scan.py` (o shim instalado só chama esse script, então uma instalação cobre as duas checagens) e o docstring foi atualizado.
+- [x] **Servidor de dev solto**: `PreToolUse` em `Bash` que nega o comando da linha "Rodar em desenvolvimento" do `CLAUDE.md` do projeto sem `run_in_background`. Reaproveita a linha que o template já tinha, em vez de criar outra. Sem comando entre crases, não faz nada. **Por que reintroduz o `PreToolUse`**: a 1.6.0 reduziu o scan de segredos a um `pre-commit` nativo e tirou o `PreToolUse`, `pre-push` e bloqueio de gate que prendiam o fluxo do agente. Este tem outro fim e não prende nada: só nega um comando que o próprio projeto declarou, não depende de estado do plugin e, se falhar, deixa a chamada passar.
+
+## 2.3.0 — paralelismo e prevenção de retrabalho (PR #9)
 
 Origem: feedback da etapa 2 do primeiro projeto (§5 paralelismo, §6 processo de produto, §7 prevenir retrabalho). Objetivo: menos tempo por entrega e menos achados por lacuna de desenho.
 
@@ -42,12 +50,6 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 - [x] **Saem**: `security`, `audit`, `design`, `code-review`, `db` e `docs` como agentes; `package.py`, `findings.py`, ferramentas de mutação, lições com contadores (as globais viraram itens dos checklists), hook `SubagentStop`, worktree obrigatória, revisão de spec com várias rodadas.
 - [x] **Lições por projeto** em `docs/lessons.md`, lidas pelo `dev` e pelo `reviewer`.
 
-## Próximos
-
-- [ ] **Retomada depois de compactação** (ECC `session-start`): hook `SessionStart` com matcher `compact|resume` mostra o `ledger.py status` quando há ledger. P.
-- [ ] **Bloquear servidor de dev solto** (ECC `pre-bash-dev-server-block`): negar o servidor de dev do projeto fora do modo background, com a forma certa na mensagem. Custou uma rodada de QA e um processo órfão no Módulo 1. P.
-- [ ] **Encoding no commit**: o `pre-commit` recusa linhas adicionadas que não decodificam como UTF-8. P.
-
 ## Decisões pendentes do usuário
 
 - [ ] **Ruído do graphify**: o plugin graphify injeta "MANDATORY: run graphify" em quase todo Bash/Read, gastando contexto em toda chamada. Opção: o kickoff instala o hook do graphify só para `Read|Grep|Glob`. Mexe em outro plugin.
@@ -63,6 +65,7 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 
 Termine a entrega em andamento antes de atualizar o plugin.
 
+- **2.4.0**: os hooks novos (retomada, UTF-8 no commit e servidor de dev) chegam com o plugin. O UTF-8 no commit exige reinstalar o `pre-commit` só em projetos preparados antes da 1.6.0 (o shim atual já chama o scanner). Para o servidor de dev, rode o `kickoff` de novo e preencha a linha "Rodar em desenvolvimento" do `CLAUDE.md` com o comando entre crases; sem isso o hook não faz nada.
 - **2.3.0**: lê os ledgers da 2.1 e da 2.2 (achados antigos aparecem como "unclassified" e as execuções sem `--seconds` como não medidas). `add --open` saiu: use `--critical`/`--important`; todo achado novo exige `--origin`. Sem `start --plan`, a checagem Criteria do gate fica SKIP. A seção Invariantes saiu do `reviewer` (a fonte é `checklists/general.md`). Rode o `kickoff` de novo para acrescentar ao `CLAUDE.md` do projeto a seção "Execução em paralelo" e as linhas "Testes afetados", "Arquivos de teste" e "Auditoria".
 - **2.2.0**: saíram os templates de stack do `kickoff` e os checklists `auth`, `nextjs-react` e `postgres-supabase`. Projetos preparados antes continuam com os arquivos que já têm; as regras de stack que ainda valem vão para o `CLAUDE.md` ou o `docs/lessons.md` do projeto. Lê os ledgers da 2.1 (um `fix-N` depois de um ciclo fechado passa a contar nesse ciclo).
 - **2.0.0 e 2.1.0**: mudaram o formato do ledger; um ledger de versão anterior não é lido.
