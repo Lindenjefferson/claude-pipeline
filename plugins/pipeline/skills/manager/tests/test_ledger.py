@@ -247,6 +247,33 @@ check("a 2.2 ledger is still read: closed cycle, findings unclassified, time unm
       state["ready_for_gate"] is True and state["metrics"]["origins"]["unclassified"] == 3
       and state["metrics"]["time"]["unmeasured"] == 5 and state["plan"] is None and state["deferred"] == [], state)
 
+CLAIMS = ".superpowers/claims.jsonl"
+run("start", "--slug", "claims", ledger=CLAIMS)
+check("claim before start is refused", run("claim", "--task", "T1", ledger=".superpowers/none.jsonl").returncode != 0)
+r = run("claim", "--task", "T1", ledger=CLAIMS)
+check("claim records the dispatch", r.returncode == 0 and "T1" in r.stdout, r.stderr)
+r = run("claim", "--task", "T1", ledger=CLAIMS)
+check("a second claim on the same task fails and says how to release", r.returncode != 0
+      and "already claimed" in r.stderr and "release --task T1" in r.stderr, r.stderr)
+check("another task can be claimed in parallel", run("claim", "--task", "T2", ledger=CLAIMS).returncode == 0)
+state = status(CLAIMS)
+check("status lists what is in flight and the gate waits", sorted(state["in_flight"]) == ["T1", "T2"]
+      and state["ready_for_gate"] is False and any("T1" in item and "no report" in item for item in state["pending"]), state)
+check("status --check fails while something is in flight", run("status", "--check", ledger=CLAIMS).returncode == 1)
+add("dev", "DONE", "T1", ledger=CLAIMS)
+state = status(CLAIMS)
+check("add on the task releases its claim", state["in_flight"] == ["T2"], state)
+r = run("claim", "--task", "T1", ledger=CLAIMS)
+check("a task already done in the cycle cannot be claimed again", r.returncode != 0 and "already done" in r.stderr,
+      r.stderr)
+r = run("release", "--task", "T2", ledger=CLAIMS)
+check("release frees a lost run", r.returncode == 0 and status(CLAIMS)["in_flight"] == [], r.stderr)
+check("release without a claim is refused", run("release", "--task", "T2", ledger=CLAIMS).returncode != 0)
+run("claim", "--task", "T3", ledger=CLAIMS)
+add("dev", "NEEDS_CONTEXT", "T3", ledger=CLAIMS)
+check("a task that came back NEEDS_CONTEXT can be claimed again", run("claim", "--task", "T3", ledger=CLAIMS).returncode == 0)
+check("an old ledger without claims has an empty in-flight list", status(".superpowers/legacy.jsonl")["in_flight"] == [])
+
 run("note", "--text", "decisão não óbvia")
 raw = subprocess.run([sys.executable, LEDGER, "status"], cwd=repo, capture_output=True,
                      env={**os.environ, "PYTHONIOENCODING": "latin-1", "PYTHONUTF8": "0"})
