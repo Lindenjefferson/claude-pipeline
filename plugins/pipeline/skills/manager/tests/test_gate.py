@@ -186,6 +186,8 @@ r = gate("--base", "main")
 check("a deferred item with no decision: NOT READY",
       r.returncode == 1 and "Ledger:     FAIL" in r.stdout and "deferred D1" in r.stdout, r.stdout)
 ledger_cmd("resolve", "--id", "D1", "--decision", "user: next delivery")
+ledger_cmd("mode", "autonomous")
+ledger_cmd("note", "--text", "page size 50", "--validar")
 r = gate("--base", "main", "--report", "feature-y")
 check("all criteria traced, audit passes, deferred decided: READY",
       r.returncode == 0 and "Auditoria:  PASS" in r.stdout and "Criteria:   PASS" in r.stdout, r.stdout)
@@ -197,5 +199,37 @@ check("the report shows time per cycle, task and agent",
 check("the report shows findings by origin and the deferred decisions",
       "Origins: design 1, assumption 0, plan 0, execution 0, environment 0" in text
       and "- D1 wrap long names -> user: next delivery" in text, text)
+check("the report shows the mode and the VALIDAR list",
+      "Mode: autonomous" in text and "## VALIDAR" in text and "- page size 50" in text, text)
+
+sh("git", "commit", "-q", "--no-verify", "-m", "docs: quality report y")
+os.makedirs(os.path.join(repo, "e2e", "flows"), exist_ok=True)
+commit("plan.md", "# plan\n- AC-T1-1 a\n- AC-T1-2 b\n- AC-T1.3 c\n- AC-T2-1 d\n- AC-T2-2 e\n## Errata\n", "docs: plan T2")
+commit("e2e/home.spec.txt", "test('AC-T2-1 given d')\n", "test: e2e at the folder root")
+commit("e2e/flows/pay.spec.txt", "test('AC-T2-2 given e')\n", "test: e2e in a subfolder")
+
+
+def criteria_with(globs):
+    commit("CLAUDE.md", claude_md(test_files=globs, audit=True), f"docs: test files {globs}")
+    return gate("--base", "main")
+
+
+r = criteria_with("tests/* e2e/**/*.spec.txt")
+check("**/ matches zero or more folders: tests at the folder root and in a subfolder are found",
+      "Criteria:   PASS" in r.stdout and "warning" not in r.stdout, r.stdout)
+r = criteria_with("tests/* e2e/*.spec.txt")
+trace = r.stdout.split("Criteria:")[1].split("\n    ")[1] if "Criteria:" in r.stdout else ""
+check("* stays within one folder: a test in a subfolder is not found",
+      "Criteria:   FAIL" in r.stdout and "AC-T2-2" in trace and "AC-T2-1" not in trace, r.stdout)
+r = criteria_with("./tests/* e2e/**/*.{spec,test}.txt")
+check("a leading ./ and {a,b} alternatives work", "Criteria:   PASS" in r.stdout, r.stdout)
+r = criteria_with("tests/* e2e/**/*.spec.txt spec/**/*.txt")
+check("a glob that matches no tracked file is a warning that names it, not a failure",
+      "Criteria:   PASS" in r.stdout and "warning: test glob 'spec/**/*.txt' matches no tracked file" in r.stdout,
+      r.stdout)
+r = criteria_with("tests/* e2e/**/*.spec.txt [!]x [z-a].txt")
+check("an invalid glob is a warning that names it, not a crash",
+      "Criteria:   PASS" in r.stdout and "warning: invalid test glob '[!]x'" in r.stdout
+      and "warning: invalid test glob '[z-a].txt'" in r.stdout, r.stdout + r.stderr[-300:])
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

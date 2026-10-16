@@ -25,6 +25,8 @@ tamanho → (spec) → plano ✋ → ciclos: dev por tarefa (as independentes em
 4. O `gate.py` confere localmente o ledger, os critérios de aceite com teste, build, tipos, lint, testes, auditoria de dependências e segredos, e grava um relatório de qualidade com as métricas da entrega.
 5. Você decide o merge e o push (✋ 2). Nada sai da máquina sem esse pedido.
 
+Com você ausente, o modo autônomo do [manager](plugins/pipeline/skills/manager/SKILL.md) troca as aprovações por uma lista VALIDAR e nunca faz merge nem push.
+
 ## Começo rápido
 
 Requisitos: Claude Code com plugins, Python 3 e git no `PATH`, e o plugin [`superpowers`](https://github.com/obra/superpowers) (`superpowers@claude-plugins-official`, declarado como dependência). Opcional: [graphify](https://github.com/Graphify-Labs/graphify) (`pip install graphifyy`) para o grafo de conhecimento.

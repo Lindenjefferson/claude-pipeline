@@ -10,6 +10,7 @@ For every operation that creates, changes or deletes data, answer each question;
 - **Two at once:** what if two people do it, or this and a conflicting operation, at the same time?
 - **Derived values:** the limit of every value it computes (sum, product, count, concatenation), not only of what is typed.
 - **Each failure:** what the user sees for each one (specific message, where, what stays typed).
+- **Validate before writing:** what is already written if the next validation refuses? Validation and permission come before any write; what must happen together is one atomic operation.
 - **The past:** what it changes in history, balances, totals or reports already shown.
 
 ## 2. Technical assumptions
