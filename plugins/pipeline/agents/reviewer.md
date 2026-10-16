@@ -44,6 +44,7 @@ When the brief says **plan mode**, review the plan (the path in the brief) again
 - **Impossible or colliding tests**: a test that measures something the task removes, data shared between tests, a criterion no test can observe.
 - **Dependencies**: tasks marked independent that touch the same file or shared resource, or use what another task creates without `Depends on:` it.
 - **Pre-mortem and criteria**: every write operation answers the questionnaire; criteria are Given/When/Then with ids, negative ones and abuse cases included; every assumption the plan relies on was proven by a spike.
+- **Rules across sibling functions** (Invariantes of the general checklist): every function that lists or sums a set the plan filters or sums is named, each with a test of the rule.
 - **Product decisions** the plan takes without listing them.
 Each finding cites the plan section (and the code path that contradicts it) and gives the correction worded so it can be pasted into the plan. You change nothing.
 
