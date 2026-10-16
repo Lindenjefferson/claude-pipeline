@@ -7,7 +7,8 @@
           [--seconds <duration>]
   claim   --task <id>                                         a dev run dispatched; refused if the task is in flight or done
   release --task <id>                                         frees a claim whose run was lost
-  note    --text <text>                                       a decision taken on the user's behalf
+  note    --text <text> [--validar]                           a decision taken on the user's behalf
+  mode    autonomous|supervised                               the user turned autonomous mode on, or is back
   defer   --text <text>                                       an item left for later; prints its id (D1, D2...)
   resolve --id <id> --decision <text>                         the final decision on a deferred item
   lesson  --text <rule> [--check <test or lint rule>]         a lesson, automated when --check names the check
@@ -24,7 +25,9 @@ A fix round (task fix-N) and the cleanup task (task cleanup) stay in the current
 a reviewer pass, and qa again only when a FAIL came before them. Every finding carries its origin (design,
 assumption, plan, execution, environment); --seconds takes 90, 12m, 1h5m or 12m30s. A deferred item with no
 decision keeps the delivery from the gate. start --archive moves an existing delivery to ledger-<old-slug>.jsonl next
-to the ledger first. --check exits 1 while anything is pending, so the gate can rely on it."""
+to the ledger first. --check exits 1 while anything is pending, so the gate can rely on it. In autonomous mode a
+cycle that still fails after a fix round does not ask the user (the fix rounds go on); notes marked --validar are
+listed apart, for the user to confirm on return. A ledger with no mode entry is supervised."""
 import argparse
 import datetime
 import json
@@ -87,7 +90,7 @@ def cycles(entries):
     return groups
 
 
-def cycle_state(cycle):
+def cycle_state(cycle, autonomous=False):
     tasks, reviews, checks = {}, [], []
     work = last_dev = last_review = last_qa = needs_qa = -1
     for index, entry in enumerate(cycle):
@@ -123,7 +126,7 @@ def cycle_state(cycle):
         pending.append("qa has not re-run the scenarios the fix touched")
     for agent, done in (("reviewer", reviews), ("qa", checks)):
         failed = sum(1 for entry in done if entry["verdict"] == "FAIL")
-        if done and done[-1]["verdict"] == "FAIL" and failed >= FIX_ROUNDS:
+        if not autonomous and done and done[-1]["verdict"] == "FAIL" and failed >= FIX_ROUNDS:
             pending.append(f"{agent} still fails after a fix round: ask the user")
     return state, pending
 
@@ -230,8 +233,23 @@ def release(args):
 def note(args):
     if not read(args.ledger):
         sys.exit("no delivery started: run start first")
-    write(args.ledger, {"type": "note", "text": args.text})
-    print("noted")
+    entry = {"type": "note", "text": args.text}
+    if args.validar:
+        entry["validar"] = True
+    write(args.ledger, entry)
+    print("noted (VALIDAR)" if args.validar else "noted")
+
+
+def autonomous(entries):
+    modes = [entry["mode"] for entry in entries if entry["type"] == "mode"]
+    return bool(modes) and modes[-1] == "autonomous"
+
+
+def mode(args):
+    if not read(args.ledger):
+        sys.exit("no delivery started: run start first")
+    write(args.ledger, {"type": "mode", "mode": args.mode})
+    print(f"mode {args.mode}")
 
 
 def deferred(entries):
@@ -314,7 +332,8 @@ def status(args):
     if not entries:
         sys.exit("no delivery started")
     groups = cycles(entries)
-    state, pending = cycle_state(groups[-1])
+    auto = autonomous(entries)
+    state, pending = cycle_state(groups[-1], auto)
     items = deferred(entries)
     held = in_flight(entries)
     pending += [f"dev {task} dispatched at {at}, no report yet (add it when it reports, or release --task {task})"
@@ -323,12 +342,16 @@ def status(args):
     report = {"slug": entries[0].get("slug"), "base": entries[0].get("base"), "plan": entries[0].get("plan"),
               "cycle": len(groups), "in_flight": list(held), "tasks": {task: entry["verdict"] for task, entry in state["tasks"].items()},
               "reviewer": state["reviewer"], "qa": state["qa"], "pending": pending,
-              "notes": [entry["text"] for entry in entries if entry["type"] == "note"], "deferred": items,
+              "autonomous": auto, "deferred": items,
+              "notes": [entry["text"] for entry in entries if entry["type"] == "note" and not entry.get("validar")],
+              "validar": [entry["text"] for entry in entries if entry["type"] == "note" and entry.get("validar")],
               "metrics": metrics(entries), "ready_for_gate": not pending}
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:
         print(f"delivery {report['slug']} (base {str(report['base'])[:12]}), cycle {report['cycle']}")
+        if auto:
+            print("mode: autonomous (approvals become VALIDAR notes; never merge or push)")
         for task, verdict in report["tasks"].items():
             print(f"- {task}: {verdict}")
         for agent in ("reviewer", "qa"):
@@ -338,6 +361,8 @@ def status(args):
             print(f"pending: {item}")
         for text in report["notes"]:
             print(f"note: {text}")
+        for text in report["validar"]:
+            print(f"VALIDAR: {text}")
         for item in items:
             if item["decision"]:
                 print(f"deferred {item['id']}: {item['text']} -> {item['decision']}")
@@ -375,7 +400,11 @@ def main():
         command.set_defaults(run=run)
     command = commands.add_parser("note")
     command.add_argument("--text", required=True)
+    command.add_argument("--validar", action="store_true", help="the user validates this decision on return")
     command.set_defaults(run=note)
+    command = commands.add_parser("mode")
+    command.add_argument("mode", choices=("autonomous", "supervised"))
+    command.set_defaults(run=mode)
     command = commands.add_parser("defer")
     command.add_argument("--text", required=True)
     command.set_defaults(run=defer)

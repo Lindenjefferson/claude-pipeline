@@ -245,7 +245,33 @@ with open(LEGACY, "w", encoding="utf-8", newline="\n") as handle:
 state = status(".superpowers/legacy.jsonl")
 check("a 2.2 ledger is still read: closed cycle, findings unclassified, time unmeasured",
       state["ready_for_gate"] is True and state["metrics"]["origins"]["unclassified"] == 3
-      and state["metrics"]["time"]["unmeasured"] == 5 and state["plan"] is None and state["deferred"] == [], state)
+      and state["metrics"]["time"]["unmeasured"] == 5 and state["plan"] is None and state["deferred"] == []
+      and state["autonomous"] is False and state["validar"] == [], state)
+
+AUTO = ".superpowers/auto.jsonl"
+check("mode before start is refused", run("mode", "autonomous", ledger=AUTO).returncode != 0)
+run("start", "--slug", "auto", ledger=AUTO)
+check("a delivery starts supervised", status(AUTO)["autonomous"] is False, status(AUTO))
+check("an unknown mode is refused", run("mode", "yolo", ledger=AUTO).returncode != 0)
+r = run("mode", "autonomous", ledger=AUTO)
+check("mode autonomous is recorded and status says so",
+      r.returncode == 0 and status(AUTO)["autonomous"] is True and "autonomous" in run("status", ledger=AUTO).stdout,
+      r.stderr)
+for agent, verdict, task, count in (("dev", "DONE", "T1", 0), ("reviewer", "FAIL", None, 1),
+                                    ("dev", "DONE", "fix-1", 0), ("reviewer", "FAIL", None, 1)):
+    add(agent, verdict, task, count, ledger=AUTO)
+pending = status(AUTO)["pending"]
+check("autonomous: a second failed review does not stop for the user, the fix rounds go on",
+      not any("ask the user" in item for item in pending) and any("one batch" in item for item in pending), pending)
+run("mode", "supervised", ledger=AUTO)
+check("back to supervised: the same cycle asks the user again",
+      any("ask the user" in item for item in status(AUTO)["pending"]), status(AUTO)["pending"])
+run("note", "--text", "page size 50", "--validar", ledger=AUTO)
+run("note", "--text", "ruled out a finding", ledger=AUTO)
+state = status(AUTO)
+check("note --validar goes to the VALIDAR list, apart from plain notes",
+      state["validar"] == ["page size 50"] and state["notes"] == ["ruled out a finding"], state)
+check("text status shows the VALIDAR list", "VALIDAR: page size 50" in run("status", ledger=AUTO).stdout)
 
 CLAIMS = ".superpowers/claims.jsonl"
 run("start", "--slug", "claims", ledger=CLAIMS)

@@ -8,13 +8,13 @@ decision); the tree is clean; every acceptance-criterion id of the plan recorded
 appears in a tracked test file (the globs on the "Arquivos de teste" line of the CLAUDE.md "Comandos" section,
 space-separated globs where * and ? stay within one folder, **/ matches zero or more folders and {a,b} is either; a
 glob that matches no tracked file prints a warning; without that line, every tracked file that is not Markdown);
-every command of that
-section passes (lines like "- Testes: `<command>`", a parenthetical after the label ignored; Build, Typecheck, Lint,
-Testes and the optional Auditoria are run, and --cmd adds or overrides one); and no secret or .env file is added
-anywhere in <base>..HEAD, the whole history that a push would send. A check that does not apply is SKIP with the reason; only Testes is required. Prints READY or
-NOT READY and exits 0 or 1. With --report and READY, writes docs/quality-reports/<date>-<slug>.md (checks, commits,
-ledger notes, deferred decisions and the delivery metrics: findings per cycle and origin, fix rounds, time per cycle,
-task and agent, lessons added and automated) and stages it."""
+every command of that section passes (lines like "- Testes: `<command>`", a parenthetical after the label ignored;
+Build, Typecheck, Lint, Testes and the optional Auditoria are run, and --cmd adds or overrides one); and no secret
+or .env file is added anywhere in <base>..HEAD, the whole history that a push would send. A check that does not
+apply is SKIP with the reason; only Testes is required. Prints READY or NOT READY and exits 0 or 1. With --report
+and READY, writes docs/quality-reports/<date>-<slug>.md (checks, commits, ledger mode and notes, the VALIDAR list,
+deferred decisions and the delivery metrics: findings per cycle and origin, fix rounds, time per cycle, task and
+agent, lessons added and automated) and stages it."""
 import argparse
 import datetime
 import importlib.util
@@ -216,7 +216,10 @@ def write_report(slug, base, head, checks, ledger):
     lines += ["", "## Commits", "", log.strip() or "-", ""]
     if ledger:
         lines += ["## Ledger", "", f"Cycles: {ledger['cycle']}"]
+        lines += ["Mode: autonomous"] if ledger.get("autonomous") else []
         lines += [f"- note: {text}" for text in ledger["notes"]]
+        if ledger.get("validar"):
+            lines += ["", "## VALIDAR", ""] + [f"- {text}" for text in ledger["validar"]]
         if ledger.get("deferred"):
             lines += ["", "## Deferred", ""]
             lines += [f"- {item['id']} {item['text']} -> {item['decision']}" for item in ledger["deferred"]]
