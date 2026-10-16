@@ -227,5 +227,9 @@ r = criteria_with("tests/* e2e/**/*.spec.txt spec/**/*.txt")
 check("a glob that matches no tracked file is a warning that names it, not a failure",
       "Criteria:   PASS" in r.stdout and "warning: test glob 'spec/**/*.txt' matches no tracked file" in r.stdout,
       r.stdout)
+r = criteria_with("tests/* e2e/**/*.spec.txt [!]x [z-a].txt")
+check("an invalid glob is a warning that names it, not a crash",
+      "Criteria:   PASS" in r.stdout and "warning: invalid test glob '[!]x'" in r.stdout
+      and "warning: invalid test glob '[z-a].txt'" in r.stdout, r.stdout + r.stderr[-300:])
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

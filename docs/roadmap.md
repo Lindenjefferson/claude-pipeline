@@ -15,11 +15,6 @@ Origem: a etapa 2 (retomada) e a etapa 3 do controle-financeiro com a 2.6.1, boa
 - [x] **Capturas persistentes**: o `qa` guarda capturas e script em `.superpowers/screens/<slug>/` e espera avisos temporários sumirem; a página de telas sai dessa pasta.
 - [x] **Segurança**: revisão de segurança nativa antes do gate; cabeçalhos de segurança, build de produção sem artefatos de depuração e tokens de fonte criptográfica no checklist; veto a extensões de terceiros (seção nova do checklist, citada pelo `manager` e pelo `kickoff`).
 
-## Backlog
-
-- **2.8 — mods do Claude Code para o modo multi-instância** (decisão do usuário, 2026-10-16): painel com o status do ledger de cada frente (worktree ou sessão), aviso quando outra sessão termina uma tarefa ou o gate, e um comando para listar as sessões abertas e mandar mensagem a uma delas. Começa por um protótipo pequeno do painel. Esforço: M.
-- **2.8, possibilidade — ambiente Linux no Windows (WSL2) para o modo multi-instância**: recomendação opcional do `kickoff` ou do template "Execução em paralelo", sem amarrar o plugin a uma plataforma. Ganha links simbólicos para as dependências de cada worktree, instalação mais rápida, fim dos avisos de fim de linha, scripts sem ajuste de caminho e contêineres mais perto do código. Não resolve banco compartilhado, limite de login nem suíte longa (item 17 da 2.7.0). Custa: repositório no sistema de arquivos do Linux, outra instalação do Claude Code (memória, plugins e configurações à parte), integração mais difícil com o navegador do Windows, hooks e `pipeline.home` reinstalados. Migração só entre entregas, como tarefa própria. Esforço: P no plugin.
-
 ## 2.6.1 — `pipeline.home` quebrado (PR #13)
 
 Origem: o teste do `kickoff` no Controle Financeiro. O `pipeline.home` global apontava para uma pasta que deixou de existir (o clone foi renomeado), e o `pre-commit` instalado bloqueava todo commit com "secret scanner not found" sem que o `kickoff` percebesse.
@@ -98,6 +93,11 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 - [x] **Saem**: `security`, `audit`, `design`, `code-review`, `db` e `docs` como agentes; `package.py`, `findings.py`, ferramentas de mutação, lições com contadores (as globais viraram itens dos checklists), hook `SubagentStop`, worktree obrigatória, revisão de spec com várias rodadas.
 - [x] **Lições por projeto** em `docs/lessons.md`, lidas pelo `dev` e pelo `reviewer`.
 
+## Backlog
+
+- **2.8 — mods do Claude Code para o modo multi-instância** (decisão do usuário, 2026-10-16): painel com o status do ledger de cada frente (worktree ou sessão), aviso quando outra sessão termina uma tarefa ou o gate, e um comando para listar as sessões abertas e mandar mensagem a uma delas. Começa por um protótipo pequeno do painel. Esforço: M.
+- **2.8, possibilidade — ambiente Linux no Windows (WSL2) para o modo multi-instância**: recomendação opcional do `kickoff` ou do template "Execução em paralelo", sem amarrar o plugin a uma plataforma. Ganha links simbólicos para as dependências de cada worktree, instalação mais rápida, fim dos avisos de fim de linha, scripts sem ajuste de caminho e contêineres mais perto do código. Não resolve banco compartilhado, limite de login nem suíte longa (item 17 da 2.7.0). Custa: repositório no sistema de arquivos do Linux, outra instalação do Claude Code (memória, plugins e configurações à parte), integração mais difícil com o navegador do Windows, hooks e `pipeline.home` reinstalados. Migração só entre entregas, como tarefa própria. Esforço: P no plugin.
+
 ## Entregues
 
 - **1.6.0** (PR #5): scan de segredos reduzido a um `pre-commit` nativo; sem `PreToolUse`, `pre-push` nem bloqueio de gate.
@@ -109,7 +109,7 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 
 Termine a entrega em andamento antes de atualizar o plugin.
 
-- **2.7.0**: lê os ledgers da 2.6 (sem `mode`, a entrega é supervisionada). A linha "Arquivos de teste" agora é glob de verdade: `*` não atravessa pastas e `**/` casa zero ou mais, então use `**/` onde um teste pode estar em subpasta; o gate avisa o glob que não casa nenhum arquivo. Rode o `kickoff` de novo para receber as linhas novas de "Execução em paralelo" e "Servidor para a verificação de interface".
+- **2.7.0**: lê os ledgers da 2.6 (sem `mode`, a entrega é supervisionada). A linha "Arquivos de teste" agora é glob de verdade: `*` não atravessa pastas e `**/` casa zero ou mais, então use `**/` onde um teste pode estar em subpasta; maiúsculas e minúsculas contam também no Windows (antes não contavam), então o glob precisa ter a mesma grafia das pastas; o gate avisa o glob inválido ou que não casa nenhum arquivo. Rode o `kickoff` de novo para receber as linhas novas de "Execução em paralelo" e "Servidor para a verificação de interface".
 - **2.6.1**: nada muda para quem atualiza. Se um commit for barrado com "secret scanner not found", `git config --global pipeline.home` aponta para um caminho que não existe mais: aponte para `<clone>/plugins/pipeline`.
 - **2.6.0**: os checks novos do `pre-commit` (caracteres invisíveis e mais formatos de chave) chegam com o plugin; o `pre-commit` instalado já chama o scanner, sem reinstalar. Para a allowlist nova (`deny` de `sudo`, force push e `chmod 777`), rode o `kickoff` de novo e confirme a mudança em `.claude/settings.json`. Commits antigos com caracteres invisíveis não são reabertos.
 - **2.5.0**: lê os ledgers anteriores (sem `claim` nada fica em andamento). O `manager` passa a dar `claim` ao despachar cada `dev`; um `claim` sem `add` deixa o gate em NOT READY até o `add` ou o `release`. Planos novos trazem `Goal:` por tarefa; planos antigos continuam válidos.
