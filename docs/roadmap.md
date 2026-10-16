@@ -95,7 +95,16 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 
 ## Backlog
 
-- **2.8 — mods do Claude Code para o modo multi-instância** (decisão do usuário, 2026-10-16): painel com o status do ledger de cada frente (worktree ou sessão), aviso quando outra sessão termina uma tarefa ou o gate, e um comando para listar as sessões abertas e mandar mensagem a uma delas. Começa por um protótipo pequeno do painel. Esforço: M.
+- **2.8 — mods do Claude Code para o modo multi-instância** (decisão do usuário, 2026-10-16): tornar o paralelismo visível. Começa por um protótipo pequeno do painel. Esforço: M. Ideias aprovadas:
+  1. **Painel "Frentes"**: uma linha por sessão ou worktree, com entrega, ciclo, tarefas em andamento e concluídas, reviewer e qa, tempo e o que falta (`ledger.py status --json`).
+  2. **Faixa acima do prompt**: resumo em uma linha (entrega, ciclo, agentes rodando, recurso compartilhado ocupado, estado do gate).
+  3. **Statusline**: modo autônomo ou supervisionado e quantos itens VALIDAR estão pendentes.
+  4. **Avisos**: tarefa concluída, reprovação, gate READY e "outra sessão terminou".
+  5. **Comando `/frentes`**: lista as sessões e abre uma aba nova do terminal numa worktree já preparada, despachando o pedido por mensagem entre sessões. Do teste de 2026-10-16: a pasta nova pede confiança na primeira vez (só o usuário responde); a aba aberta a partir de uma sessão herda as variáveis `CLAUDE_CODE_*` (inclusive `CLAUDE_CODE_CHILD_SESSION`) e vira sessão filha, sem histórico salvo e invisível às outras sessões, então essas variáveis são limpas antes de abrir uma irmã; o pedido inicial vai por mensagem depois que a sessão aparece.
+  6. **Comando `/validar`**: percorre a lista VALIDAR item a item com perguntas e grava cada decisão no ledger.
+  7. **Semáforo do recurso compartilhado**: quem usa o banco ou a porta agora e quem está na fila.
+  8. **Linha do tempo da entrega**: as tarefas de cada agente ao longo do tempo, com tempo e tokens; dá o sinal para o teto de custo por entrega.
+  9. **Página de telas** gerada a partir de `.superpowers/screens/`.
 - **2.8, possibilidade — ambiente Linux no Windows (WSL2) para o modo multi-instância**: recomendação opcional do `kickoff` ou do template "Execução em paralelo", sem amarrar o plugin a uma plataforma. Ganha links simbólicos para as dependências de cada worktree, instalação mais rápida, fim dos avisos de fim de linha, scripts sem ajuste de caminho e contêineres mais perto do código. Não resolve banco compartilhado, limite de login nem suíte longa (item 17 da 2.7.0). Custa: repositório no sistema de arquivos do Linux, outra instalação do Claude Code (memória, plugins e configurações à parte), integração mais difícil com o navegador do Windows, hooks e `pipeline.home` reinstalados. Migração só entre entregas, como tarefa própria. Esforço: P no plugin.
 
 ## Entregues
