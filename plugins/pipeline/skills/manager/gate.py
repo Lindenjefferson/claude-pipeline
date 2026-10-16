@@ -6,8 +6,9 @@
 Checks, in order: nothing is pending in the ledger (the current cycle is closed and every deferred item has a final
 decision); the tree is clean; every acceptance-criterion id of the plan recorded in the ledger (tokens like AC-T3-2)
 appears in a tracked test file (the globs on the "Arquivos de teste" line of the CLAUDE.md "Comandos" section,
-space-separated globs where * and ? stay within one folder, **/ matches zero or more folders and {a,b} is either; a
-glob that matches no tracked file prints a warning; without that line, every tracked file that is not Markdown);
+space-separated globs where * and ? stay within one folder, **/ matches zero or more folders and {a,b} is either; an
+invalid glob, or one that matches no tracked file, prints a warning; without that line, every tracked file that is
+not Markdown);
 every command of that section passes (lines like "- Testes: `<command>`", a parenthetical after the label ignored;
 Build, Typecheck, Lint, Testes and the optional Auditoria are run, and --cmd adds or overrides one); and no secret
 or .env file is added anywhere in <base>..HEAD, the whole history that a push would send. A check that does not
@@ -131,7 +132,12 @@ def traceability(plan):
     if globs:
         tracked, names = names, []
         for pattern in globs:
-            matched = [name for name in tracked if glob_regex(pattern).match(name)]
+            try:
+                regex = glob_regex(pattern)
+            except re.error:
+                print(f"warning: invalid test glob '{pattern}' (Arquivos de teste in CLAUDE.md)", flush=True)
+                continue
+            matched = [name for name in tracked if regex.match(name)]
             if not matched:
                 print(f"warning: test glob '{pattern}' matches no tracked file (Arquivos de teste in CLAUDE.md)",
                       flush=True)
