@@ -186,6 +186,8 @@ r = gate("--base", "main")
 check("a deferred item with no decision: NOT READY",
       r.returncode == 1 and "Ledger:     FAIL" in r.stdout and "deferred D1" in r.stdout, r.stdout)
 ledger_cmd("resolve", "--id", "D1", "--decision", "user: next delivery")
+ledger_cmd("mode", "autonomous")
+ledger_cmd("note", "--text", "page size 50", "--validar")
 r = gate("--base", "main", "--report", "feature-y")
 check("all criteria traced, audit passes, deferred decided: READY",
       r.returncode == 0 and "Auditoria:  PASS" in r.stdout and "Criteria:   PASS" in r.stdout, r.stdout)
@@ -197,6 +199,8 @@ check("the report shows time per cycle, task and agent",
 check("the report shows findings by origin and the deferred decisions",
       "Origins: design 1, assumption 0, plan 0, execution 0, environment 0" in text
       and "- D1 wrap long names -> user: next delivery" in text, text)
+check("the report shows the mode and the VALIDAR list",
+      "Mode: autonomous" in text and "## VALIDAR" in text and "- page size 50" in text, text)
 
 sh("git", "commit", "-q", "--no-verify", "-m", "docs: quality report y")
 os.makedirs(os.path.join(repo, "e2e", "flows"), exist_ok=True)
