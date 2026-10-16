@@ -24,13 +24,19 @@ Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o
 - Arquivos de teste (globs separados por espaço; o `gate.py` procura neles o id de cada critério de aceite): _(globs)_
 - Auditoria (vulnerabilidades das dependências; opcional): _(comando)_
 - Verificação de interface (se houver tela): _(comando)_
+- Servidor para a verificação de interface (o mesmo que o runner sobe, com as variáveis do ambiente de teste; quem sobe o servidor à mão usa este): _(comando)_
 - Migrations (aplicar/criar): _(comando)_
 
 ## Execução em paralelo
 
 O `manager` roda em paralelo, cada uma numa worktree do git, as tarefas que não dependem uma da outra nem tocam os mesmos arquivos. Sem esta seção preenchida, as tarefas rodam uma de cada vez.
 
-- Como rodar N cópias ao mesmo tempo (o que muda por worktree): _(porta, banco ou esquema, dados de teste, variáveis de ambiente)_
+- Como rodar N cópias ao mesmo tempo (o que muda por worktree): _(porta, variáveis de ambiente, dados de teste)_
+- Armazenamento de dados por cópia: _(outra instância com portas próprias ou um esquema por cópia; ou "compartilhado", e a verificação que grava roda uma tarefa por vez)_
+- Como preparar as dependências de uma cópia (o `manager` faz antes de despachar): _(reaproveitar as dependências já instaladas ou instalar; copiar o arquivo de ambiente)_
+- Pasta de saída dos testes por execução: _(a variável de ambiente que o runner lê; `reviewer` e `qa` usam sempre uma pasta própria)_
+- Limites do ambiente de teste que atrapalham execuções simultâneas e como afrouxá-los só no ambiente local: _(ex.: taxa de login)_
+- Testes de interface reaproveitam uma sessão autenticada pronta em vez de autenticar a cada teste: _(como)_
 - Recursos que não dá para isolar (a verificação que os usa roda uma tarefa por vez): _(ex.: limite de taxa de um serviço externo, um serviço único)_
 - Números sequenciais reservados no plano: _(ex.: migrations)_
 
