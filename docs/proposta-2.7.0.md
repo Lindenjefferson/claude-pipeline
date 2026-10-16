@@ -10,7 +10,7 @@ Rascunho original para decisão do usuário. Origem: a entrega da etapa 2 (corre
 |---|---|---|
 | Tarefas | 6 rodadas de correção (fix-6..fix-11) | 23 tarefas em 4 ciclos + 5 rodadas de correção + limpeza |
 | Revisões do plano | — | 3 (FAIL, FAIL, PASS) |
-| Achados Important | 6 (reviewer 4, qa 2) | 8 no plano (um deles: fatura paga mudando de valor) e 4 no código |
+| Achados Important | 6 (reviewer 4, qa 2) | 5 no plano (um deles: fatura paga mudando de valor) e 4 no código |
 | Origem dos achados | execução | execução > plano > desenho |
 
 O tempo foi para as rodadas de correção de bordas (foco, vãos, limites, quebra de palavra) e para três revisões do plano. O paralelismo da 2.3 (worktrees, reviewer ∥ qa, próximo ciclo em segundo plano) funcionou, com os atritos da seção B.
@@ -44,7 +44,7 @@ O tempo foi para as rodadas de correção de bordas (foco, vãos, limites, quebr
    - Regra nova no checklist (Invariantes) e no modo plano do reviewer: **toda regra que filtra ou soma um conjunto vale em todas as funções que listam ou somam esse conjunto; o plano lista essas funções e cada uma tem um teste da regra.**
 8. **A ordem "validar antes de escrever" precisa estar no plano.** A primeira versão do pagamento confirmava itens e só depois validava a data; um pagamento recusado deixava o total errado.
    - Regra no questionário de pré-mortem (spec-checklist §1): **"o que já foi gravado se a validação seguinte recusar?" — validação e permissão vêm antes de qualquer escrita; o que tem de acontecer junto é uma operação atômica.**
-9. **Rascunho do plano por subagente funcionou** (5.000+ linhas sem gastar o contexto do manager) e três revisões em modo plano pegaram 1 erro de dinheiro e 8 Important antes de qualquer código.
+9. **Rascunho do plano por subagente funcionou** (5.000+ linhas sem gastar o contexto do manager) e três revisões em modo plano pegaram 5 Important (um deles, o erro de dinheiro: fatura paga mudando de valor) antes de qualquer código.
    - Formalizar no passo 2 do manager: o plano pode ser escrito por um subagente com o mesmo brief do `writing-plans`; o manager aplica as decisões de produto e roda o reviewer em modo plano até PASS (no máximo 3 rodadas, depois pergunta).
 
 ## D. Revisão e testes
