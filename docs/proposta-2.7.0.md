@@ -10,7 +10,7 @@ Rascunho original para decisão do usuário. Origem: a entrega da etapa 2 (corre
 |---|---|---|
 | Tarefas | 6 rodadas de correção (fix-6..fix-11) | 23 tarefas em 4 ciclos + 5 rodadas de correção + limpeza |
 | Revisões do plano | — | 3 (FAIL, FAIL, PASS) |
-| Achados Important | 6 (reviewer 4, qa 2) | 5 no plano (um deles: fatura paga mudando de valor) e 4 no código |
+| Achados Important | 6 (reviewer 4, qa 2) | 8 no plano (um deles: fatura paga mudando de valor) e 4 no código |
 | Origem dos achados | execução | execução > plano > desenho |
 
 O tempo foi para as rodadas de correção de bordas (foco, vãos, limites, quebra de palavra) e para três revisões do plano. O paralelismo da 2.3 (worktrees, reviewer ∥ qa, próximo ciclo em segundo plano) funcionou, com os atritos da seção B.
