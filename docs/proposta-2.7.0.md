@@ -1,6 +1,6 @@
 # Proposta 2.7.0: o que a etapa 2 (retomada) e a etapa 3 ensinaram
 
-**Status: aprovada pelo usuário em 2026-10-16, os 16 itens como escritos** (revisão um a um), **mais os itens 17 (isolamento para várias instâncias) e 18 (segurança), pedidos pelo usuário no mesmo dia.** Implementação numa branch `feat/2.7.0-...` do repositório do plugin, com PR e aprovação de merge.
+**Status: aprovada pelo usuário, os 16 itens como escritos** (revisão um a um), **mais os itens 17 (isolamento para várias instâncias) e 18 (segurança), pedidos pelo usuário no mesmo dia.** Implementação numa branch `feat/2.7.0-...` do repositório do plugin, com PR e aprovação de merge.
 
 Rascunho original para decisão do usuário. Origem: a entrega da etapa 2 (correções visuais) e da etapa 3 inteira do controle-financeiro com o plugin 2.6.1, boa parte em modo autônomo (usuário ausente). Toda regra abaixo é geral, sem stack; o que é de stack ficou no `docs/lessons.md` do projeto.
 
@@ -78,12 +78,12 @@ O tempo foi para as rodadas de correção de bordas (foco, vãos, limites, quebr
 
 ## H. Segurança
 
-18. **Revisão de segurança por entrega e veto a extensões de terceiros.** Origem: leitura de sete skills de "security audit" de terceiros (2026-10-16). Nenhuma valia instalar: OWASP genérico, pentest fora do escopo, binário remoto sem versão fixa que altera dependências sozinho, ou cópia do revisor nativo com filtro que descarta rate limit, redirect, auditoria e corrida. Três trouxeram ideias que viram regra própria.
+18. **Revisão de segurança por entrega e veto a extensões de terceiros.** Origem: leitura de sete skills de "security audit" de terceiros. Nenhuma valia instalar: OWASP genérico, pentest fora do escopo, binário remoto sem versão fixa que altera dependências sozinho, ou cópia do revisor nativo com filtro que descarta rate limit, redirect, auditoria e corrida. Três trouxeram ideias que viram regra própria.
     - **Manager, passo 6 (antes do gate):** rodar a revisão de segurança nativa da ferramenta sobre a branch da entrega uma vez; achados entram como `fix-N` ou como item adiado com decisão, como os do reviewer.
     - **Checklist geral, "Web and UI":** cabeçalhos de segurança da resposta (política de conteúdo, transporte estrito, enquadramento, referenciador) configurados e testados; artefatos de depuração (mapas de código-fonte, erros detalhados, rotas de diagnóstico) desligados no build de produção; tokens e identificadores secretos gerados só por fonte criptográfica.
     - **Regra de veto antes de instalar qualquer skill, plugin, servidor MCP ou hook de terceiros** (no manager e no kickoff; vale também para o usuário): ler todos os arquivos, não só o principal, incluindo hooks, manifesto do plugin, configuração de MCP, arquivos de instrução para agentes (`AGENTS.md`, `CLAUDE.md` do repositório) e scripts de ciclo de vida de pacotes (`postinstall`); recusar quem baixa e roda código sem versão fixa (`npx` sem versão, `curl | sh`), altera dependências ou configuração sozinho, envia conteúdo para fora sem estar claro, pede ferramentas além do que descreve ou tenta mudar o comportamento do agente fora do próprio escopo; conferir licença e procedência (cópia sem atribuição é sinal de alerta). O resultado é um de três: não instalar, copiar a ideia para regra própria, ou instalar com versão fixa.
 
-## Para a 2.8 (decisão do usuário, 2026-10-16)
+## Para a 2.8 (decisão do usuário)
 
 - **Mods do Claude Code para o modo multi-instância:** painel com o status do ledger de cada frente (worktree ou sessão), aviso quando outra sessão termina uma tarefa ou o gate, e um comando para listar as sessões abertas e mandar mensagem a uma delas. A conversa entre sessões já é nativa; o mod a torna visível. Começa por um protótipo pequeno do painel antes de virar item.
 
