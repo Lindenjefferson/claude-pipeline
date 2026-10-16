@@ -95,12 +95,12 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 
 ## Backlog
 
-- **2.8 — mods do Claude Code para o modo multi-instância** (decisão do usuário, 2026-10-16): tornar o paralelismo visível. Começa por um protótipo pequeno do painel. Esforço: M. Ideias aprovadas:
+- **2.8 — mods do Claude Code para o modo multi-instância** (decisão do usuário): tornar o paralelismo visível. Começa por um protótipo pequeno do painel. Esforço: M. Ideias aprovadas:
   1. **Painel "Frentes"**: uma linha por sessão ou worktree, com entrega, ciclo, tarefas em andamento e concluídas, reviewer e qa, tempo e o que falta (`ledger.py status --json`).
   2. **Faixa acima do prompt**: resumo em uma linha (entrega, ciclo, agentes rodando, recurso compartilhado ocupado, estado do gate).
   3. **Statusline**: modo autônomo ou supervisionado e quantos itens VALIDAR estão pendentes.
   4. **Avisos**: tarefa concluída, reprovação, gate READY e "outra sessão terminou".
-  5. **Comando `/frentes`**: lista as sessões e abre uma aba nova do terminal numa worktree já preparada, despachando o pedido por mensagem entre sessões. Do teste de 2026-10-16: a pasta nova pede confiança na primeira vez (só o usuário responde); a aba aberta a partir de uma sessão herda as variáveis `CLAUDE_CODE_*` (inclusive `CLAUDE_CODE_CHILD_SESSION`) e vira sessão filha, sem histórico salvo e invisível às outras sessões, então essas variáveis são limpas antes de abrir uma irmã; o pedido inicial vai por mensagem depois que a sessão aparece.
+  5. **Comando `/frentes`**: lista as sessões e abre uma aba nova do terminal numa worktree já preparada, despachando o pedido por mensagem entre sessões. Do teste: a pasta nova pede confiança na primeira vez (só o usuário responde); a aba aberta a partir de uma sessão herda as variáveis `CLAUDE_CODE_*` (inclusive `CLAUDE_CODE_CHILD_SESSION`) e vira sessão filha, sem histórico salvo e invisível às outras sessões, então essas variáveis são limpas antes de abrir uma irmã; o pedido inicial vai por mensagem depois que a sessão aparece.
   6. **Comando `/validar`**: percorre a lista VALIDAR item a item com perguntas e grava cada decisão no ledger.
   7. **Semáforo do recurso compartilhado**: quem usa o banco ou a porta agora e quem está na fila.
   8. **Linha do tempo da entrega**: as tarefas de cada agente ao longo do tempo, com tempo e tokens; dá o sinal para o teto de custo por entrega.
