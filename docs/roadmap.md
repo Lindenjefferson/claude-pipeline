@@ -2,7 +2,7 @@
 
 Backlog vivo do plugin. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin ou ideia adaptada do ECC) e o esforço estimado (P, M, G). Ao entregar um item, mover para a seção da versão correspondente com o PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
-## 2.7.0 — lições da etapa 3 (PR #?)
+## 2.7.0 — lições da etapa 3 (PR #14)
 
 Origem: a etapa 2 (retomada) e a etapa 3 do controle-financeiro com a 2.6.1, boa parte em modo autônomo, mais uma leitura de skills de auditoria de segurança de terceiros. Os 18 itens e o porquê de cada um estão na [proposta](proposta-2.7.0.md).
 
