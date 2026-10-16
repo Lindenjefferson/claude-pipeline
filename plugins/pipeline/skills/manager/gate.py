@@ -6,7 +6,9 @@
 Checks, in order: nothing is pending in the ledger (the current cycle is closed and every deferred item has a final
 decision); the tree is clean; every acceptance-criterion id of the plan recorded in the ledger (tokens like AC-T3-2)
 appears in a tracked test file (the globs on the "Arquivos de teste" line of the CLAUDE.md "Comandos" section,
-space-separated, fnmatch style; without that line, every tracked file that is not Markdown); every command of that
+space-separated globs where * and ? stay within one folder, **/ matches zero or more folders and {a,b} is either; a
+glob that matches no tracked file prints a warning; without that line, every tracked file that is not Markdown);
+every command of that
 section passes (lines like "- Testes: `<command>`", a parenthetical after the label ignored; Build, Typecheck, Lint,
 Testes and the optional Auditoria are run, and --cmd adds or overrides one); and no secret or .env file is added
 anywhere in <base>..HEAD, the whole history that a push would send. A check that does not apply is SKIP with the reason; only Testes is required. Prints READY or
@@ -15,7 +17,6 @@ ledger notes, deferred decisions and the delivery metrics: findings per cycle an
 task and agent, lessons added and automated) and stages it."""
 import argparse
 import datetime
-import fnmatch
 import importlib.util
 import json
 import os
@@ -87,6 +88,36 @@ def secret_findings(base):
     return scanner.scan(diff, sorted(set(names.split())), scanner.load_allowlist(cwd, "HEAD"))
 
 
+def glob_regex(pattern):
+    pattern, out, index = pattern.replace("\\", "/").removeprefix("./"), [], 0
+    while index < len(pattern):
+        char = pattern[index]
+        if pattern.startswith("**/", index):
+            out.append("(?:.*/)?")
+            index += 3
+            continue
+        if pattern.startswith("**", index):
+            out.append(".*")
+            index += 2
+            continue
+        end = pattern.find("]" if char == "[" else "}", index + 2) if char in "[{" else -1
+        if char == "*":
+            out.append("[^/]*")
+        elif char == "?":
+            out.append("[^/]")
+        elif char == "[" and end > 0:
+            body = pattern[index + 1:end]
+            out.append("[" + ("^" + body[1:] if body.startswith("!") else body) + "]")
+            index = end
+        elif char == "{" and end > 0 and "," in pattern[index:end]:
+            out.append("(?:" + "|".join(re.escape(part) for part in pattern[index + 1:end].split(",")) + ")")
+            index = end
+        else:
+            out.append(re.escape(char))
+        index += 1
+    return re.compile("".join(out) + r"\Z")
+
+
 def traceability(plan):
     if not plan:
         return True, "no plan in the ledger (start --plan)"
@@ -98,7 +129,13 @@ def traceability(plan):
     globs = next((value.split() for label, value in comandos() if label == TEST_FILES), None)
     names = [name for name in git("ls-files", "-z")[1].split("\0") if name and os.path.isfile(name)]
     if globs:
-        names = [name for name in names if any(fnmatch.fnmatch(name, pattern) for pattern in globs)]
+        tracked, names = names, []
+        for pattern in globs:
+            matched = [name for name in tracked if glob_regex(pattern).match(name)]
+            if not matched:
+                print(f"warning: test glob '{pattern}' matches no tracked file (Arquivos de teste in CLAUDE.md)",
+                      flush=True)
+            names += [name for name in matched if name not in names]
     else:
         names = [name for name in names if not name.lower().endswith(".md")]
     found = set()
