@@ -2,25 +2,22 @@
   "entry": "Bash(<command>)",
   "deny": [
     "Edit(.pipeline-secrets-allow)",
-    "Write(.pipeline-secrets-allow)",
-    "Bash(git commit --no-verify:*)",
-    "Bash(git commit -n:*)",
+    "Bash(git commit *--no-v*)",
+    "Bash(git commit -n*)",
+    "Bash(git commit * -n *)",
+    "Bash(git commit * -n)",
+    "Bash(git -c core.hooksPath*)",
     "Bash(sudo:*)",
     "Bash(git push --force:*)",
     "Bash(git push -f:*)",
     "Bash(chmod 777:*)"
   ],
+  "ask": [
+    "Bash(git push:*)"
+  ],
   "never_allow": [
-    "db push",
-    "db dump",
-    "--linked",
-    "--db-url",
-    "link",
-    "migration repair",
-    "secrets set",
     "deploy",
     "publish",
-    "vercel",
     "git push",
     "rm -rf",
     "sudo",
