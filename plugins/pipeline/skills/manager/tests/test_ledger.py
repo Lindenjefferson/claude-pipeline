@@ -394,6 +394,13 @@ r = run("claim", "--task", "W1", cwd=task_tree)
 check("from a task worktree with no ledger, claim writes to the main worktree's ledger",
       r.returncode == 0 and "W1" in status()["in_flight"], r.stderr)
 run("release", "--task", "W1", cwd=task_tree)
+subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "task commit"], cwd=task_tree, check=True,
+               capture_output=True)
+run("add", "--agent", "dev", "--task", "W2", "--verdict", "DONE", cwd=task_tree)
+main_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
+check("a run added from a task worktree records the head of the worktree that owns the ledger",
+      [entry for entry in map(json.loads, open(os.path.join(repo, ".superpowers", "ledger.jsonl"), encoding="utf-8"))
+       if entry.get("task") == "W2"][0]["head"] == main_head)
 r = run("start", "--slug", "front", cwd=front_tree)
 check("start in a worktree creates that worktree's own ledger",
       r.returncode == 0 and os.path.exists(os.path.join(front_tree, ".superpowers", "ledger.jsonl")), r.stderr)

@@ -59,10 +59,14 @@ DURATION = re.compile(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?|(\d+)")
 LEDGER = os.path.join(".superpowers", "ledger.jsonl")
 
 
-def git_head(rev="HEAD"):
-    result = subprocess.run(["git", "rev-parse", "--verify", "--quiet", rev + "^{commit}"], capture_output=True,
-                            text=True)
-    return result.stdout.strip() if result.returncode == 0 else None
+def git_head(rev="HEAD", ledger=None):
+    where = os.path.dirname(os.path.abspath(ledger)) if ledger else None
+    for cwd in ([where] if where and os.path.isdir(where) else []) + [None]:
+        result = subprocess.run(["git", "rev-parse", "--verify", "--quiet", rev + "^{commit}"], capture_output=True,
+                                text=True, cwd=cwd)
+        if result.returncode == 0:
+            return result.stdout.strip()
+    return None
 
 
 def git_path(*args):
@@ -179,7 +183,7 @@ def start(args):
     if entries and not args.archive:
         sys.exit(f"{args.ledger} already has a delivery ({entries[0].get('slug')}); "
                  "run start --archive to move it to ledger-<slug>.jsonl and start fresh")
-    base = git_head(args.base)
+    base = git_head(args.base, args.ledger)
     if base is None:
         sys.exit(f"not a commit: {args.base}")
     if entries:
@@ -223,7 +227,8 @@ def add(args):
         sys.exit("FAIL needs open Critical/Important findings (--critical or --important > 0) and PASS none")
     entry = {"type": "run", "agent": args.agent, "task": args.task, "verdict": args.verdict, "open": blocking,
              "critical": args.critical, "important": args.important, "minor": args.minor,
-             "origin": origins(args.origin, blocking + args.minor), "head": git_head() or "", "summary": args.summary}
+             "origin": origins(args.origin, blocking + args.minor), "head": git_head(ledger=args.ledger) or "",
+             "summary": args.summary}
     if args.seconds is not None:
         entry["seconds"] = seconds(args.seconds)
     write(args.ledger, entry)
