@@ -49,7 +49,15 @@ Vai para a 2.8.1 (decisão do usuário), para a 2.8 ficar focada no andamento e 
 8. **Caminho mais fraco**: o `reviewer` pergunta que outras entradas chegam ao mesmo efeito e não foram checadas. Uma linha. Onde: `agents/reviewer.md`.
 9. **Checklist**: as cinco lacunas de `checklists/general.md` (export e backup no escopo de quem pede; registro excluído logicamente fora de busca, lookup e restauração; default de migration nas linhas antigas; acesso que não sobrevive à remoção de um membro; checagem de origem nas mutações). Onde: `checklists/general.md`.
 
-## D. Enxuto
+## D. Rodada de design de tela (pedido do usuário, depois da aprovação)
+
+Pedido do usuário a partir de uma sessão de design do controle-financeiro: o Dashboard redesenhado numa página de comparação antes do código encaixou melhor os cartões na tela grande. Entra na 2.8 (decisão do usuário), só como prompt e checklist, sem um terceiro ponto de parada.
+
+10. **Rodada de design** antes do plano, quando o pedido cria ou redesenha uma tela: o manager (a sessão principal, que tem a ferramenta Skill; o `dev` não tem) carrega a `frontend-design` (e uma skill de visualização de dados, se houver, para gráficos e dashboards) e produz uma página de comparação com cada tela na menor largura e no desktop, em todos os temas, com dados de exemplo. Tokens de cor (claro e escuro, contraste medido), regras de layout por largura e o mock viram insumo do plano; a página é aprovada no ✋ 1 com o plano (no modo autônomo, `note --validar`). Pedido que cria ou redesenha tela é pelo menos padrão. Onde: `manager/SKILL.md`, README (plugin opcional).
+11. **Revisão contra o mock**: o `reviewer` confere a tela contra o mock e os tokens aprovados. Onde: `agents/reviewer.md`.
+12. **Cores medidas**: no checklist, cor só por token, contraste AA calculado em todos os temas, paleta categórica conferida para daltonismo por cálculo e cores de significado reservadas, com a marca e as categóricas fora das matizes delas. Onde: `checklists/general.md`.
+
+## E. Enxuto
 
 - A regra do manager que manda medir a duração sai, substituída pelos números do aviso de término (item 1).
 - Ao tocar `manager/SKILL.md`, os trechos que só repetem o que `ledger.py status` já mostra viram apontamento.
