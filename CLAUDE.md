@@ -23,7 +23,7 @@ Cada componente tem **uma** fonte de verdade, o próprio arquivo. Os outros docu
 | Regras exatas do ledger (ciclos, pendências, métricas) | docstring de [`ledger.py`](plugins/pipeline/skills/manager/ledger.py) |
 | Checagens do gate e relatório de qualidade | docstring de [`gate.py`](plugins/pipeline/skills/manager/gate.py) |
 | Scan de segredos, UTF-8, caracteres invisíveis, allowlist e falso positivo | docstring de [`hooks/pre-commit-secret-scan.py`](plugins/pipeline/hooks/pre-commit-secret-scan.py) |
-| Hooks de sessão e de ferramenta (retomada após compactação, servidor de dev solto) | docstrings de [`hooks/session-start.py`](plugins/pipeline/hooks/session-start.py) e [`hooks/block-dev-server.py`](plugins/pipeline/hooks/block-dev-server.py), registrados em [`hooks/hooks.json`](plugins/pipeline/hooks/hooks.json) |
+| Hooks de sessão e de ferramenta (retomada após compactação, pular o `pre-commit`, servidor de dev solto) | docstrings de [`hooks/session-start.py`](plugins/pipeline/hooks/session-start.py) e [`hooks/bash-guard.py`](plugins/pipeline/hooks/bash-guard.py), registrados em [`hooks/hooks.json`](plugins/pipeline/hooks/hooks.json) |
 | Testes dos scripts | `plugins/pipeline/skills/manager/tests/`, `plugins/pipeline/hooks/tests/` |
 | Versões entregues, notas de atualização, backlog | [`docs/roadmap.md`](docs/roadmap.md) |
 | Apresentação, começo rápido, componentes em uma linha | [`README.md`](README.md) |

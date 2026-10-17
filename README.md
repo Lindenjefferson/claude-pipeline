@@ -61,7 +61,7 @@ O marketplace também pode vir direto do GitHub (`claude plugin marketplace add 
 | [`spec-checklist.md`](plugins/pipeline/skills/manager/templates/spec-checklist.md) | O que toda spec e todo plano respondem, com o pré-mortem de cada escrita. |
 | [Hook de segredos e UTF-8](plugins/pipeline/hooks/pre-commit-secret-scan.py) | `pre-commit` do git que bloqueia `.env`, linhas com cara de segredo e linhas adicionadas que não são UTF-8 ou têm caracteres invisíveis; o docstring explica falso positivo e a correção. |
 | [Hook de retomada](plugins/pipeline/hooks/session-start.py) | `SessionStart` (`compact` e `resume`): devolve ao manager o `status` do ledger. Registrado em [`hooks.json`](plugins/pipeline/hooks/hooks.json). |
-| [Hook de servidor de dev](plugins/pipeline/hooks/block-dev-server.py) | `PreToolUse` em `Bash`: nega o comando da linha "Rodar em desenvolvimento" do `CLAUDE.md` do projeto fora do modo background. Sem a linha, não faz nada. |
+| [Guarda do Bash](plugins/pipeline/hooks/bash-guard.py) | `PreToolUse` em `Bash`: nega pular o `pre-commit` (`--no-verify`, `-n`, `core.hooksPath`) e o comando da linha "Rodar em desenvolvimento" do `CLAUDE.md` do projeto fora do modo background. |
 
 ## Atualização
 

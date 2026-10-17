@@ -1,7 +1,7 @@
 import json, os, subprocess, sys, tempfile, time
 
 HOOKS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-SCRIPT = os.path.join(HOOKS, "block-dev-server.py")
+SCRIPT = os.path.join(HOOKS, "bash-guard.py")
 results = []
 
 
@@ -74,9 +74,45 @@ check("without a CLAUDE.md the hook does nothing", run(bare, "npm run dev") == (
 garbage = subprocess.run([sys.executable, SCRIPT], input="not json", capture_output=True, text=True)
 check("garbage on stdin never blocks", garbage.returncode == 0 and garbage.stdout == "", garbage.stderr)
 
+def skips(command, background=False, folder=None):
+    reason = run(folder or bare, command, background=background)[1]
+    return reason is not None and reason[0] == "deny" and "pre-commit" in reason[1]
+
+
+for command in ('git commit --no-verify -m "x"', 'git commit -m "x" --no-verify', 'git commit -nm "x"',
+                "git commit -am wip -n", "git commit -an -m ''", "git commit --no-veri -m x",
+                'git commit "--no-verify" -m x', "cd sub && git commit -n -m x", "git -C repo commit -n -m x",
+                "git -c core.hooksPath=/dev/null commit -m x", "git -c CORE.HOOKSPATH=x commit -m x",
+                "git --config-env=core.hooksPath=EMPTY commit -m x", "GIT_CONFIG_KEY_0=core.hooksPath git commit -m x",
+                "git config core.hooksPath /tmp/none", "git config set --local core.hooksPath x",
+                "echo ok; git commit -n -m x", "echo $(git commit -n -m x)", "bash -c 'git commit -n -m x'",
+                "/usr/bin/git commit -n -m x", "git.exe commit --no-verify -m x",
+                "git commit -n -m \"$(cat <<'EOF'\nmsg\nEOF\n)\"", "echo a#b; git commit -n -m x",
+                'git commit -m "#12 fix" -n', "git commit -m x 2>&1 -n", "git commit -m x &>log -n",
+                "env git commit -n -m x", "env -i PATH=/bin nohup git commit -n -m x",
+                "env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/x git commit -m x",
+                "export GIT_CONFIG_KEY_0=core.hooksPath; git commit -m x", "time git commit -n -m x",
+                "command git commit -n -m x", "if true; then git commit -n -m x; fi", "{ git commit -n -m x; }",
+                "! git commit -n -m x", "bash -lc 'git commit -n -m x'", "sh -ec 'git commit -n -m x'",
+                "git config --unset core.hooksPath", "git commit -n -m x # don't",
+                "git commit --no-verify -F - <<'MSG-END'\nit's done\nMSG-END"):
+    check(f"skipping the pre-commit hook is denied: {command!r}", skips(command))
+check("skipping the hook is denied in background too", skips("git commit -n -m x", background=True))
+check("skipping the hook is denied where the dev server is configured", skips("git commit -n -m x", folder=configured))
+for command in ('git commit -m "docs: never use --no-verify"', 'git commit -m "fix: grep -n finds it"',
+                "git commit -m \"$(cat <<'EOF'\nfix: explain --no-verify and git commit -n\nEOF\n)\"",
+                "git commit -F - <<'EOF'\nchore: -n --no-verify\nEOF", "git commit -uno -m x",
+                "git commit --no-verbose -m x", "git commit --amend --no-edit", "git commit -m x -- -n",
+                "git log -n 3", "echo git commit -n", "git config --get core.hooksPath", "git config core.hooksPath",
+                "grep -n x file && git commit -m y", 'git commit --message "-n items"',
+                "git commit --author 'A <a@x>' --date -n -m x", "cat > notes.md <<'MD-EOF'\ngit commit -n -m x\nMD-EOF",
+                "cat > notes.md <<\\EOF\ngit commit -n -m x\nEOF", "env | grep GIT",
+                'git commit -m "unbalanced'):
+    check(f"a commit that keeps the hook passes: {command!r}", run(bare, command)[1] is None, str(run(bare, command)))
+
 config = json.load(open(os.path.join(HOOKS, "hooks.json"), encoding="utf-8"))
 pre = config["hooks"]["PreToolUse"]
-check("hooks.json registers block-dev-server.py for Bash", len(pre) == 1 and pre[0]["matcher"] == "Bash"
-      and "${CLAUDE_PLUGIN_ROOT}/hooks/block-dev-server.py" in pre[0]["hooks"][0]["command"], json.dumps(config))
+check("hooks.json registers bash-guard.py for Bash", len(pre) == 1 and pre[0]["matcher"] == "Bash"
+      and "${CLAUDE_PLUGIN_ROOT}/hooks/bash-guard.py" in pre[0]["hooks"][0]["command"], json.dumps(config))
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
