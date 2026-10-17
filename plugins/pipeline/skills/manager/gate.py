@@ -129,8 +129,7 @@ def secret_findings(base):
                                 f"{base}..HEAD", "--"] + scanner.EXCLUDES, cwd)
     names = scanner.git_checked(["log", "--name-only", "-z", "-m", "--diff-filter=d", "--format=", f"{base}..HEAD"],
                                 cwd)
-    return scanner.scan(diff, sorted({name.strip("\n") for name in names.split("\0")} - {""}),
-                        scanner.load_allowlist(cwd, "HEAD"))
+    return scanner.scan(diff, scanner.names(names), scanner.load_allowlist(cwd, "HEAD"))
 
 
 def glob_regex(pattern):

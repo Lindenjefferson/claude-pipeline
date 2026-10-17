@@ -19,6 +19,9 @@ must_flag = {
     "underscored passphrase under a password key": "+pass" "word: " + "correct_horse_" "battery_staple",
     "quoted value that only starts with a placeholder word": "+sec" "ret: " + q("example-real-" "QnX8m2Kp9Lz"),
     "random snake-shaped value": "+api_k" "ey = " + "xkqpzl_mnvbrt_" "wyasdf",
+    "unquoted password with symbols, YAML": "+POSTGRES_PASS" "WORD: " + "Pr0d#Db!" "2024x",
+    "unquoted password with symbols, properties": "+spring.datasource.pass" "word=" + "Pr0d#Db!" "2024x",
+    "unquoted secret with symbols": "+client_sec" "ret: " + "Xk#29fLq" "81!Zp",
 }
 must_pass = {
     "A9 SQL self-assignment": "+update auth.users set encrypted_pass" "word = encrypted_password where id = '00000000-0000-0000-0000-000000000001';",
@@ -47,21 +50,29 @@ must_pass = {
     "camelCase value under a key": "+api_k" "ey: " + "publishableKey" "FromSettings",
     "snake value under a password key naming a code word": "+pass" "word = " + "user_input_" "value",
     "quoted prose": "+password: " + q("Senha incorreta, tente de novo"),
+    "unquoted kebab phrase under a password key": "+# pass" "word: min-12-chars",
+    "unquoted call under a password key": "+pass" "word: z.string().min(12, " + q("Senha#Fraca1") + ")",
+    "unquoted regex under a password key": "+pass" "word: ^(?=.*[A-Z])(?=.*#).{12,}$",
+    "unquoted URL under a secret key": "+sec" "ret: https://vault.example.com/kv#app-2024",
+    "unquoted short password": "+pass" "word: Senha@123",
+    "unquoted templated secret": "+sec" "ret: ${{ secrets.DEPLOY_KEY_2024 }}",
+    "unquoted symbols under a key that is not a password": "+api_key_label: " + "Pr0d#Db!" "2024x",
 }
 results = []
+hunk = lambda text: f"@@ -0,0 +1,{text.count(chr(10)) + 1} @@\n" + text
 for name, line in must_flag.items():
-    ok = bool(m.scan(line, []))
+    ok = bool(m.scan(hunk(line), []))
     results.append(ok)
     print("PASS" if ok else "FAIL", "flags:", name)
 for name, line in must_pass.items():
-    findings = m.scan(line, [])
+    findings = m.scan(hunk(line), [])
     ok = not findings
     results.append(ok)
     print("PASS" if ok else "FAIL", "allows:", name, "" if ok else findings)
 
 flagged = "+password = " + q("S3cr3tP4ss" "w0rd!2026")
 mark = m.fingerprint(None, flagged[1:])
-findings = m.scan(flagged, [])
+findings = m.scan(hunk(flagged), [])
 ok = len(findings) == 1 and f"fingerprint {mark}" in findings[0]
 results.append(ok)
 print("PASS" if ok else "FAIL", "finding carries the line fingerprint", findings)
@@ -69,11 +80,11 @@ ok = m.fingerprint(None, "  password  =\t" + q("S3cr3tP4ss" "w0rd!2026") + "  ")
 results.append(ok)
 print("PASS" if ok else "FAIL", "fingerprint ignores whitespace differences")
 other = "+token = " + q("abcdefghijkl" "mnopqrstuv1234")
-findings = m.scan(flagged + "\n" + other, [], {mark})
+findings = m.scan(hunk(flagged + "\n" + other), [], {mark})
 ok = len(findings) == 1 and m.fingerprint(None, other[1:]) in findings[0]
 results.append(ok)
 print("PASS" if ok else "FAIL", "allowlist suppresses only the matching line", findings)
-diff = "+++ b/src/db.sql\n" + flagged
+diff = "+++ b/src/db.sql\n" + hunk(flagged)
 findings = m.scan(diff, [])
 ok = len(findings) == 1 and " in src/db.sql " in findings[0]
 results.append(ok)
@@ -81,9 +92,24 @@ print("PASS" if ok else "FAIL", "finding names the file", findings)
 ok = m.fingerprint("src/a.sql", flagged[1:]) != m.fingerprint("src/b.sql", flagged[1:])
 results.append(ok)
 print("PASS" if ok else "FAIL", "fingerprint depends on the file path")
-two = "+++ b/src/a.sql\n" + flagged + "\n+++ b/src/b.sql\n" + flagged
+two = "+++ b/src/a.sql\n" + hunk(flagged) + "\n+++ b/src/b.sql\n" + hunk(flagged)
 findings = m.scan(two, [], {m.fingerprint("src/a.sql", flagged[1:])})
 ok = len(findings) == 1 and " in src/b.sql " in findings[0]
 results.append(ok)
 print("PASS" if ok else "FAIL", "an entry for one file does not cover the same line in another", findings)
+inside = "+++ b/src/x.txt\n@@ -0,0 +1,2 @@\n+++ " + "AKIAABCDEF" "GHIJKLMNOP\n+ok"
+findings = m.scan(inside, [])
+ok = len(findings) == 1 and " in src/x.txt " in findings[0]
+results.append(ok)
+print("PASS" if ok else "FAIL", "an added line that starts with ++ is content, not a file header", findings)
+context = "+++ b/src/y.txt\n@@ -1,2 +1,3 @@\n kept\n-gone\n+" + "AKIAABCDEF" "GHIJKLMNOP\n kept too"
+findings = m.scan(context, [])
+ok = len(findings) == 1 and " in src/y.txt " in findings[0]
+results.append(ok)
+print("PASS" if ok else "FAIL", "context and removed lines are counted by the hunk header", findings)
+wide = "+++ b/cfg.txt\n@@ -0,0 +1 @@\n+" + "".join(c + "\0" for c in "KEY=AKIAABCDEF" "GHIJKLMNOP")
+findings = m.scan(wide, [])
+ok = len(findings) == 1
+results.append(ok)
+print("PASS" if ok else "FAIL", "a UTF-16 line (a NUL after every character) is scanned", findings)
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
