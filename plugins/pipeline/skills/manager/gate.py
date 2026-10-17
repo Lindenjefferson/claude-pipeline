@@ -21,10 +21,11 @@ shows it) and still runs the branch's commands. Prints READY or NOT READY and ex
 
 <base> is --base (an error when it is not a commit), or else the base the ledger recorded at start, or else the
 merge base with the default branch. With --report, the gate writes and stages docs/quality-reports/<date>-<slug>.md
-(checks, commits, ledger mode and notes, the VALIDAR list, deferred decisions, a changed "Comandos" section and the
-delivery metrics: findings per cycle and origin, fix rounds, time per cycle, task and agent, lessons added and
-automated) before running the commands, so the project's own tests check it too; READY rewrites its check lines,
-NOT READY removes it, and a draft of the same report left staged by a run that was killed is removed first."""
+(checks, commits, ledger mode and notes, the VALIDAR list with the user's decision or pending, deferred decisions, a
+changed "Comandos" section and the delivery metrics: findings per cycle and origin, fix rounds, time per cycle, task
+and agent, tokens per agent and task, lessons added and automated) before running the commands, so the project's
+own tests check it too; READY rewrites its check lines, NOT READY removes it, and a draft of the same report left
+staged by a run that was killed is removed first."""
 import argparse
 import datetime
 import difflib
@@ -248,6 +249,17 @@ def time_lines(metrics):
     return lines + [""]
 
 
+def token_lines(metrics):
+    tokens = metrics.get("tokens")
+    if not tokens or not tokens["agents"]:
+        return []
+    unmeasured = tokens["unmeasured"]
+    agents = ", ".join(f"{agent} {count}" for agent, count in tokens["agents"].items())
+    tasks = ", ".join(f"{task} {count}" for task, count in tokens["tasks"].items())
+    return [f"- Tokens: {agents} ({unmeasured} run{'' if unmeasured == 1 else 's'} unmeasured)",
+            f"- Task tokens: {tasks or '-'}", ""]
+
+
 def metrics_lines(metrics):
     if not metrics:
         return []
@@ -267,7 +279,7 @@ def metrics_lines(metrics):
     lines += ["", f"Lessons: {len(metrics['lessons'])} ({automated} automated)"]
     lines += [f"- {lesson['text']}" + (f" (check: {lesson['check']})" if lesson["check"] else "")
               for lesson in metrics["lessons"]]
-    return lines + [""] + time_lines(metrics)
+    return lines + [""] + time_lines(metrics) + token_lines(metrics)
 
 
 def verdict(ok, detail):
@@ -295,7 +307,8 @@ def write_report(slug, base, head, checks, ledger, changed):
         lines += ["Mode: autonomous"] if ledger.get("autonomous") else []
         lines += [f"- note: {text}" for text in ledger["notes"]]
         if ledger.get("validar"):
-            lines += ["", "## VALIDAR", ""] + [f"- {text}" for text in ledger["validar"]]
+            lines += ["", "## VALIDAR", ""] + [f"- {item['id']} {item['text']} -> {item['decision'] or 'pending'}"
+                                               for item in ledger["validar"]]
         if ledger.get("deferred"):
             lines += ["", "## Deferred", ""]
             lines += [f"- {item['id']} {item['text']} -> {item['decision']}" for item in ledger["deferred"]]

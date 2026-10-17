@@ -110,6 +110,52 @@ for command in ('git commit -m "docs: never use --no-verify"', 'git commit -m "f
                 'git commit -m "unbalanced'):
     check(f"a commit that keeps the hook passes: {command!r}", run(bare, command)[1] is None, str(run(bare, command)))
 
+LEDGER_PY = os.path.join(HOOKS, "..", "skills", "manager", "ledger.py")
+repo = tempfile.mkdtemp(prefix="guard_")
+
+
+def sh(*args):
+    subprocess.run(args, cwd=repo, check=True, capture_output=True)
+
+
+for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t.com"), ("config", "user.name", "t"),
+             ("commit", "-q", "--allow-empty", "-m", "base")):
+    sh("git", *args)
+sh(sys.executable, LEDGER_PY, "start", "--slug", "x")
+
+
+def reaches_main(command):
+    reason = run(repo, command)[1]
+    return reason is not None and reason[0] == "deny" and "autonomous" in reason[1]
+
+
+main_pushes = ("git push origin main", "git push origin HEAD:main", "git push origin feat/x:main",
+               "git push -u origin +main", "git push --all", "git push --mirror origin",
+               "git push origin refs/heads/main", "gh pr merge 20 --merge", "cd . && git push origin main",
+               "git push origin --delete main", "git -C . push origin main")
+check("supervised: a push to the main branch is left to the ask rule", not reaches_main("git push origin main"))
+sh(sys.executable, LEDGER_PY, "mode", "autonomous")
+for command in main_pushes + ("git push", "git merge feat/x", "git merge --no-ff feat/x"):
+    check(f"autonomous, on the main branch: denied {command!r}", reaches_main(command))
+check("autonomous, on the main branch: denied 'git push origin @'", reaches_main("git push origin @"))
+for command in ("git merge --abort", "git status", "git log -n 3", 'git commit -m "push to main later"',
+                "git push --tags", "git push origin --tags"):
+    check(f"autonomous, on the main branch: passes {command!r}", run(repo, command)[1] is None, str(run(repo, command)))
+sh("git", "checkout", "-q", "-b", "feat/x")
+for command in main_pushes:
+    check(f"autonomous, on a work branch: denied {command!r}", reaches_main(command))
+for command in ("git checkout main && git merge feat/x", "git switch main && git merge feat/x && git push",
+                "git switch -q main; git push", "gh -R o/r pr merge 3", "gh api -X PUT repos/o/r/pulls/3/merge"):
+    check(f"autonomous, on a work branch: denied {command!r}", reaches_main(command))
+for command in ("git push", "git push -u origin feat/x", "git push origin HEAD", "git merge main",
+                "git merge --no-ff task-1", "gh pr view 20", "git switch main && git switch feat/x && git push",
+                "git switch -c main2 && git push", "gh api repos/o/r/pulls/3"):
+    check(f"autonomous, on a work branch: passes {command!r}", run(repo, command)[1] is None, str(run(repo, command)))
+sub = os.path.join(repo, "src")
+os.makedirs(sub)
+check("autonomous: the ledger is found from a subfolder", run(repo, "git push origin main", cwd=sub)[1] is not None)
+check("no ledger: a push to the main branch is left to the ask rule", run(bare, "git push origin main")[1] is None)
+
 config = json.load(open(os.path.join(HOOKS, "hooks.json"), encoding="utf-8"))
 pre = config["hooks"]["PreToolUse"]
 check("hooks.json registers bash-guard.py for Bash", len(pre) == 1 and pre[0]["matcher"] == "Bash"

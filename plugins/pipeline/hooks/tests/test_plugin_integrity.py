@@ -28,7 +28,7 @@ def front_matter(path):
 
 
 hidden = []
-for path in files(".md", ".py", ".json", ".jsonl", ".gitignore", ".txt"):
+for path in files(".md", ".py", ".json", ".jsonl", ".gitignore", ".txt", ".js", ".ts"):
     for number, line in enumerate(open(path, encoding="utf-8").read().split("\n"), 1):
         for found in scan.INVISIBLE.finditer(line):
             if not (found.group() == chr(0xFEFF) and number == 1 and found.start() == 0):
@@ -52,6 +52,11 @@ commands = [hook["command"] for groups in config["hooks"].values() for group in 
 RISKY = re.compile(r"\b(curl|wget|sudo|eval|nc|ssh)\b|2>\s*/dev/null|\|\|\s*(true|:)")
 check("hooks.json commands make no network call, privilege change or silent failure",
       commands and not any(RISKY.search(command) for command in commands), commands)
+check("hooks.json loads the progress mod", config.get("modules") == ["./andamento.js"], config.get("modules"))
+mod = open(os.path.join(ROOT, "hooks", "andamento.js"), encoding="utf-8").read()
+check("the progress mod only reads: no network, model, prompt, tool approval, store or file write",
+      not re.search(r"\$\.(http|model|prompt|tool|store|fs\.write|session\.send|env\.set)\b", mod)
+      and "'tool.call'" not in mod and "'tool.check'" not in mod, "")
 
 settings = json.load(open(os.path.join(ROOT, "skills", "kickoff", "templates", "settings.allowlist.json"),
                           encoding="utf-8"))
