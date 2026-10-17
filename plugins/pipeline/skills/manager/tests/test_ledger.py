@@ -448,6 +448,12 @@ tokens = status(TOKENS)["metrics"]["tokens"]
 check("add --tokens records the tokens of a run, summed per agent, task and cycle",
       r.returncode == 0 and tokens["agents"] == {"dev": 98357, "reviewer": 40000} and tokens["tasks"] == {"T1": 98357}
       and status(TOKENS)["metrics"]["cycles"][0]["tokens"] == 138357 and tokens["unmeasured"] == 1, (r.stderr, tokens))
+state = status(TOKENS)
+check("status --json gives the ledger's path and the current cycle's runs, for a progress table",
+      os.path.samefile(state["ledger"], os.path.join(repo, TOKENS))
+      and [(run["agent"], run["task"], run["verdict"], run.get("seconds"), run.get("tokens")) for run in state["runs"]]
+      == [("dev", "T1", "DONE", 211, 98357), ("reviewer", "", "PASS", None, 40000), ("dev", "fix-1", "DONE", None, None)],
+      state.get("runs"))
 for bad in ("-5", "many", "1.5"):
     check(f"--tokens {bad} is refused", run("add", "--agent", "dev", "--task", "T2", "--verdict", "DONE", "--tokens", bad,
                                             ledger=TOKENS).returncode != 0)

@@ -2,7 +2,7 @@
 
 **Status: aprovada pelo usuário, com três escolhas:** a trava do item 4 nega só o que chega na branch principal (push para ela, `gh pr merge` e merge com ela em checkout; o push da branch de trabalho segue o `ask`); a seção C vai para uma 2.8.1; a faixa do item 2 fica sempre visível com entrega aberta.
 
-Origem: a revisão da 2.8 do backlog contra as etapas 4 e 5 do controle-financeiro e a documentação atual do Claude Code (decisão do usuário), mais o pedido de uma tabela de progresso viva por ciclo ("sempre fico perguntando como tá o andamento"). O que saiu da lista e por quê está no [roadmap](roadmap.md).
+Origem: a revisão da 2.8 do backlog contra as etapas 4 e 5 do controle-financeiro e a documentação atual do Claude Code (decisão do usuário), mais o pedido de uma tabela de progresso viva por ciclo ("sempre fico perguntando como tá o andamento"). Saíram da lista original: a statusline (plugin não instala `statusLine`; a faixa mostra o modo e os VALIDAR); o `/frentes` abrindo abas (só no Windows e frágil: título da aba, variáveis `CLAUDE_CODE_*` herdadas, confiança da pasta nova, mensagem lida só quando a sessão é usada; não há API oficial; as frentes ficam listadas no painel); o semáforo do recurso compartilhado (o manager já serializa e registra nas notas); a linha do tempo em gráfico (ficam tempo e tokens por execução); a página de telas; o `/aprovar` (a trava não depende dele); o aviso de decisão pendente separado (entrou nos avisos). O WSL2 saiu da 2.8: não resolve o gargalo medido, a suíte e2e longa.
 
 Cada item diz o problema, a mudança e onde ela entra. **Teste primeiro** marca o que muda `ledger.py`, `gate.py` ou um hook: o teste novo falha antes da mudança. **Decisão** marca o que tem mais de um caminho razoável.
 
@@ -16,7 +16,7 @@ Cada item diz o problema, a mudança e onde ela entra. **Teste primeiro** marca 
    - Onde: `ledger.py`, `gate.py`, `manager/SKILL.md`.
 
 2. **Tabela de progresso viva** (mod do Claude Code, a partir da v2.1.287). Um módulo JavaScript dentro do próprio plugin (`hooks/andamento.js`, listado em `modules` no `hooks.json`, ao lado dos hooks de hoje).
-   - **Faixa acima do prompt**, só quando o ledger da worktree tem uma entrega aberta: `pipeline · etapa-5 · ciclo 2 · ▶ T2.1 14m · ▶ T2.2 9m · reviewer — · qa — · VALIDAR 3 · gate: falta qa`, com o modo autônomo marcado.
+   - **Faixa acima do prompt**, só quando o ledger da worktree tem uma entrega aberta: `pipeline · etapa-5 · cycle 2 · autonomous · ▶ T2.1 14m · reviewer FAIL · qa — · VALIDAR 1 · next: <a primeira pendência>` (os textos do plugin ficam em inglês, como os do `ledger.py`), com o modo autônomo marcado.
    - **`/andamento`**, que abre um painel na hora, mesmo com o manager no meio de um trabalho: a tabela do ciclo atual (tarefa, estado, tempo, tokens), reviewer e qa (veredito, achados, tempo), pendências, VALIDAR e adiados abertos; uma linha por ciclo anterior; e as outras frentes (cada worktree com ledger próprio, uma linha cada). Onde o mod não desenha (`claude -p`, sessão WSL do app), `/andamento` responde em texto.
    - **Dados**: o mod roda `ledger.py status --json` e só desenha; nenhuma regra no JavaScript. Para não rodar o Python à toa, confere a data do arquivo do ledger a cada 5 s e só relê quando ela muda; o tempo decorrido corre no próprio mod.
    - **Testes**: `claude plugin test plugins/pipeline` (testes `.test.ts` que simulam o `ledger.py`), somado à seção "Testar e validar" do `CLAUDE.md`.

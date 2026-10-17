@@ -435,11 +435,11 @@ def status(args):
                 for task, at in held.items()]
     pending += [f"deferred {item['id']} has no decision: {item['text']}" for item in items if not item["decision"]]
     plans = [entry["plan"] for entry in entries if entry["type"] == "plan"]
-    report = {"slug": entries[0].get("slug"), "base": entries[0].get("base"),
+    report = {"slug": entries[0].get("slug"), "base": entries[0].get("base"), "ledger": os.path.abspath(args.ledger),
               "plan": plans[-1] if plans else entries[0].get("plan"),
               "cycle": len(groups), "in_flight": list(held), "dispatched": held,
               "tasks": {task: entry["verdict"] for task, entry in state["tasks"].items()},
-              "reviewer": state["reviewer"], "qa": state["qa"], "pending": pending,
+              "reviewer": state["reviewer"], "qa": state["qa"], "runs": groups[-1], "pending": pending,
               "autonomous": auto, "deferred": items,
               "notes": [entry["text"] for entry in entries if entry["type"] == "note" and not entry.get("validar")],
               "validar": validar(entries),
