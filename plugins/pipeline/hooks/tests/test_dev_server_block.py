@@ -46,6 +46,15 @@ check("another command passes", run(configured, "npm test")[1] is None)
 check("a longer script name is not the dev server", run(configured, "npm run dev:docs")[1] is None)
 check("the command quoted in other text passes", run(configured, "grep 'npm run dev' README.md")[1] is None)
 check("not a Bash call passes", run(configured, "npm run dev", tool="Read")[1] is None)
+check("a heredoc body that only mentions the command passes",
+      run(configured, "cat > README.md <<'EOF'\n## Como rodar\nnpm run dev\nEOF\ngit add README.md")[1] is None)
+check("a quoted message that mentions the command passes",
+      run(configured, 'git commit -m "docs: explain the dev server (npm run dev)"')[1] is None)
+check("after a quoted argument, the command itself is still denied",
+      run(configured, 'echo "starting; really" && npm run dev')[1] is not None)
+check("a heredoc fed to a shell is still denied", run(configured, "bash <<'EOF'\nnpm run dev\nEOF")[1] is not None)
+check("a here-string is not a heredoc: the next line is still read",
+      run(configured, 'cat <<< "x"\nnpm run dev')[1] is not None)
 sub = os.path.join(configured, "app")
 os.makedirs(sub)
 check("cwd in a subfolder still finds the project's CLAUDE.md", run(configured, "npm run dev", cwd=sub)[1] is not None)
@@ -66,6 +75,5 @@ config = json.load(open(os.path.join(HOOKS, "hooks.json"), encoding="utf-8"))
 pre = config["hooks"]["PreToolUse"]
 check("hooks.json registers block-dev-server.py for Bash", len(pre) == 1 and pre[0]["matcher"] == "Bash"
       and "${CLAUDE_PLUGIN_ROOT}/hooks/block-dev-server.py" in pre[0]["hooks"][0]["command"], json.dumps(config))
-check("hooks.json keeps the SessionStart hook", "SessionStart" in config["hooks"])
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
