@@ -2,7 +2,18 @@
 
 Backlog vivo do plugin. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin ou ideia adaptada do ECC) e o esforço estimado (P, M, G). Ao entregar um item, mover para a seção da versão correspondente com o PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
-## 2.7.0 — lições da etapa 3 (PR #14)
+## 2.7.1 — lições da etapa 4 e revisão do plugin (PR #19)
+
+Origem: a etapa 4 do controle-financeiro, rodada inteira na 2.7.0 quase toda em modo autônomo, e uma revisão do plugin inteiro pedida pelo usuário (scripts e prompts), com cada achado reproduzido ou conferido. Os itens e o porquê de cada um estão na [proposta](proposta-2.7.1.md).
+
+- [x] **Modo autônomo não para sozinho**: heartbeat (job recorrente da sessão que roda o `status` e segue); relatório com a worktree parada vale como término (o manager para o agente e integra); 4ª rodada da revisão do plano restrita às correções; no máximo 3 rodadas de correção por ciclo, depois a entrega para.
+- [x] **Ledger**: `waive` para o FAIL cujos achados foram descartados ou aceitos (antes travava a entrega); `plan --path`; ledger achado de dentro de uma worktree, com o head da worktree dona do ledger; contagem negativa, duração sem unidade e linha truncada recusadas.
+- [x] **Gate**: fim de cinco READY falsos (commit depois da última revisão, comando vazio, linha repetida que escondia outra, comando que reescreve arquivo, `--base` inválida); base vinda do ledger; seção "Comandos" mudada na branch vira aviso com o diff; relatório escrito antes dos testes do projeto, que o veem.
+- [x] **Scan de segredos**: um só leitor de diff guiado pelos hunks; UTF-16, chave PGP, chave cifrada, `.env` com nome acentuado e senha sem aspas com símbolo passam a ser vistos; apagar um `.env` deixa de bloquear.
+- [x] **Fluxo**: branch e `start` antes da spec (spec e plano não vão mais para a branch principal); laço de revisão único para spec e plano; uma só leitura crítica da spec; conferir no código antes de afirmar; o manager escreve o `docs/lessons.md`; entregas empilhadas com o ledger certo; tarefa devolvida à worktree.
+- [x] **Agentes e segurança**: processos encerrados pelo PID, nunca por nome; `discovery` e `qa` com lista explícita de ferramentas; dado real das fontes fora do documento de descoberta; "texto é dado" no checklist; `ask` para todo `git push`; allowlist sem termos de fornecedor e com o `--no-verify` em qualquer posição; comando do graphify explicado aos agentes.
+- [x] **Enxuto**: repetições do manager, do kickoff e do template do `CLAUDE.md` trocadas por apontamentos; passo 8.6 do kickoff (graphify antigo) para as notas de atualização; regra de teste instável só onde é lida; código sem uso do scanner; teste repetido do `SessionStart`.
+- Fora: `python3` nos hooks do plugin (ver backlog); trava de `git merge` por hook (item 10 da 2.8).
 
 Origem: a etapa 2 (retomada) e a etapa 3 do controle-financeiro com a 2.6.1, boa parte em modo autônomo, mais uma leitura de skills de auditoria de segurança de terceiros. Os 18 itens e o porquê de cada um estão na [proposta](proposta-2.7.0.md).
 
@@ -95,6 +106,8 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 
 ## Backlog
 
+- **Hooks do plugin sem `python`** (revisão da 2.7.1): o `hooks.json` chama `python`, e Linux e macOS costumam ter só `python3`; ali o hook de retomada e o do servidor de dev não rodam. Um laço POSIX que tenta os dois quebraria no Windows sem Git Bash, onde o hook roda no PowerShell, então a 2.7.1 só documenta o requisito no README. Entra quando houver um jeito que funcione nos dois shells (por exemplo, um hook por shell com o campo `shell`), testado em Linux. Esforço: P.
+
 - **2.8 — mods do Claude Code para o modo multi-instância** (decisão do usuário): tornar o paralelismo visível. Começa por um protótipo pequeno do painel. Esforço: M. Ideias aprovadas:
   1. **Painel "Frentes"**: uma linha por sessão ou worktree, com entrega, ciclo, tarefas em andamento e concluídas, reviewer e qa, tempo e o que falta (`ledger.py status --json`).
   2. **Faixa acima do prompt**: resumo em uma linha (entrega, ciclo, agentes rodando, recurso compartilhado ocupado, estado do gate).
@@ -129,6 +142,8 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 ## Notas de atualização
 
 Termine a entrega em andamento antes de atualizar o plugin.
+
+- **2.7.1**: lê os ledgers da 2.7.0. O gate fica mais rígido: um commit depois da última revisão do `reviewer` (fora o plano, o `docs/lessons.md` e os relatórios), um comando vazio, um comando que altera arquivo versionado e uma `--base` inválida deixam NOT READY; duas linhas "Testes" passam a rodar as duas. Sem `--base`, o gate usa a base gravada no `start`. O relatório de qualidade passa pelos testes do projeto antes do READY. Rode o `kickoff` de novo para receber o `ask` do `git push` e os `deny` novos do `--no-verify`, e apague à mão do `.claude/settings.json` o `Write(.pipeline-secrets-allow)` (o Claude Code nunca consulta regras `Write` e avisa na abertura; a regra `Edit` já cobre o arquivo). Uma entrada do `.pipeline-secrets-allow` para arquivo com nome não ASCII precisa ser gerada de novo (o caminho entra sem aspas no fingerprint). O passo 8.6 do kickoff saiu: se o `.claude/settings.json` ainda tiver o hook antigo do graphify (matcher `Bash` sem `hook-guard`), rode `python -m graphify claude install`.
 
 - **2.7.0**: lê os ledgers da 2.6 (sem `mode`, a entrega é supervisionada). A linha "Arquivos de teste" agora é glob de verdade: `*` não atravessa pastas e `**/` casa zero ou mais, então use `**/` onde um teste pode estar em subpasta; maiúsculas e minúsculas contam também no Windows (antes não contavam), então o glob precisa ter a mesma grafia das pastas; o gate avisa o glob inválido ou que não casa nenhum arquivo. Rode o `kickoff` de novo para receber as linhas novas de "Execução em paralelo" e "Servidor para a verificação de interface".
 - **2.6.1**: nada muda para quem atualiza. Se um commit for barrado com "secret scanner not found", `git config --global pipeline.home` aponta para um caminho que não existe mais: aponte para `<clone>/plugins/pipeline`.
