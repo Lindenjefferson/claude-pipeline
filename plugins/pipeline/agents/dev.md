@@ -22,7 +22,7 @@ For every behavior change (rule, guard, bug fix):
 3. **Refactor**: clean up with the tests green.
 Each acceptance criterion gets a test whose name starts with its id and states its Given/When/Then (`AC-T3-2 given ..., when ..., then ...`). Cover the edges the task can hit: empty and null input, boundaries (n-1, n, n+1), errors, and, for every write, the abuse cases the task lists (without permission, another tenant's or owner's record, the server called directly). Each test creates its own data and passes when run alone. With no testable behavior (scaffolding, config), say `RED: n/a` and why.
 **Mutation**: for every important guard you wrote (lock, permission, limit, invariant, access rule), loosen it (in a rolled-back transaction or a temporary edit), see a test go red, restore it, and report that evidence.
-Then run the tests your task affects (the ones you wrote or changed and the ones covering the files you touched, selected the way the project's test command allows) before reporting. The full suite runs once per cycle in qa and again in the gate; the `cleanup` task is the exception and runs it before and after. A test that fails and then passes with no change is flaky: never re-run it until green; find the cause or report it.
+Then run the tests your task affects (the ones you wrote or changed and the ones covering the files you touched, selected the way the project's test command allows) before reporting. The full suite runs once per cycle in qa and again in the gate; the `cleanup` task is the exception and runs it before and after.
 
 ## Database work
 - Never edit an applied migration; add a new one, following the project's numbering.
@@ -30,7 +30,10 @@ Then run the tests your task affects (the ones you wrote or changed and the ones
 - Every new table follows the project's access/tenant model and gets a negative test (an unauthorized role reads or writes nothing). Assert the affected-row count, not just "no error".
 
 ## UI work
-Verify with the UI verification command the project's `CLAUDE.md` lists under "Comandos" (add a test there for a golden path the task adds); if there is none, a throwaway script in a temp folder outside the project. Reuse a dev server already running for this directory; start one only with the Bash tool's background mode, with the UI server command of "Comandos" when the project has one, and stop it before reporting. Never leave a process running.
+Verify with the UI verification command the project's `CLAUDE.md` lists under "Comandos" (add a test there for a golden path the task adds); if there is none, a throwaway script in a temp folder outside the project. Reuse a dev server already running for this directory; start one only with the Bash tool's background mode, with the UI server command of "Comandos" when the project has one.
+
+## Processes
+Before reporting, stop every server and background shell you started, each by its PID (the process listening on the port you started it on, or the background shell's id). Never stop a process by program or image name: other copies and the user's own services run the same program. Nothing you started is left running.
 
 ## Docs
 If the task changes a module's behavior, interface, setup or a design decision, update its `docs/NN-*.md` (status, key files, decisions and why) in the same task. Document what the code does, never what it was supposed to do; a divergence from the spec is noted in the doc and in your report.
@@ -55,7 +58,8 @@ RED evidence: <test> failed before the change with: <excerpt>   (or RED: n/a —
 Mutation evidence: <guard loosened> -> <test> red, restored   (or n/a — no guard)
 Docs: <file updated, or none needed and why>
 Lessons: <lines of docs/lessons.md that applied and how the diff meets them, or none applied>
+Processes: none left running (each one you started, stopped by PID)
 ```
 
 ## Knowledge graph (when present)
-If `graphify-out/graph.json` exists, orient with `python -m graphify query "<question>"` before grepping, then verify in the real files. The graph is a map, not proof.
+If `graphify-out/graph.json` exists, orient with `python -m graphify query "<question>"` before grepping, then verify in the real files. A hook that asks for `graphify query` means this same command: without `graphify` on the PATH, run it as `python -m graphify`. The graph is a map, not proof.

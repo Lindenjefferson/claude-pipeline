@@ -34,7 +34,7 @@ O `manager` roda em paralelo, cada uma numa worktree do git, as tarefas que não
 - Como rodar N cópias ao mesmo tempo (o que muda por worktree): _(porta, variáveis de ambiente, dados de teste)_
 - Armazenamento de dados por cópia: _(outra instância com portas próprias ou um esquema por cópia; ou "compartilhado", e a verificação que grava roda uma tarefa por vez)_
 - Como preparar as dependências de uma cópia (o `manager` faz antes de despachar): _(reaproveitar as dependências já instaladas ou instalar; copiar o arquivo de ambiente)_
-- Pasta de saída dos testes por execução: _(a variável de ambiente que o runner lê; `reviewer` e `qa` usam sempre uma pasta própria)_
+- Pasta de saída dos testes por execução: _(a variável de ambiente que o runner lê; o `qa` usa sempre uma pasta própria)_
 - Limites do ambiente de teste que atrapalham execuções simultâneas e como afrouxá-los só no ambiente local: _(ex.: taxa de login)_
 - Testes de interface reaproveitam uma sessão autenticada pronta em vez de autenticar a cada teste: _(como)_
 - Recursos que não dá para isolar (a verificação que os usa roda uma tarefa por vez): _(ex.: limite de taxa de um serviço externo, um serviço único)_
@@ -42,12 +42,11 @@ O `manager` roda em paralelo, cada uma numa worktree do git, as tarefas que não
 
 ## Fluxo de entrega
 
-A skill `manager` classifica o pedido (pequeno, padrão, grande) e conduz em ciclos curtos: spec (só nos grandes) → plano (revisado pelo `reviewer` e aprovado pelo usuário) → ciclos de até ~6 tarefas (`dev` em cada tarefa, as independentes em paralelo; depois `reviewer` e `qa` juntos sobre o ciclo inteiro e uma rodada de correção) → limpeza → `gate.py` (ledger, critérios de aceite com teste, build, tipos, lint, testes, auditoria e scan de segredos, tudo local) → merge e push só quando o usuário aprovar.
+A skill `manager` conduz cada entrega, do tamanho do pedido ao `gate.py` (o fluxo está nela), com duas aprovações do usuário: o plano e o merge/push.
 
 - O trabalho acontece numa branch `feat/...` ou `fix/...`; nada vai para a branch principal sem aprovação.
 - O ledger (`.superpowers/ledger.jsonl`) registra o que cada agente concluiu e o que falta.
-- Achados do `reviewer` e do `qa` voltam para o `dev` numa rodada só; se ainda sobrar algo, o `manager` pergunta.
-- Erros que uma regra teria evitado viram uma checagem automática (teste, helper, lint) sempre que possível; o que não dá para automatizar vira uma linha em `docs/lessons.md`, que o `dev` e o `reviewer` leem.
+- O que não dá para virar checagem automática (teste, helper, lint) vira uma linha em `docs/lessons.md`, que o `dev` e o `reviewer` leem.
 - O hook `pre-commit` do git (instalado pelo `kickoff`) bloqueia commits com arquivos `.env` ou linhas com cara de segredo. Nunca usar `--no-verify` nem mexer em `.git/hooks`: um segredo commitado fica no histórico.
 - Cada entrega aprovada pelo `gate.py` gera um relatório em `docs/quality-reports/`.
 - Ambiente de testes antes de produção: _(onde a entrega é publicada primeiro, como as migrations passam por ele, como fazer backup e reverter)_
