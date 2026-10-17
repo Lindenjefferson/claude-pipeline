@@ -2,9 +2,10 @@
   "entry": "Bash(<command>)",
   "deny": [
     "Edit(.pipeline-secrets-allow)",
-    "Bash(git commit *--no-verify*)",
-    "Bash(git commit -n *)",
+    "Bash(git commit *--no-v*)",
+    "Bash(git commit -n*)",
     "Bash(git commit * -n *)",
+    "Bash(git commit * -n)",
     "Bash(git -c core.hooksPath*)",
     "Bash(sudo:*)",
     "Bash(git push --force:*)",
