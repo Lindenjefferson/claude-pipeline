@@ -62,7 +62,7 @@ check("the kickoff template guards the scan allowlist with an Edit rule and has 
       "Edit(.pipeline-secrets-allow)" in settings["deny"] and not any(rule.startswith("Write(") for rule in settings["deny"]),
       settings["deny"])
 check("the kickoff template denies skipping the pre-commit hook wherever the flag sits",
-      {"Bash(git commit *--no-verify*)", "Bash(git commit -n *)", "Bash(git commit * -n *)"} <= set(settings["deny"]),
+      {"Bash(git commit *--no-v*)", "Bash(git commit -n*)", "Bash(git commit * -n *)", "Bash(git commit * -n)"} <= set(settings["deny"]),
       settings["deny"])
 for term in ("sudo", "--force", "chmod 777", "| sh", "| bash"):
     check(f"the kickoff template never allows a command containing {term!r}", term in settings["never_allow"],
