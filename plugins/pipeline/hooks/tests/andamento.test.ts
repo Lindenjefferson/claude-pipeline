@@ -19,34 +19,58 @@ const STATUS = {
   metrics: { cycles: [{ cycle: 1, critical: 0, important: 1, minor: 2, open: 1, fix_rounds: 1, seconds: 3600, tokens: 0 },
                       { cycle: 2, critical: 0, important: 2, minor: 0, open: 2, fix_rounds: 0, seconds: 241, tokens: 98357 }] },
 }
+const OTHER = { ...STATUS, slug: 'etapa-6', ledger: '/other/.superpowers/ledger.jsonl', dispatched: {} }
 const BAND = {
   plugin: 'pipeline', component: 'AbovePrompt', requestId: 'band', surface: 'terminal',
   viewport: { columns: 140, rows: 40 },
   props: { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 140, scroll: { offset: 0, bodyRows: 6 }, view: {} },
 } as const
+const PANE = {
+  ...BAND, component: 'Pane', requestId: 'andamento',
+  props: { title: 'Andamento', isFocused: true, bodyColumns: 100, placement: 'inline', scroll: { offset: 0, bodyRows: 20 },
+           view: {} },
+} as const
 
-function stubs(on, found) {
-  mock.clock(on, { now: NOW })
+// found: the status ledger.py prints (null: no delivery; a string: its stderr on failure)
+function stubs(on, found, log = { runs: 0, mtime: 1 }) {
+  const clock = mock.clock(on, { now: NOW })
   on('session.start', () => ({ cwd: '/work' }))
   on('session.cwd', () => ({ value: '/work' }))
   on('command.register', () => ({ value: undefined }))
-  on('fs.stat', () => ({ value: { kind: 'file', size: 10, mtimeMs: 1, isLink: false } }))
-  on('process.run', ($, e) => ({
-    value: e.argv[0] === 'git' ? { exitCode: 0, stdout: 'worktree /work\n', stderr: '' }
-      : found ? { exitCode: 0, stdout: JSON.stringify(found), stderr: '' }
-      : { exitCode: 1, stdout: '', stderr: 'no delivery started' },
-  }))
+  on('fs.stat', () => ({ value: { kind: 'file', size: 10, mtimeMs: log.mtime, isLink: false } }))
+  on('process.run', ($, e) => {
+    if (e.argv[0] === 'git') return { value: { exitCode: 0, stdout: 'worktree /work\nworktree /other\n', stderr: '' } }
+    log.runs += 1
+    if (e.argv.includes('/other/.superpowers/ledger.jsonl')) {
+      return { value: { exitCode: 0, stdout: JSON.stringify(OTHER), stderr: '' } }
+    }
+    if (typeof found === 'string') return { value: { exitCode: 1, stdout: '', stderr: found } }
+    return { value: found ? { exitCode: 0, stdout: JSON.stringify(found), stderr: '' }
+                          : { exitCode: 1, stdout: '', stderr: 'no delivery started' } }
+  })
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
+  return clock
+}
+
+async function start($, clock) {
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await clock.settle()
 }
 
 test('the band says the cycle, what runs and for how long, the verdicts, VALIDAR and what comes next', () => {
-  const line = bandLine(STATUS, NOW)
-  expect(line).toBe('pipeline · etapa-5 · cycle 2 · autonomous · ▶ T2.1 14m · reviewer FAIL · qa — · VALIDAR 1 · ' +
-                    'next: reviewer FAIL (2 open): dev fixes every finding in one batch')
+  expect(bandLine(STATUS, NOW)).toBe('pipeline · etapa-5 · cycle 2 · autonomous · ▶ T2.1 14m · reviewer FAIL · qa — · ' +
+                                     'VALIDAR 1 · next: reviewer FAIL (2 open): dev fixes every finding in one batch')
+})
+
+test('the band leaves out the pending line of a task it already shows running, and says when the gate is next', () => {
+  const running = { ...STATUS, pending: STATUS.pending.slice(1) }
+  expect(bandLine(running, NOW)).not.toContain('next:')
+  const ready = { ...STATUS, dispatched: {}, pending: [], ready_for_gate: true }
+  expect(bandLine(ready, NOW)).toMatch(/ · ready for gate$/)
 })
 
 test('the pane lists the cycle runs with time and tokens, the running task, VALIDAR, earlier cycles and fronts', () => {
-  const lines = paneLines(STATUS, [{ name: 'front-b', report: { ...STATUS, slug: 'etapa-6', dispatched: {} } }], NOW)
+  const lines = paneLines(STATUS, [{ name: 'other', report: OTHER }], NOW)
   expect(lines[0]).toBe('etapa-5 · cycle 2 · autonomous')
   expect(lines).toContain('dev            T2.2       DONE                 3m       98357')
   expect(lines).toContain('reviewer       -          FAIL (2 open)        1m       -')
@@ -54,7 +78,7 @@ test('the pane lists the cycle runs with time and tokens, the running task, VALI
   expect(lines).toContain('- V1 page size 50')
   expect(lines.join('\n')).not.toContain('sort by date')
   expect(lines).toContain('- cycle 1: 0 Critical, 1 Important, 2 Minor; 1 fix round; 1h0m agent time')
-  expect(lines).toContain('- front-b: etapa-6 · cycle 2 · 0 running · 2 pending')
+  expect(lines).toContain('- other: etapa-6 · cycle 2 · 0 running · 2 pending')
 })
 
 test('an old ledger without VALIDAR ids, runs or tokens still draws', () => {
@@ -63,39 +87,75 @@ test('an old ledger without VALIDAR ids, runs or tokens still draws', () => {
   expect(paneLines(old, [], NOW)[0]).toBe('etapa-5 · cycle 2 · autonomous')
 })
 
-test('with a delivery open, the band is drawn above the prompt', async ($, on) => {
-  stubs(on, STATUS)
-  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+test('with a delivery open, the band is drawn above the prompt and keeps what other mods draw there', async ($, on) => {
+  const clock = stubs(on, STATUS)
+  await start($, clock)
   const ui = await $.ui.mount(BAND)
   expect(await ui.find({ type: 'Text', text: /^pipeline · etapa-5 · cycle 2/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'drawn by Claude Code' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('while a survey holds the band, the mod yields it', async ($, on) => {
+  const clock = stubs(on, STATUS)
+  await start($, clock)
+  const ui = await $.ui.mount({ ...BAND, props: { ...BAND.props, hasSurvey: true } })
+  expect(await ui.find({ type: 'Text', text: /pipeline/ })).toBeUndefined()
   await ui.unmount()
 })
 
 test('with no delivery, the band is left to Claude Code', async ($, on) => {
-  stubs(on, null)
-  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const clock = stubs(on, null)
+  await start($, clock)
   const ui = await $.ui.mount(BAND)
   expect(await ui.find({ type: 'Text', text: /pipeline/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'drawn by Claude Code' })).toBeDefined()
   await ui.unmount()
 })
 
-test('/andamento answers in text where no pane can open', async ($, on) => {
-  stubs(on, STATUS)
+test('a ledger.py failure shows in the band and in /andamento, not as "no delivery"', async ($, on) => {
+  const clock = stubs(on, 'x.jsonl:3: not a ledger entry (bad); fix or remove that line by hand')
   on('ui.open', () => ({ deny: 'no pane here' }))
+  await start($, clock)
+  const ui = await $.ui.mount(BAND)
+  expect(await ui.find({ type: 'Text', text: /^pipeline · ledger\.py failed: x\.jsonl:3/ })).toBeDefined()
+  await ui.unmount()
+  const answer = await $.command.run({ command: 'andamento', args: '' })
+  expect(answer.text).toContain('ledger.py failed: x.jsonl:3')
+})
+
+test('the poll runs ledger.py again only when the ledger file changes, or after a minute', async ($, on) => {
+  const log = { runs: 0, mtime: 1 }
+  const clock = stubs(on, STATUS, log)
+  await start($, clock)
+  expect(log.runs).toBe(1)
+  await clock.advance(15000)
+  expect(log.runs).toBe(1)
+  log.mtime = 2
+  await clock.advance(5000)
+  expect(log.runs).toBe(2)
+  await clock.advance(60000)
+  expect(log.runs).toBe(3)
+})
+
+test('/andamento answers in text where no pane can open, listing the other fronts but not its own', async ($, on) => {
+  const clock = stubs(on, STATUS)
+  on('ui.open', () => ({ deny: 'no pane here' }))
+  await start($, clock)
   const answer = await $.command.run({ command: 'andamento', args: '' })
   expect(answer.text).toContain('etapa-5 · cycle 2 · autonomous')
   expect(answer.text).toContain('Earlier cycles:')
+  expect(answer.text).toContain('- other: etapa-6')
+  expect(answer.text).not.toContain('- work:')
 })
 
 test('/andamento opens the pane and the pane draws the same table', async ($, on) => {
-  stubs(on, STATUS)
+  const clock = stubs(on, STATUS)
   on('ui.open', () => ({ value: { isPlaced: true } }))
+  await start($, clock)
   const answer = await $.command.run({ command: 'andamento', args: '' })
   expect(answer).toEqual({})
-  const ui = await $.ui.mount({ ...BAND, component: 'Pane', requestId: 'andamento',
-                                props: { title: 'Andamento', isFocused: true, bodyColumns: 100, placement: 'inline',
-                                         scroll: { offset: 0, bodyRows: 20 }, view: {} } })
+  const ui = await $.ui.mount(PANE)
   expect(await ui.find({ type: 'Text', text: 'etapa-5 · cycle 2 · autonomous' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /T2\.1\s+running/ })).toBeDefined()
   await ui.unmount()

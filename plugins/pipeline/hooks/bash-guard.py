@@ -4,10 +4,13 @@ reaches the default branch while the delivery is in autonomous mode, and the pro
 mode.
 
 In autonomous mode (the latest mode entry of the ledger ledger.py finds from the session's directory), denied in the
-foreground or background: a git push of the default branch (named by origin/HEAD, else main or master: as a refspec's
-target, with --all or --mirror, or with no refspec while it is checked out), a git merge while it is checked out
-(--abort and --quit pass), and gh pr merge. Pushing and merging the work branch pass; in supervised mode, or with
-no ledger, nothing here is denied and the ask rule on git push applies.
+foreground or background: a git push of the default branch (named by origin/HEAD, else init.defaultBranch, main or
+master: as a refspec's target, with --all or --mirror, or with no refspec while it is checked out; --tags alone
+passes), a git merge while it is checked out (--abort and --quit pass), and a pull request merge (gh pr merge, also
+behind gh's own options, and gh api on pulls/<n>/merge). A git checkout or switch earlier in the same command counts
+as what is checked out for the rest of it; a cd does not, so the check reads the session's directory. Pushing and
+merging the work branch pass; in supervised mode, or with no ledger, nothing here is denied and the ask rule on git
+push applies.
 
 Skipping the hook is denied in any project, in the foreground or background: a git commit with --no-verify (or an
 unambiguous prefix such as --no-veri) or -n (also inside a cluster such as -nm or -an), a git -c or --config-env
@@ -201,8 +204,9 @@ def main_branch(cwd):
     remote = git_out(cwd, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
     if remote:
         return remote.split("/", 1)[-1]
-    return next((name for name in ("main", "master")
-                 if git_out(cwd, "rev-parse", "--verify", "--quiet", "refs/heads/" + name)), None)
+    names = [git_out(cwd, "config", "--get", "init.defaultBranch"), "main", "master"]
+    return next((name for name in names
+                 if name and git_out(cwd, "rev-parse", "--verify", "--quiet", "refs/heads/" + name)), None)
 
 
 def push_reaches(arguments, main, current):
@@ -217,29 +221,56 @@ def push_reaches(arguments, main, current):
         elif not word.startswith("-"):
             positional.append(word)
     if len(positional) < 2:
-        return current == main
+        return current == main and "--tags" not in arguments
     for spec in positional[1:]:
         target = spec.lstrip("+").split(":")[-1].removeprefix("refs/heads/")
-        if target == main or (target == "HEAD" and current == main):
+        if target == main or (target in ("HEAD", "@") and current == main):
             return True
     return False
 
 
+def switched_to(arguments):
+    """The branch a git checkout or git switch leaves checked out, or None when it is not a branch change."""
+    for position, word in enumerate(arguments):
+        if word == "--":
+            return None
+        if word in ("-b", "-B", "-c", "-C", "--orphan"):
+            return arguments[position + 1] if position + 1 < len(arguments) else None
+        if not word.startswith("-"):
+            return word
+    return None
+
+
+def merges_pull_request(arguments):
+    pairs = zip(arguments, arguments[1:])
+    return any(pair == ("pr", "merge") for pair in pairs) or (
+        arguments[:1] == ["api"] and any(re.search(r"pulls/\d+/merge\b", word) for word in arguments))
+
+
 def reaches_main(command, cwd):
-    """True in autonomous mode when the command merges into or pushes the default branch, or merges a pull request."""
-    calls = [(program, git_command(arguments) if program == "git" else ("", arguments, False))
-             for program, arguments, _ in simple_commands(command)]
-    calls = [(program, name, rest) for program, (name, rest, _) in calls
-             if (program == "git" and name in ("push", "merge")) or (program == "gh" and rest[:2] == ["pr", "merge"])]
-    if not calls or not autonomous(cwd):
+    """True in autonomous mode when the command merges into or pushes the default branch, or merges a pull request.
+    A git checkout or switch earlier in the same command counts as the branch checked out for what follows it."""
+    calls = []
+    for program, arguments, _ in simple_commands(command):
+        if program == "git":
+            name, rest, _ = git_command(arguments)
+            if name in ("push", "merge", "checkout", "switch"):
+                calls.append((program, name, rest))
+        elif program == "gh":
+            calls.append((program, "", arguments))
+    if not any(name in ("push", "merge") or (program == "gh" and merges_pull_request(rest))
+               for program, name, rest in calls) or not autonomous(cwd):
         return False
     main, current = main_branch(cwd), git_out(cwd, "branch", "--show-current")
     for program, name, rest in calls:
         if program == "gh":
+            if merges_pull_request(rest):
+                return True
+        elif name in ("checkout", "switch"):
+            current = switched_to(rest) or current
+        elif main and name == "push" and push_reaches(rest, main, current):
             return True
-        if main and name == "push" and push_reaches(rest, main, current):
-            return True
-        if main and name == "merge" and current == main and not {"--abort", "--quit"} & set(rest):
+        elif main and name == "merge" and current == main and not {"--abort", "--quit"} & set(rest):
             return True
     return False
 

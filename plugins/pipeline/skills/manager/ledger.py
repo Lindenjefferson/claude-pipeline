@@ -300,6 +300,8 @@ def validate(args):
     entries = read(args.ledger)
     if args.id not in {item["id"] for item in validar(entries)}:
         sys.exit(f"no VALIDAR item {args.id}")
+    if not args.decision.strip():
+        sys.exit("--decision needs the user's answer, not an empty text")
     write(args.ledger, {"type": "validate", "id": args.id, "decision": args.decision})
     print(f"{args.id} validated")
 

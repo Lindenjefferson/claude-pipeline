@@ -12,7 +12,7 @@ Origem: a revisão da 2.8 do backlog contra as etapas 4 e 5 do controle-financei
 - [x] **Decisões e avisos**: VALIDAR numerados com `validate` e a skill `validar`; `PushNotification` quando o manager para esperando o usuário, no READY e quando o modo autônomo para; skill `feedback-plugin` no fim da entrega.
 - [x] **Rodada de design de tela** (pedido do usuário, a partir de uma sessão de design do controle-financeiro): tela nova ou redesenhada passa por uma página de comparação (menor largura e desktop, todos os temas, dados de exemplo) com a skill `frontend-design`, aprovada junto com o plano; tokens de cor e mock viram insumo do plano, o `reviewer` confere a tela contra eles, e o checklist ganha cores por token com contraste e separação medidos e cores de significado reservadas.
 - [x] **Enxuto**: saíram a duração medida pelo manager e a "promoção de lição" do passo 7 (virou parte do `feedback-plugin`).
-- Fora: segurança (2.8.1), guarda na ferramenta PowerShell, `python3` nos hooks, WSL2 (ver backlog).
+- Fora: segurança (2.8.1), guarda na ferramenta PowerShell, `python3` nos hooks, WSL2, VALIDAR das entregas empilhadas anteriores na faixa (ver backlog).
 
 ## 2.7.2 — pular o `pre-commit` negado pelo hook, não pela mensagem (PR #20)
 
@@ -128,6 +128,8 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 ## Backlog
 
 - **Hooks do plugin sem `python`** (revisão da 2.7.1): o `hooks.json` chama `python`, e Linux e macOS costumam ter só `python3`; ali o hook de retomada e o guarda do Bash não rodam. Um laço POSIX que tenta os dois quebraria no Windows sem Git Bash, onde o hook roda no PowerShell, então a 2.7.1 só documenta o requisito no README. Entra quando houver um jeito que funcione nos dois shells (por exemplo, um hook por shell com o campo `shell`), testado em Linux. Esforço: P.
+
+- **VALIDAR das entregas empilhadas na faixa** (revisão da 2.8): a faixa e o `/andamento` contam só o ledger atual; os itens de uma entrega anterior empilhada (`ledger-<slug>.jsonl`) não aparecem, e um arquivo desses não diz se é entrega empilhada à espera ou já encerrada. Entra se o `start --archive` passar a registrar isso. Esforço: P.
 
 - **Guarda do Bash também na ferramenta PowerShell** (2.7.2): no Windows a sessão principal tem a ferramenta PowerShell, que o `bash-guard.py` não vê (os agentes não a têm). Entra com um leitor das aspas do PowerShell, testado. Esforço: P.
 
