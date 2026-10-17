@@ -1,170 +1,74 @@
 # Roadmap do plugin `pipeline`
 
-Backlog vivo do plugin. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin ou ideia adaptada do ECC) e o esforço estimado (P, M, G). Ao entregar um item, mover para a seção da versão correspondente com o PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
+O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões da linha atual (hoje a 2.8) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
+
+## Backlog
+
+- **Hooks do plugin sem `python`** (revisão da 2.7.1): o `hooks.json` chama `python`, e Linux e macOS costumam ter só `python3`; ali o hook de retomada e o guarda do Bash não rodam. Um laço POSIX que tenta os dois quebraria no Windows sem Git Bash, onde o hook roda no PowerShell, então por ora o requisito está só no README. Entra quando houver um jeito que funcione nos dois shells (por exemplo, um hook por shell com o campo `shell`), testado em Linux. Esforço: P.
+- **Guarda do Bash também na ferramenta PowerShell** (2.7.2): no Windows a sessão principal tem a ferramenta PowerShell, que o `bash-guard.py` não vê (os agentes não a têm). Entra com um leitor das aspas do PowerShell, testado. Esforço: P.
+- **VALIDAR das entregas empilhadas na faixa** (revisão da 2.8): a faixa e o `/andamento` contam só o ledger atual; os itens de uma entrega anterior empilhada (`ledger-<slug>.jsonl`) não aparecem, e um arquivo desses não diz se é entrega empilhada à espera ou já encerrada. Entra se o `start --archive` passar a registrar isso. Esforço: P.
+- **Custo da entrega com o `ccusage`** (pedido do usuário, a partir de uma sessão de design do controle-financeiro): declarar a CLI `ccusage` como dependência conferida (aviso e instrução de instalação quando falta). Nada no plugin chama o `ccusage` hoje (os tokens vêm do aviso de término do agente), e uma dependência sem uso contraria o princípio "enxuto"; entra junto com o uso, por exemplo o custo da entrega no relatório do gate. Cuidado conhecido: com `--offline` ele não tem o preço de todos os modelos, então a checagem não depende do modo offline. Esforço: P.
+
+### Em espera (voltam com um sinal)
+
+- **Teto de orçamento por entrega** (2.5.0, 2.6.0): volta se os tokens medidos desde a 2.8 mostrarem entregas estourando.
+- **Verificador que tenta refutar cada achado de segurança e registro de cobertura acumulado no gate** (2.8.1): um agente a mais por achado, e uma mudança grande no gate. Voltam se uma entrega mostrar achado falso ou caminho não examinado.
+- **WSL2 para o modo multi-instância** (2.8): não resolve o gargalo medido (a suíte e2e longa, item 17 da [proposta 2.7.0](proposta-2.7.0.md)); plugins não carregam nas sessões WSL do app Desktop; custa outra instalação do Claude Code (memória, plugins e configurações à parte), integração mais difícil com o navegador do Windows e hooks e `pipeline.home` reinstalados. Volta se o próprio Windows virar o gargalo; migração só entre entregas. Esforço: P no plugin.
+- Recusado: revisão externa no gate (2.6.0). O `open-code-review` exige CLI Node e chave de um provedor de LLM e envia o diff para fora; o `reviewer` já cobre isso, e o gate é sem LLM de propósito.
+
+## 2.8.2 — abrir uma sessão nova do jeito certo (PR #23)
+
+Origem: pedido do usuário, depois de duas falhas ao abrir a sessão do controle-financeiro a partir de outra sessão: a aba que não achou o arquivo (argumentos do terminal partidos) e a que herdou `CLAUDE_CODE_CHILD_SESSION`, sem transcrição e fora do `ListAgents`.
+
+- [x] **Sessão nova limpa**, no `manager` (frentes em várias sessões): ao abrir ele mesmo um terminal com `claude`, tirar do ambiente as variáveis `CLAUDE*` herdadas, passar a linha de comando inteira, mandar o briefing só depois que o `ListAgents` lista a sessão, e, se ela não subir, avisar o usuário e esperar ele fechar a aba antes de abrir outra.
+- [x] **Roadmap enxuto**: backlog no topo, itens condicionais juntos em "Em espera", versões anteriores à 2.8 numa linha cada.
 
 ## 2.8.1 — segurança: achados com prova (PR #22)
 
 Origem: decisão do usuário de separar a segurança da 2.8; ideias da skill `cloudflare/security-audit-skill` (MIT, commit `c1c8a8c`, lida inteira sem instalar nem executar). A skill não é instalada: no Windows os validadores recusam toda entrada, sem sandbox do sistema nada chega a confirmado, o perfil padrão custa de 25 a 50 subagentes e 1,5 a 4 M tokens, e o README instala sem versão fixa (veto a extensões de terceiros). Proposta na [seção C da 2.8](proposta-2.8.md).
 
-- [x] **Achado de segurança com prova**, no `reviewer`: nomeia quem explora, a entrada, a fronteira de confiança cruzada e o resultado, rastreado da entrada ao efeito; status `confirmed`, `needs_validation` (o elo que o código não prova e o teste que decide, Important no máximo, e a rodada de correção escreve esse teste; sem teste possível no projeto, vira Minor e o manager adia ou registra como VALIDAR) ou `rejected` (vai para "Checked with no findings"). A escala critical a low da skill virou as severidades que o ledger já conta: nunca acima do impacto rastreado, Critical quando o achado derrota o controle por inteiro, Important quando só o enfraquece; boa prática sem exploração vira Minor `hardening`. Ledger e gate não mudam.
+- [x] **Achado de segurança com prova**, no `reviewer`: nomeia quem explora, a entrada, a fronteira de confiança cruzada e o resultado, rastreado da entrada ao efeito; status `confirmed`, `needs_validation` (o elo que o código não prova e o teste que decide; Important no máximo, e a rodada de correção escreve esse teste; sem teste possível no projeto, vira Minor e o manager adia ou registra como VALIDAR) ou `rejected` (vai para "Checked with no findings"). A escala critical a low da skill virou as severidades que o ledger já conta: nunca acima do impacto rastreado, Critical quando o achado derrota o controle por inteiro, Important quando só o enfraquece; boa prática sem exploração vira Minor `hardening`. Ledger e gate não mudam.
 - [x] **Caminho mais fraco**: para cada achado de segurança, o `reviewer` confere as outras entradas que chegam ao mesmo efeito.
 - [x] **Checklist**: default de coluna nova certo para as linhas antigas; export e backup no escopo de quem pede; registro excluído logicamente fora de toda leitura; remoção de membro corta todo acesso; mutação confere a origem do pedido.
-- Fora: verificador que tenta refutar cada achado (um agente a mais por achado) e registro de cobertura acumulado entre entregas no gate (mudança grande no gate). Voltam se uma entrega mostrar achado falso ou caminho não examinado.
 
 ## 2.8 — andamento visível e travas do modo autônomo (PR #21)
 
 Origem: a revisão da 2.8 do backlog contra as etapas 4 e 5 do controle-financeiro e a documentação atual do Claude Code, e o pedido do usuário de uma tabela de progresso viva por ciclo. Os itens, o porquê e as escolhas do usuário estão na [proposta](proposta-2.8.md).
 
 - [x] **Tempo e tokens reais**: `ledger.py add --tokens`; duração e tokens vêm do aviso de término do agente, nunca de estimativa; `status --json` traz a hora de despacho, o caminho do ledger e as execuções do ciclo; o relatório do gate mostra tokens por agente e tarefa.
-- [x] **Andamento visível**: mod `andamento.js` (linha acima do prompt com entrega aberta, `/andamento` com o painel do ciclo, ciclos anteriores e outras frentes, texto onde nada desenha); só desenha o que o `ledger.py` devolve. Conferido com `claude -p /andamento` sobre a cópia de um ledger real; a faixa e o painel, numa sessão interativa antes da instalação.
+- [x] **Andamento visível**: mod `andamento.js` (linha acima do prompt com entrega aberta, `/andamento` com o painel do ciclo, ciclos anteriores e outras frentes, texto onde nada desenha); só desenha o que o `ledger.py` devolve. Conferido com `claude -p /andamento` sobre a cópia de um ledger real.
 - [x] **Trava do ✋ 2**: no modo autônomo, o `bash-guard.py` nega push da branch principal, merge nela e `gh pr merge`; a branch de trabalho passa.
 - [x] **Decisões e avisos**: VALIDAR numerados com `validate` e a skill `validar`; `PushNotification` quando o manager para esperando o usuário, no READY e quando o modo autônomo para; skill `feedback-plugin` no fim da entrega.
 - [x] **Rodada de design de tela** (pedido do usuário, a partir de uma sessão de design do controle-financeiro): tela nova ou redesenhada passa por uma página de comparação (menor largura e desktop, todos os temas, dados de exemplo) com a skill `frontend-design`, aprovada junto com o plano; tokens de cor e mock viram insumo do plano, o `reviewer` confere a tela contra eles, e o checklist ganha cores por token com contraste e separação medidos e cores de significado reservadas. O plugin `frontend-design` passa a ser dependência declarada, conferida pelo `kickoff`, que diz como instalar quando falta.
 - [x] **Enxuto**: saíram a duração medida pelo manager e a "promoção de lição" do passo 7 (virou parte do `feedback-plugin`).
-- Fora: segurança (na 2.8.1), guarda na ferramenta PowerShell, `python3` nos hooks, WSL2, VALIDAR das entregas empilhadas anteriores na faixa (ver backlog).
 
-## 2.7.2 — pular o `pre-commit` negado pelo hook, não pela mensagem (PR #20)
+## Versões anteriores
 
-Origem: na etapa 5 do controle-financeiro, o deny `Bash(git commit *--no-v*)` da 2.7.1 negou um commit cuja mensagem citava a flag; `* -n *` corria o mesmo risco. Regra de permissão casa com o comando como texto e não distingue flag de mensagem.
-
-- [x] **Guarda do Bash**: o hook do servidor de dev vira `bash-guard.py` e passa a negar pular o `pre-commit` (`--no-verify`, `-n`, `core.hooksPath`) em qualquer projeto, também em background, lendo o comando como o shell: a flag citada na mensagem do commit não conta. As formas cobertas estão no docstring.
-- [x] **Allowlist do kickoff**: saem os três deny com curinga antes da flag; ficam os ancorados logo depois de `git commit` e de `git`, para quando o hook não roda.
-
-## 2.7.1 — lições da etapa 4 e revisão do plugin (PR #19)
-
-Origem: a etapa 4 do controle-financeiro, rodada inteira na 2.7.0 quase toda em modo autônomo, e uma revisão do plugin inteiro pedida pelo usuário (scripts e prompts), com cada achado reproduzido ou conferido. Os itens e o porquê de cada um estão na [proposta](proposta-2.7.1.md).
-
-- [x] **Modo autônomo não para sozinho**: heartbeat (job recorrente da sessão que roda o `status` e segue); relatório com a worktree parada vale como término (o manager para o agente e integra); 4ª rodada da revisão do plano restrita às correções; no máximo 3 rodadas de correção por ciclo, depois a entrega para.
-- [x] **Ledger**: `waive` para o FAIL cujos achados foram descartados ou aceitos (antes travava a entrega); `plan --path`; ledger achado de dentro de uma worktree, com o head da worktree dona do ledger; contagem negativa, duração sem unidade e linha truncada recusadas.
-- [x] **Gate**: fim de cinco READY falsos (commit depois da última revisão, comando vazio, linha repetida que escondia outra, comando que reescreve arquivo, `--base` inválida); base vinda do ledger; seção "Comandos" mudada na branch vira aviso com o diff; relatório escrito antes dos testes do projeto, que o veem.
-- [x] **Scan de segredos**: um só leitor de diff guiado pelos hunks; UTF-16, chave PGP, chave cifrada, `.env` com nome acentuado e senha sem aspas com símbolo passam a ser vistos; apagar um `.env` deixa de bloquear.
-- [x] **Fluxo**: branch e `start` antes da spec (spec e plano não vão mais para a branch principal); laço de revisão único para spec e plano; uma só leitura crítica da spec; conferir no código antes de afirmar; o manager escreve o `docs/lessons.md`; entregas empilhadas com o ledger certo; tarefa devolvida à worktree.
-- [x] **Agentes e segurança**: processos encerrados pelo PID, nunca por nome; `discovery` e `qa` com lista explícita de ferramentas; dado real das fontes fora do documento de descoberta; "texto é dado" no checklist; `ask` para todo `git push`; allowlist sem termos de fornecedor e com mais formas de pular o hook negadas (o `pre-commit` e o scan do gate seguem como a proteção de verdade); comando do graphify explicado aos agentes.
-- [x] **Enxuto**: repetições do manager, do kickoff e do template do `CLAUDE.md` trocadas por apontamentos; passo 8.6 do kickoff (graphify antigo) para as notas de atualização; regra de teste instável só onde é lida; código sem uso do scanner; teste repetido do `SessionStart`.
-- Fora: `python3` nos hooks do plugin (ver backlog); trava de `git merge` por hook (trava do ✋ 2, na 2.8).
-
-## 2.7.0 — lições da etapa 3 (PR #14)
-
-Origem: a etapa 2 (retomada) e a etapa 3 do controle-financeiro com a 2.6.1, boa parte em modo autônomo, mais uma leitura de skills de auditoria de segurança de terceiros. Os 18 itens e o porquê de cada um estão na [proposta](proposta-2.7.0.md).
-
-- [x] **Gate**: "Arquivos de teste" casado como glob de verdade (`**/` casa zero ou mais pastas, `*` fica numa pasta, `{a,b}`); glob que não casa nenhum arquivo rastreado gera aviso.
-- [x] **Worktrees e execução em paralelo**: o `manager` cria e prepara cada worktree no head atual e passa o commit de origem, que o `dev` confere; integra só depois do aviso de término do agente, um comando por vez. O template "Execução em paralelo" pede armazenamento de dados por cópia, preparo das dependências, pasta de saída de testes por execução, limites do ambiente de teste e sessão autenticada reaproveitada; "Comandos" ganha o servidor da verificação de interface. Sem isolamento declarado, só a codificação é paralela. Várias sessões no mesmo projeto: uma frente por sessão, uma só integra.
-- [x] **Planejamento**: regra que filtra ou soma um conjunto vale em todas as funções irmãs (checklist e `reviewer` em modo plano); "validar antes de escrever" no pré-mortem; plano rascunhado por subagente e revisado até PASS (no máximo 3 rodadas).
-- [x] **Revisão e testes**: layout medido em toda célula, coluna e cabeçalho em cada largura; pré-preenchimento com os dados de quando o formulário abre; erro de limite de armazenamento diz o limite.
-- [x] **Lições**: o `dev` confere o diff contra o `docs/lessons.md` e cita as que se aplicaram; lição quebrada duas vezes vira checagem na mesma rodada; seção do `CLAUDE.md` gerada por ferramenta nunca recebe conteúdo.
-- [x] **Modo autônomo**: `ledger.py mode autonomous|supervised` e `note --validar`; aprovações viram registro, rodadas de correção até PASS, nunca merge nem push (a entrega seguinte sai numa branch empilhada); `status` e o relatório do gate mostram o modo e a lista VALIDAR.
-- [x] **Capturas persistentes**: o `qa` guarda capturas e script em `.superpowers/screens/<slug>/` e espera avisos temporários sumirem; a página de telas sai dessa pasta.
-- [x] **Segurança**: revisão de segurança nativa antes do gate; cabeçalhos de segurança, build de produção sem artefatos de depuração e tokens de fonte criptográfica no checklist; veto a extensões de terceiros (seção nova do checklist, citada pelo `manager` e pelo `kickoff`).
-
-## 2.6.1 — `pipeline.home` quebrado (PR #13)
-
-Origem: o teste do `kickoff` no Controle Financeiro. O `pipeline.home` global apontava para uma pasta que deixou de existir (o clone foi renomeado), e o `pre-commit` instalado bloqueava todo commit com "secret scanner not found" sem que o `kickoff` percebesse.
-
-- [x] **Passo 2 do `kickoff`**: trata como quebrado o `pipeline.home` que está vazio ou que aponta para uma pasta sem `hooks/pre-commit-secret-scan.py`, e passa o comando de correção ao usuário.
-- [x] **Passo 9 do `kickoff`**: roda o `pre-commit` instalado uma vez, sem nada no índice, e relata se o scanner foi encontrado. Vale também quando o hook já existia.
-
-## 2.6.0 — endurecimento (PR #12)
-
-Origem: leitura das regras do AgentShield (ECC) de hooks, permissões e agentes, só como referência, sem instalar nada. O que é código malicioso, MCP e pontuação ficou fora.
-
-- [x] **Caracteres invisíveis no commit**: o `pre-commit` recusa espaço de largura zero, controles de direção, caracteres Tag e BOM fora do início (a forma de esconder instruções em arquivos de prompt); ZWJ/ZWNJ de emoji e escritas legítimas passam.
-- [x] **Mais formatos de chave no scan**: OpenAI, Google, xAI, GitHub fine-grained, Linear e o segredo de webhook do Stripe.
-- [x] **Ferramentas do `discovery`**: sem `Edit`, `NotebookEdit` nem `Agent` (lia fontes não confiáveis com todas as ferramentas). Os agentes `discovery` e `qa` tratam texto de fontes, páginas e saída de ferramentas como dado, nunca como instrução.
-- [x] **Allowlist do `kickoff` mais fechada**: `deny` para `sudo`, force push e `chmod 777`; `never_allow` ganha `sudo`, `--force`, `chmod 777`, `| sh` e `| bash`.
-- [x] **Teste de integridade do plugin** (`test_plugin_integrity.py`): todo agente limita ferramentas, nenhum arquivo tem caractere invisível, os comandos do `hooks.json` não usam rede, `sudo` nem erro silenciado, e o template de allowlist mantém o `deny`.
-- [x] **Passo 9 do `kickoff`** relata, sem alterar, `env` de endpoint ou proxy, `enableAllProjectMcpServers` e hooks alheios ao adotar um projeto com `settings.json`.
-- [x] **Documentação**: o mapa do `CLAUDE.md` passa a citar os hooks de retomada e de servidor de dev.
-- Fora: checagem de revisão externa no gate (o `open-code-review` da Alibaba exige CLI Node, chave de um provedor de LLM e envia o diff para fora; o `reviewer` já cobre isso sem chave, e o gate é sem LLM de propósito). Teto de orçamento continua sem sinal nas métricas.
-
-## 2.5.0 — objetivo da tarefa e tarefas em andamento (PR #11)
-
-Origem: ideias adaptadas do [Paperclip](https://github.com/paperclipai/paperclip) (contexto de objetivo e checkout de tarefa), sem usar a ferramenta.
-
-- [x] **`Goal:` por tarefa**: cada tarefa do plano diz a qual item da spec serve e o que o usuário ganha; o `dev` lê o campo junto com a tarefa.
-- [x] **`claim` / `release` no ledger**: o `manager` registra o despacho do `dev`; `claim` recusa tarefa em andamento ou já concluída no ciclo, o `status` lista o que está em andamento (e o gate espera), e o `add` do `dev` libera. Não é lock entre processos: só o `manager` escreve no ledger, então o ganho é saber, depois de compactação ou `resume`, quais execuções ainda faltam reportar. Ledgers sem `claim` continuam legíveis.
-- Fora, por falta de sinal: teto de orçamento por entrega. Entra se as métricas de tempo do gate mostrarem entregas estourando.
-
-## 2.4.0 — hooks e ruído (PR #10)
-
-Origem: ideias adaptadas do ECC (`session-start`, `pre-bash-dev-server-block`) e feedback do Módulo 1 (servidor órfão, texto em Latin-1).
-
-- [x] **Retomada depois de compactação**: `hooks/hooks.json` registra um `SessionStart` (`compact|resume`) que imprime o `ledger.py status` quando há ledger e nada quando não há.
-- [x] **Encoding no commit**: o `pre-commit` recusa linhas adicionadas que não são UTF-8, com arquivo, primeira linha e como corrigir; binários e linhas antigas não contam. Ficou em `pre-commit-secret-scan.py` (o shim instalado só chama esse script, então uma instalação cobre as duas checagens) e o docstring foi atualizado.
-- [x] **Servidor de dev solto**: `PreToolUse` em `Bash` que nega o comando da linha "Rodar em desenvolvimento" do `CLAUDE.md` do projeto sem `run_in_background`. Reaproveita a linha que o template já tinha, em vez de criar outra. Sem comando entre crases, não faz nada. **Por que reintroduz o `PreToolUse`**: a 1.6.0 reduziu o scan de segredos a um `pre-commit` nativo e tirou o `PreToolUse`, `pre-push` e bloqueio de gate que prendiam o fluxo do agente. Este tem outro fim e não prende nada: só nega um comando que o próprio projeto declarou, não depende de estado do plugin e, se falhar, deixa a chamada passar.
-- [x] **Ruído do graphify**: novo passo 8.6 do `kickoff` que, só quando o `.claude/settings.json` tem o hook antigo do graphify (matcher `Bash`, sem `hook-guard`), mostra o diff que estreita o matcher para `Read|Grep|Glob` e pede confirmação; edição por parse de JSON. O graphify atual já se limita sozinho.
-- [x] **Lacunas do `dev`** (comparação com `andrej-karpathy-skills` e com o `orch-pipeline` do ECC): procurar o que já existe antes de escrever helper, componente ou dependência; remover só o que a própria mudança deixou sem uso e apenas relatar código morto alheio.
-
-## 2.3.0 — paralelismo e prevenção de retrabalho (PR #9)
-
-Origem: feedback da etapa 2 do primeiro projeto (§5 paralelismo, §6 processo de produto, §7 prevenir retrabalho). Objetivo: menos tempo por entrega e menos achados por lacuna de desenho.
-
-- [x] **Paralelismo**: `reviewer` e `qa` do ciclo em paralelo (o qa refaz só o que a correção tocou); plano como grafo de dependências (`Depends on`, `Touches`, números sequenciais reservados) e tarefas independentes em worktrees isoladas, integradas na ordem do plano; contrato "Execução em paralelo" no `CLAUDE.md` do projeto; tarefas do ciclo seguinte durante a revisão; o `dev` roda só os testes afetados.
-- [x] **Ledger**: `--seconds` por execução e tempo por agente, tarefa e ciclo (tempo de agente e tempo de relógio) nas métricas; `--origin` em cada achado (desenho, premissa, plano, execução, ambiente); `defer`/`resolve`; tarefa `cleanup`; `start --plan`.
-- [x] **Gate**: rastreabilidade critério → teste (cada `AC-...` do plano aparece num arquivo de teste); comando opcional `Auditoria`; item adiado sem decisão deixa NOT READY; tempo, origens e decisões no relatório.
-- [x] **Processo de produto**: reviewer em modo plano antes da aprovação; checkpoint visual por ciclo (capturas na menor largura e no desktop, fluxo principal gravado); casos de abuso por escrita; matriz de permissões testada por inteiro; passo de limpeza antes do gate; política de teste instável; ambiente de testes antes de produção.
-- [x] **Prevenir retrabalho**: pré-mortem por operação de escrita no `spec-checklist` e no plano; premissas técnicas provadas por spikes; plano conferido contra o código; critérios Dado/Quando/Então com id, usados como nome do teste; decisões de produto do plano listadas na aprovação.
-- [x] **Documentação**: `CLAUDE.md` na raiz (propósito, mapa, regras de mudança); README como página de apresentação; fonte única por componente.
-
-## 2.2.0 — lições da fatia 2 (PR #8)
-
-Objetivo: o plugin só orquestra e gere o desenvolvimento; tudo o que é de stack ou de projeto sai dele.
-
-- [x] **Ledger**: `fix-N` fica no ciclo corrente (reviewer na correção; qa de novo só se o último qa do ciclo reprovou); `start --archive`; saída UTF-8; achados por severidade (`--critical`, `--important`, `--minor`) e o comando `lesson`.
-- [x] **Métricas da entrega** no relatório do `gate.py`: achados por ciclo e severidade, rodadas de correção, lições adicionadas e automatizadas.
-- [x] **Manager**: seção `## Errata` no plano (a única parte que o manager edita; o brief do dev manda ler); granularidade do plano (código completo só em regras puras e camada de dados); "isso pode ser uma checagem?" antes de escrever uma lição; promoção de lição repetida em dois projetos para o plugin.
-- [x] **Invariantes** no `reviewer` e no `checklists/general.md`, aplicadas também no modo spec; o checklist geral absorve as regras sem stack de `auth`, `nextjs-react` e `postgres-supabase`, que saem; mutação como evidência no relatório do dev; mensagens de erro específicas; controle de edição concorrente; regras de domínio (dinheiro, tempo, identidade) no `spec-checklist`.
-- [x] **Kickoff sem stack**: saem `templates/nextjs/` e `templates/supabase/`; a allowlist vem dos "Comandos" do `CLAUDE.md`; novo `docs/lessons.md`.
-
-## 2.1.0 — entregue (PR #7)
-
-Objetivo: menos tempo por módulo (o fluxo 1.x levou 4 a 5 horas e mais de 20 relatórios num módulo).
-
-- [x] **Ciclos curtos**: até ~6 tarefas; por tarefa só o `dev`; no fim do ciclo um `reviewer` sobre o diff inteiro, um `qa` e uma rodada de correção em lote (o reviewer confere só a correção). Módulo de 6 tarefas: ~9 execuções de agente em vez de 20+.
-- [x] **`gate.py` no lugar do agente `gate`**: ledger, árvore limpa, Build/Typecheck/Lint/Testes do `CLAUDE.md` e scan de segredos no histórico da branch, sem LLM; grava o relatório de qualidade no READY.
-- [x] **Ledger por ciclo**: o ciclo fecha quando o qa aprova; uma segunda reprovação pede decisão do usuário.
-
-## 2.0.0 — entregue (PR #6)
-
-Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `verification-loop`), em versão enxuta.
-
-- [x] **Tamanho decide as etapas** (pequeno, padrão, grande) e duas aprovações do usuário: o plano e o merge/push.
-- [x] **Um laço por tarefa**: `dev` (TDD, migrations e doc do módulo) → `reviewer` (um agente, checklists por stack, só achados com prova) → `qa`; no máximo 3 rodadas antes de perguntar.
-- [x] **`gate` como verification-loop local**: ledger, build, tipos, lint, testes, segredos no histórico e diff → READY / NOT READY.
-- [x] **Ledger simples** (`ledger.py`, 164 linhas): `start`, `add`, `note`, `status [--check]`.
-- [x] **Saem**: `security`, `audit`, `design`, `code-review`, `db` e `docs` como agentes; `package.py`, `findings.py`, ferramentas de mutação, lições com contadores (as globais viraram itens dos checklists), hook `SubagentStop`, worktree obrigatória, revisão de spec com várias rodadas.
-- [x] **Lições por projeto** em `docs/lessons.md`, lidas pelo `dev` e pelo `reviewer`.
-
-## Backlog
-
-- **Hooks do plugin sem `python`** (revisão da 2.7.1): o `hooks.json` chama `python`, e Linux e macOS costumam ter só `python3`; ali o hook de retomada e o guarda do Bash não rodam. Um laço POSIX que tenta os dois quebraria no Windows sem Git Bash, onde o hook roda no PowerShell, então a 2.7.1 só documenta o requisito no README. Entra quando houver um jeito que funcione nos dois shells (por exemplo, um hook por shell com o campo `shell`), testado em Linux. Esforço: P.
-
-- **VALIDAR das entregas empilhadas na faixa** (revisão da 2.8): a faixa e o `/andamento` contam só o ledger atual; os itens de uma entrega anterior empilhada (`ledger-<slug>.jsonl`) não aparecem, e um arquivo desses não diz se é entrega empilhada à espera ou já encerrada. Entra se o `start --archive` passar a registrar isso. Esforço: P.
-
-- **Guarda do Bash também na ferramenta PowerShell** (2.7.2): no Windows a sessão principal tem a ferramenta PowerShell, que o `bash-guard.py` não vê (os agentes não a têm). Entra com um leitor das aspas do PowerShell, testado. Esforço: P.
-
-- **Custo da entrega com o `ccusage`** (pedido do usuário, a partir de uma sessão de design do controle-financeiro): declarar a CLI `ccusage` como dependência conferida (aviso e instrução de instalação quando falta). Nenhuma parte do plugin chama o `ccusage` hoje (os tokens vêm do aviso de término do agente), e uma dependência sem uso contraria o princípio "enxuto"; entra junto com o uso, por exemplo o custo da entrega no relatório do gate. Cuidado conhecido: com `--offline` ele não tem o preço de todos os modelos, então a checagem não depende do modo offline. Esforço: P.
-
-- **WSL2 para o modo multi-instância** (fora da 2.8): não resolve o gargalo medido (a suíte e2e longa, item 17 da 2.7.0), plugins não carregam nas sessões WSL do app Desktop e custa outra instalação do Claude Code (memória, plugins e configurações à parte), integração mais difícil com o navegador do Windows e hooks e `pipeline.home` reinstalados. Volta se o próprio Windows virar o gargalo; migração só entre entregas. Esforço: P no plugin.
-
-## Entregues
-
+- **2.7.2** (PR #20): pular o `pre-commit` passa a ser negado pelo `bash-guard.py`, que lê o comando como o shell (a flag citada na mensagem do commit não conta); saem os deny do kickoff com curinga antes da flag.
+- **2.7.1** (PR #19, [proposta](proposta-2.7.1.md)): lições da etapa 4 e revisão do plugin inteiro. Modo autônomo que não para sozinho (heartbeat, no máximo 3 rodadas de correção por ciclo); `waive`, `plan --path` e ledger achado de dentro de uma worktree; cinco READY falsos do gate fechados; scan de segredos guiado pelos hunks; branch e `start` antes da spec; `ask` para todo `git push`.
+- **2.7.0** (PR #14, [proposta](proposta-2.7.0.md)): lições da etapa 3. Glob de verdade em "Arquivos de teste"; worktrees preparadas pelo manager e contrato "Execução em paralelo"; plano rascunhado por subagente; modo autônomo com lista VALIDAR; capturas persistentes do `qa`; revisão de segurança nativa antes do gate e veto a extensões de terceiros.
+- **2.6.1** (PR #13): o `kickoff` reconhece o `pipeline.home` quebrado e roda o `pre-commit` instalado uma vez para provar que o scanner é encontrado.
+- **2.6.0** (PR #12): endurecimento a partir das regras do AgentShield (ECC). Caracteres invisíveis recusados no commit, mais formatos de chave no scan, `discovery` sem ferramentas de escrita, `deny` de `sudo`, force push e `chmod 777`, teste de integridade do plugin.
+- **2.5.0** (PR #11): `Goal:` por tarefa e `claim`/`release` no ledger, ideias do [Paperclip](https://github.com/paperclipai/paperclip).
+- **2.4.0** (PR #10): hook de retomada depois de compactação, UTF-8 no commit, servidor de dev solto negado, lacunas do `dev` (procurar o que já existe, remover só o que a mudança deixou sem uso).
+- **2.3.0** (PR #9): paralelismo (`reviewer` e `qa` juntos, plano como grafo, worktrees), tempo e origem dos achados no ledger, critério → teste no gate, pré-mortem, spikes e critérios Dado/Quando/Então.
+- **2.2.0** (PR #8): o plugin só orquestra; saem os templates e checklists de stack; métricas da entrega no gate; Invariantes no `reviewer` e no checklist geral.
+- **2.1.0** (PR #7): ciclos curtos de até ~6 tarefas, `gate.py` sem LLM no lugar do agente `gate`, ledger por ciclo.
+- **2.0.0** (PR #6): fluxo simples no formato do ECC, com tamanho que decide as etapas, duas aprovações, um laço `dev` → `reviewer` → `qa`, ledger simples e lições por projeto.
 - **1.6.0** (PR #5): scan de segredos reduzido a um `pre-commit` nativo; sem `PreToolUse`, `pre-push` nem bloqueio de gate.
 - **1.5.1** (PR #5): captura de relatórios por `SubagentStop`, Playwright no kickoff, correções de negações falsas do hook, testes com `mkdtemp`.
-- **1.5.0** (PR #4): rerrevisão escopada; relatório por tarefa; STALE por arquivo e domínio; revisores exigidos no `status`; ferramentas de mutação; `pre-commit` nativo; estado do remoto por `ls-remote`; `git config` fechado por padrão; sem exceção para caminhos derivados do git.
-- **1.4.0** (PR #3): lições com contadores e injeção por caminho; checklists por stack; validação do relatório do implementador; `save-report`; adendos em arquivos; kickoff com allowlist e complementos Next/Supabase; allowlist de segredos por fingerprint.
+- **1.5.0** (PR #4): rerrevisão escopada; relatório por tarefa; STALE por arquivo e domínio; revisores exigidos no `status`; ferramentas de mutação; `pre-commit` nativo; estado do remoto por `ls-remote`; `git config` fechado por padrão.
+- **1.4.0** (PR #3): lições com contadores e injeção por caminho; checklists por stack; validação do relatório do implementador; `save-report`; kickoff com allowlist; allowlist de segredos por fingerprint.
 
 ## Notas de atualização
 
-Termine a entrega em andamento antes de atualizar o plugin.
+Termine a entrega em andamento antes de atualizar o plugin. Ao pular versões, leia as notas de cada uma, da mais antiga para a mais nova.
 
+- **2.8.2**: nada muda para quem atualiza.
 - **2.8.1**: lê os ledgers da 2.8. Só prompts mudam: o relatório do `reviewer` ganha a linha de achado de segurança (Exploit e Status), e um achado `needs_validation` pede na rodada de correção o teste que o decide.
-
-- **2.8.0**: lê os ledgers da 2.7. O `status --json` muda a lista `validar`: cada item é `{id, text, decision}` (antes, só o texto), para quem lê o JSON por fora do plugin. A linha de andamento e o `/andamento` pedem o Claude Code v2.1.287 ou mais novo e aparecem sozinhos; o resto funciona sem eles. No modo autônomo, push da branch principal, merge nela e `gh pr merge` pela ferramenta Bash passam a ser negados pelo hook, não só pelo prompt (a ferramenta PowerShell segue no backlog). O `frontend-design@claude-plugins-official` passa a ser dependência; se a atualização não o trouxer, instale com `claude plugin install frontend-design@claude-plugins-official` (o `kickoff` avisa).
-
+- **2.8.0**: lê os ledgers da 2.7. O `status --json` muda a lista `validar`: cada item é `{id, text, decision}` (antes, só o texto), para quem lê o JSON por fora do plugin. A linha de andamento e o `/andamento` pedem o Claude Code v2.1.287 ou mais novo e aparecem sozinhos; o resto funciona sem eles. No modo autônomo, push da branch principal, merge nela e `gh pr merge` pela ferramenta Bash passam a ser negados pelo hook, não só pelo prompt. O `frontend-design@claude-plugins-official` passa a ser dependência; se a atualização não o trouxer, instale com `claude plugin install frontend-design@claude-plugins-official` (o `kickoff` avisa).
 - **2.7.2**: lê os ledgers da 2.7.1. Pular o `pre-commit` passa a ser negado pelo hook do plugin, que ignora a mensagem do commit. Quem rodou o `kickoff` da 2.7.1 apaga à mão do `.claude/settings.json` os deny `Bash(git commit *--no-v*)`, `Bash(git commit * -n *)` e `Bash(git commit * -n)`, que negavam commits cuja mensagem citava a flag, e roda o `kickoff` de novo para receber `Bash(git commit --no-v*)`.
-
 - **2.7.1**: lê os ledgers da 2.7.0. O gate fica mais rígido: um commit depois da última revisão do `reviewer` (fora o plano, o `docs/lessons.md` e os relatórios), um comando que altera arquivo versionado e uma `--base` inválida deixam NOT READY; um comando vazio conta como não configurado (NOT READY só na linha Testes, que é obrigatória); duas linhas "Testes" passam a rodar as duas. No modo autônomo, a entrega para depois de 3 rodadas de correção num ciclo, em vez de seguir até o PASS. `discovery` e `qa` passam a ter só as ferramentas listadas no próprio agente (nada de MCP, navegador ou subagente). Sem `--base`, o gate usa a base gravada no `start`. O relatório de qualidade passa pelos testes do projeto antes do READY. Rode o `kickoff` de novo para receber o `ask` do `git push` e os `deny` novos do `--no-verify`, e apague à mão do `.claude/settings.json` o `Write(.pipeline-secrets-allow)` (o Claude Code nunca consulta regras `Write` e avisa na abertura; a regra `Edit` já cobre o arquivo). Uma entrada do `.pipeline-secrets-allow` para arquivo com nome não ASCII precisa ser gerada de novo (o caminho entra sem aspas no fingerprint). O passo 8.6 do kickoff saiu: se o `.claude/settings.json` ainda tiver o hook antigo do graphify (matcher `Bash` sem `hook-guard`), rode `python -m graphify claude install`.
-
 - **2.7.0**: lê os ledgers da 2.6 (sem `mode`, a entrega é supervisionada). A linha "Arquivos de teste" agora é glob de verdade: `*` não atravessa pastas e `**/` casa zero ou mais, então use `**/` onde um teste pode estar em subpasta; maiúsculas e minúsculas contam também no Windows (antes não contavam), então o glob precisa ter a mesma grafia das pastas; o gate avisa o glob inválido ou que não casa nenhum arquivo. Rode o `kickoff` de novo para receber as linhas novas de "Execução em paralelo" e "Servidor para a verificação de interface".
 - **2.6.1**: nada muda para quem atualiza. Se um commit for barrado com "secret scanner not found", `git config --global pipeline.home` aponta para um caminho que não existe mais: aponte para `<clone>/plugins/pipeline`.
 - **2.6.0**: os checks novos do `pre-commit` (caracteres invisíveis e mais formatos de chave) chegam com o plugin; o `pre-commit` instalado já chama o scanner, sem reinstalar. Para a allowlist nova (`deny` de `sudo`, force push e `chmod 777`), rode o `kickoff` de novo e confirme a mudança em `.claude/settings.json`. Commits antigos com caracteres invisíveis não são reabertos.
