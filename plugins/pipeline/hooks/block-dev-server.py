@@ -39,8 +39,8 @@ def dev_command(start):
         folder = parent
 
 
-HEREDOC = re.compile(r"(?P<head>[^\n]*?)(?<!<)<<(?!<)-?\s*(['\"]?)(?P<tag>\w+)\2[^\n]*\n(?P<body>.*?)"
-                     r"(?:\n[ \t]*(?P=tag)[ \t]*(?=\n|$)|\Z)", re.S)
+HEREDOC = re.compile(r"^(?P<head>[^\n]*?)(?<!<)<<(?!<)-?\s*(['\"]?)(?P<tag>\w+)\2[^\n]*\n(?P<body>.*?)"
+                     r"(?:\n[ \t]*(?P=tag)[ \t]*(?=\n|$)|\Z)", re.S | re.M)
 SHELL_INPUT = re.compile(r"(?:^|[\s;&|(])(?:ba|z|da)?sh(?:\s+-\w+)*\s*$")
 QUOTED = re.compile(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"")
 

@@ -309,6 +309,8 @@ check("waive refuses an agent whose latest run is not a FAIL", r.returncode != 0
 check("waive needs a reason", run("waive", "--agent", "reviewer", ledger=WAIVE).returncode != 0)
 unmeasured = status(WAIVE)["metrics"]["time"]["unmeasured"]
 failed_head = status(WAIVE)["reviewer"][0]["head"]
+subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "after the review"], cwd=repo, check=True,
+               capture_output=True)
 r = run("waive", "--agent", "reviewer", "--reason", "the finding is wrong: the caller validates", ledger=WAIVE)
 state = status(WAIVE)
 check("waive accepts the open findings of the latest FAIL: the cycle closes and the ruling is a note",

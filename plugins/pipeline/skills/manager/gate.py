@@ -9,7 +9,8 @@ appears in a tracked test file (the globs on the "Arquivos de teste" line of the
 space-separated globs where * and ? stay within one folder, **/ matches zero or more folders and {a,b} is either; an
 invalid glob, or one that matches no tracked file, prints a warning; without that line, every tracked file that is
 not Markdown); no commit after the head of the ledger's latest reviewer run changes anything but the plan,
-docs/lessons.md or docs/quality-reports/ (first-parent commits only, so a merged front is not counted);
+docs/lessons.md, docs/quality-reports/ or the user's .pipeline-secrets-allow (first-parent commits only, so a merged
+front is not counted, and tasks are integrated by fast-forward or cherry-pick);
 every command of that section passes (lines like "- Testes: `<command>`"; Build, Typecheck, Lint, Testes and the
 optional Auditoria are run, a second line of the same kind runs too under its own label, such as "Testes (e2e)", a
 blank command counts as not configured, and --cmd adds or overrides one, or with no command removes it); the
@@ -23,7 +24,7 @@ merge base with the default branch. With --report, the gate writes and stages do
 (checks, commits, ledger mode and notes, the VALIDAR list, deferred decisions, a changed "Comandos" section and the
 delivery metrics: findings per cycle and origin, fix rounds, time per cycle, task and agent, lessons added and
 automated) before running the commands, so the project's own tests check it too; READY rewrites its check lines,
-NOT READY removes it."""
+NOT READY removes it, and a draft of the same report left staged by a run that was killed is removed first."""
 import argparse
 import datetime
 import difflib
@@ -44,6 +45,7 @@ CRITERION = re.compile(r"(?<![\w-])AC-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*")
 TIMEOUT = 900
 REPORTS = "docs/quality-reports"
 LESSONS = "docs/lessons.md"
+SECRETS_ALLOW = ".pipeline-secrets-allow"
 
 
 def git(*args):
@@ -125,10 +127,10 @@ def secret_findings(base):
     scanner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(scanner)
     cwd = os.getcwd()
-    diff = scanner.git_checked(["log", "-p", "-m", "--no-ext-diff", "--no-textconv", "--text", "--format=",
-                                f"{base}..HEAD", "--"] + scanner.EXCLUDES, cwd)
-    names = scanner.git_checked(["log", "--name-only", "-z", "-m", "--diff-filter=d", "--format=", f"{base}..HEAD"],
-                                cwd)
+    diff = scanner.git_checked(["log", "-p", "--diff-merges=separate", "--no-ext-diff", "--no-textconv", "--text",
+                                "--format=", f"{base}..HEAD", "--"] + scanner.EXCLUDES, cwd)
+    names = scanner.git_checked(["log", "--name-only", "-z", "--diff-merges=separate", "--diff-filter=d", "--format=",
+                                 f"{base}..HEAD"], cwd)
     return scanner.scan(diff, scanner.names(names), scanner.load_allowlist(cwd, "HEAD"))
 
 
@@ -164,7 +166,7 @@ def glob_regex(pattern):
 
 def traceability(plan):
     if not plan:
-        return True, "no plan in the ledger (start --plan)"
+        return True, "no plan in the ledger (small work has none; otherwise record it with ledger.py plan --path)"
     if not os.path.exists(plan):
         return False, f"plan not found: {plan}"
     ids = sorted(set(CRITERION.findall(open(plan, encoding="utf-8").read())))
@@ -202,9 +204,12 @@ def reviewed(ledger):
         return True, "no reviewer head in the ledger"
     if git("merge-base", "--is-ancestor", head, "HEAD")[0] != 0:
         return False, f"the reviewed head {head[:7]} is not in this history: run the reviewer on the current head"
-    plan = (ledger.get("plan") or "").replace("\\", "/").removeprefix("./")
+    plan = ledger.get("plan") or ""
+    if os.path.isabs(plan):
+        plan = os.path.relpath(plan, git("rev-parse", "--show-toplevel")[1].strip())
+    plan = plan.replace("\\", "/").removeprefix("./")
     out = git("log", "--first-parent", "--no-merges", "-z", "--name-only", "--format=", f"{head}..HEAD")[1]
-    changed = sorted({name.strip("\n") for name in out.split("\0")} - {"", plan, LESSONS})
+    changed = sorted({name.strip("\n") for name in out.split("\0")} - {"", plan, LESSONS, SECRETS_ALLOW})
     changed = [name for name in changed if not name.startswith(REPORTS + "/")]
     return not changed, (f"changed after the reviewed head {head[:7]} with no review: " + ", ".join(changed)
                          if changed else "")
@@ -342,6 +347,9 @@ def main():
     pending = problem or ("; ".join(ledger["pending"]) if ledger["pending"] else "")
     checks.append(("Ledger", not pending, pending))
 
+    if args.report and git("diff", "--cached", "--name-only", "--", report_path(args.report))[1].strip():
+        print(f"warning: removing {report_path(args.report)}, a draft left by a gate run that did not finish", flush=True)
+        drop_report(report_path(args.report), git("cat-file", "-e", f"HEAD:{report_path(args.report)}")[0] == 0)
     dirty = git("status", "--porcelain")[1].strip()
     checks.append(("Clean tree", not dirty, dirty))
 

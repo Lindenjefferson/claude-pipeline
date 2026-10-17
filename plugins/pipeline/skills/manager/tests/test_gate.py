@@ -297,6 +297,24 @@ close_cycle("fix-1")
 r = gate()
 check("the reviewer on that commit makes the gate READY again", r.returncode == 0, r.stdout)
 
+commit(".pipeline-secrets-allow", "# user entries\n", "chore: the user allowlists a false positive")
+r = gate()
+check("a commit of the secret-scan allowlist (the user's file) after the last review keeps the gate READY",
+      r.returncode == 0, r.stdout)
+commit("z.test.txt", "test('AC-Z1-1 given z')\n", "test: z")
+commit("docs/plan.md", "# plan\n- AC-Z1-1 Given z.\n## Errata\n", "docs: plan z")
+close_cycle("fix-0")
+ledger_cmd("plan", "--path", os.path.join(repo, "docs", "plan.md"))
+commit("docs/plan.md", "# plan\n- AC-Z1-1 Given z.\n## Errata\n- renumbered\n", "docs: errata")
+r = gate()
+check("an Errata commit on a plan recorded with an absolute path keeps the gate READY", r.returncode == 0, r.stdout)
+os.makedirs(folder, exist_ok=True)
+write(f"docs/quality-reports/{__import__('datetime').date.today().isoformat()}-left.md", "# half a report\n")
+sh("git", "add", "docs/quality-reports")
+r = gate("--report", "left")
+check("a draft report left staged by a killed gate run is cleared by the next run of the same report",
+      r.returncode == 0 and "Clean tree: PASS" in r.stdout, r.stdout)
+sh("git", "commit", "-q", "--no-verify", "-m", "docs: quality report left")
 r = gate("--cmd", "Testes=")
 check("an empty test command is not configured: NOT READY",
       r.returncode == 1 and "Testes:     FAIL" in r.stdout and "not configured" in r.stdout, r.stdout)
@@ -343,5 +361,17 @@ close_cycle()
 r = gate()
 check("a branch that only removes a tracked .env file passes the secret check",
       re.search(r"Secrets:\s+PASS", r.stdout), r.stdout)
+
+sh("git", "config", "log.diffMerges", "cc")
+sh("git", "switch", "-q", "-c", "side-secret")
+commit("side.txt", "s\n", "feat: side")
+sh("git", "switch", "-q", "feat/drop-env")
+sh("git", "merge", "-q", "--no-ff", "--no-commit", "side-secret")
+write("merged.txt", SECRET)
+sh("git", "add", "merged.txt")
+sh("git", "commit", "-q", "--no-verify", "-m", "merge with a secret added in the merge itself")
+r = gate()
+check("a secret added in a merge commit is found even with log.diffMerges=cc in the git config",
+      re.search(r"Secrets:\s+FAIL", r.stdout) and "merged.txt" in r.stdout, r.stdout)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
