@@ -21,10 +21,11 @@ shows it) and still runs the branch's commands. Prints READY or NOT READY and ex
 
 <base> is --base (an error when it is not a commit), or else the base the ledger recorded at start, or else the
 merge base with the default branch. With --report, the gate writes and stages docs/quality-reports/<date>-<slug>.md
-(checks, commits, ledger mode and notes, the VALIDAR list with the user's decision on each, deferred decisions, a
+(checks, commits, ledger mode and notes, the VALIDAR list with the user's decision or pending, deferred decisions, a
 changed "Comandos" section and the delivery metrics: findings per cycle and origin, fix rounds, time per cycle, task
-and agent, tokens per agent and task, lessons added and automated) before running the commands, so the project's own tests check it too; READY rewrites its check lines,
-NOT READY removes it, and a draft of the same report left staged by a run that was killed is removed first."""
+and agent, tokens per agent and task, lessons added and automated) before running the commands, so the project's
+own tests check it too; READY rewrites its check lines, NOT READY removes it, and a draft of the same report left
+staged by a run that was killed is removed first."""
 import argparse
 import datetime
 import difflib

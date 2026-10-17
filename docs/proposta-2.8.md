@@ -9,7 +9,7 @@ Cada item diz o problema, a mudança e onde ela entra. **Teste primeiro** marca 
 ## A. Andamento visível
 
 1. **Tempo e tokens reais no ledger** (teste primeiro). Nas etapas 4 e 5, quatro durações foram estimadas antes do aviso de término e corrigidas depois por nota (o fix-1 da etapa 5 ficou com 1500 s; o real foi 211 s). O aviso de término do agente já traz a duração e os tokens.
-   - `ledger.py add` ganha `--tokens N`. `status` mostra tokens por agente e por tarefa ao lado do tempo, e o `--json` passa a trazer a hora do despacho de cada tarefa em andamento (hoje só no texto da pendência), para o tempo decorrido.
+   - `ledger.py add` ganha `--tokens N`. As métricas do `status --json` e o relatório do gate mostram tokens por agente e por tarefa ao lado do tempo, e o `--json` passa a trazer a hora do despacho de cada tarefa em andamento (hoje só no texto da pendência), para o tempo decorrido.
    - O manager grava `--seconds` e `--tokens` com os números do aviso de término. Quando integra antes do aviso (relatório entregue e worktree parada), grava sem os dois: nunca estima.
    - O relatório do gate mostra tempo e tokens por agente.
    - Ledgers antigos seguem legíveis (sem `tokens`, a coluna fica vazia).
@@ -18,7 +18,7 @@ Cada item diz o problema, a mudança e onde ela entra. **Teste primeiro** marca 
 2. **Tabela de progresso viva** (mod do Claude Code, a partir da v2.1.287). Um módulo JavaScript dentro do próprio plugin (`hooks/andamento.js`, listado em `modules` no `hooks.json`, ao lado dos hooks de hoje).
    - **Faixa acima do prompt**, só quando o ledger da worktree tem uma entrega aberta: `pipeline · etapa-5 · cycle 2 · autonomous · ▶ T2.1 14m · reviewer FAIL · qa — · VALIDAR 1 · next: <a primeira pendência>` (os textos do plugin ficam em inglês, como os do `ledger.py`), com o modo autônomo marcado.
    - **`/andamento`**, que abre um painel na hora, mesmo com o manager no meio de um trabalho: a tabela do ciclo atual (tarefa, estado, tempo, tokens), reviewer e qa (veredito, achados, tempo), pendências, VALIDAR e adiados abertos; uma linha por ciclo anterior; e as outras frentes (cada worktree com ledger próprio, uma linha cada). Onde o mod não desenha (`claude -p`, sessão WSL do app), `/andamento` responde em texto.
-   - **Dados**: o mod roda `ledger.py status --json` e só desenha; nenhuma regra no JavaScript. Para não rodar o Python à toa, confere a data do arquivo do ledger a cada 5 s e só relê quando ela muda; o tempo decorrido corre no próprio mod.
+   - **Dados**: o mod roda `ledger.py status --json` e só desenha; nenhuma regra no JavaScript. Para não rodar o Python à toa, confere a data do arquivo do ledger a cada 5 s e só relê quando ela muda (ou uma vez por minuto); o tempo decorrido corre no próprio mod.
    - **Testes**: `claude plugin test plugins/pipeline` (testes `.test.ts` que simulam o `ledger.py`), somado à seção "Testar e validar" do `CLAUDE.md`.
    - **Protótipo primeiro**: testado numa sessão de teste com uma cópia de ledger real, sem tocar no controle-financeiro, antes de virar release.
    - **Risco**: a API de mods é nova e muda a cada versão do Claude Code, e o plugin passa a ter JavaScript além do Python. O README diz a versão mínima testada.
@@ -32,7 +32,7 @@ Cada item diz o problema, a mudança e onde ela entra. **Teste primeiro** marca 
    - Onde: `hooks/bash-guard.py`.
 
 5. **`/validar`** (teste primeiro no ledger). A lista VALIDAR cresce no modo autônomo (a etapa 5 aprovou o plano com 13 itens) e é confirmada de memória no chat.
-   - Cada item VALIDAR ganha um id pela ordem (V1, V2...), também nos ledgers antigos. `ledger.py validate --id V2 --decision <texto>` grava a decisão; `status` lista só os pendentes, e o relatório do gate mostra cada um com a decisão.
+   - Cada item VALIDAR ganha um id pela ordem (V1, V2...), também nos ledgers antigos. `ledger.py validate --id V2 --decision <texto>` grava a decisão; `status` lista os pendentes à parte dos decididos, e o relatório do gate mostra cada um com a decisão ou como pendente.
    - Skill `validar` (`/pipeline:validar`): percorre os pendentes um a um com uma pergunta (confirmar, mudar ou deixar para depois) e grava cada resposta. "Mudar" vira tarefa ou correção da entrega, conduzida pelo manager.
    - VALIDAR pendente não trava o gate, como hoje; no ✋ 2 o manager oferece o `/validar` antes do merge.
    - Onde: `ledger.py`, `gate.py`, `skills/validar/SKILL.md`, `manager/SKILL.md`.
@@ -60,7 +60,7 @@ Pedido do usuário a partir de uma sessão de design do controle-financeiro: o D
 ## E. Enxuto
 
 - A regra do manager que manda medir a duração sai, substituída pelos números do aviso de término (item 1).
-- Ao tocar `manager/SKILL.md`, os trechos que só repetem o que `ledger.py status` já mostra viram apontamento.
+- Ao tocar `manager/SKILL.md`, sai o que repete o `ledger.py` ou outro passo (o NOT READY por adiado sem decisão, a segunda chamada do `validar` na volta do usuário).
 - Fica de fora desta proposta (está no backlog): o guarda do Bash também na ferramenta PowerShell e o `python3` nos hooks.
 
 ## Ordem de implementação

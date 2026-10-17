@@ -26,15 +26,16 @@ It closes when the latest reviewer PASS came after the latest dev run, qa PASSed
 task, and qa ran again after every fix of a blocking (FAIL) finding. The next regular dev run opens the next cycle.
 A fix round (task fix-N) and the cleanup task (task cleanup) stay in the current cycle, even a closed one: they need
 a reviewer pass, and qa again only when a FAIL came before them. Every finding carries its origin (design,
-assumption, plan, execution, environment); --seconds takes 90, 12m, 1h5m or 12m30s, and --seconds and --tokens come
-from the agent's completion notice, never an estimate (a run without the notice goes unmeasured). A deferred item with no
-decision keeps the delivery from the gate. start --archive moves an existing delivery to ledger-<old-slug>.jsonl next
-to the ledger first. --check exits 1 while anything is pending, so the gate can rely on it. A cycle whose reviewer or
-qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on up to three, then the
-delivery stops. waive is refused when the dev ran after that FAIL (the fix needs its review); it records the reason
-as a note and counts as that agent's PASS at the head it reviewed. Notes marked --validar (and waivers in autonomous
-mode) are listed apart, numbered V1, V2... in the order written, for the user to confirm on return; validate records
-the decision, and status lists only the items still waiting for one. A ledger with no mode entry is supervised.
+assumption, plan, execution, environment); --seconds takes 90, 12m, 1h5m or 12m30s, and --seconds and --tokens
+come from the agent's completion notification, never an estimate (a run without it goes unmeasured). A deferred item
+with no decision keeps the delivery from the gate. start --archive moves an existing delivery to
+ledger-<old-slug>.jsonl next to the ledger first. --check exits 1 while anything is pending, so the gate can rely on
+it. A cycle whose reviewer or qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on
+up to three, then the delivery stops. waive is refused when the dev ran after that FAIL (the fix needs its review); it
+records the reason as a note and counts as that agent's PASS at the head it reviewed. Notes marked --validar (and
+waivers in autonomous mode) are listed apart, numbered V1, V2... in the order written, for the user to confirm on
+return; validate records the decision, and status lists the items still waiting apart from the decided ones. A
+ledger with no mode entry is supervised.
 
 Without --ledger, the ledger is .superpowers/ledger.jsonl at the root of the current worktree, or of the main
 worktree when the current one has none (a task worktree), except for start, which always uses the current one. A
@@ -449,7 +450,7 @@ def status(args):
     else:
         print(f"delivery {report['slug']} (base {str(report['base'])[:12]}), cycle {report['cycle']}")
         if auto:
-            print("mode: autonomous (approvals become VALIDAR notes; never merge into or push the main branch)")
+            print("mode: autonomous (approvals become VALIDAR notes; never merge into or push the default branch)")
         for task, verdict in report["tasks"].items():
             print(f"- {task}: {verdict}")
         for agent in ("reviewer", "qa"):
@@ -497,8 +498,8 @@ def main():
     for severity in SEVERITIES:
         command.add_argument(f"--{severity}", type=count, default=0)
     command.add_argument("--origin", default="", help="design=N,assumption=N,plan=N,execution=N,environment=N")
-    command.add_argument("--seconds", help="how long the run took, from its completion notice: 90, 12m, 1h5m or 12m30s")
-    command.add_argument("--tokens", type=count, help="the tokens the run used, from its completion notice")
+    command.add_argument("--seconds", help="how long the run took, from its completion notification: 90, 12m, 1h5m or 12m30s")
+    command.add_argument("--tokens", type=count, help="the tokens the run used, from its completion notification")
     command.add_argument("--summary", default="")
     command.set_defaults(run=add)
     for name, run in (("claim", claim), ("release", release)):

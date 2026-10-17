@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """PreToolUse hook (matcher Bash, see hooks.json): denies skipping the secret-scan pre-commit hook, anything that
-reaches the main branch while the delivery is in autonomous mode, and the project's dev server outside background
+reaches the default branch while the delivery is in autonomous mode, and the project's dev server outside background
 mode.
 
 In autonomous mode (the latest mode entry of the ledger ledger.py finds from the session's directory), denied in the
-foreground or background: a git push of the main branch (named by origin/HEAD, else main or master: as a refspec's
+foreground or background: a git push of the default branch (named by origin/HEAD, else main or master: as a refspec's
 target, with --all or --mirror, or with no refspec while it is checked out), a git merge while it is checked out
 (--abort and --quit pass), and gh pr merge. Pushing and merging the work branch pass; in supervised mode, or with
 no ledger, nothing here is denied and the ask rule on git push applies.
@@ -226,7 +226,7 @@ def push_reaches(arguments, main, current):
 
 
 def reaches_main(command, cwd):
-    """True in autonomous mode when the command merges into or pushes the main branch, or merges a pull request."""
+    """True in autonomous mode when the command merges into or pushes the default branch, or merges a pull request."""
     calls = [(program, git_command(arguments) if program == "git" else ("", arguments, False))
              for program, arguments, _ in simple_commands(command)]
     calls = [(program, name, rest) for program, (name, rest, _) in calls
@@ -280,9 +280,9 @@ def main():
                   "secret committed stays in the history. Commit without it; if the hook blocks, fix what it reports "
                   "(a false positive is allowlisted by the user, as its message explains).")
     elif reaches_main(command, cwd):
-        reason = ("The delivery is in autonomous mode (the ledger says so), and nothing reaches the main branch without "
-                  "the user: no push to it, no merge into it, no pull request merge. Record what is ready as "
-                  "note --validar and leave the merge and the push for the user's approval when they return.")
+        reason = ("The delivery is in autonomous mode (the ledger says so), and nothing reaches the default branch "
+                  "without the user: no push to it, no merge into it, no pull request merge. Leave the merge and the "
+                  "push for approval 2, when the user returns.")
     elif tool_input.get("run_in_background"):
         return
     else:

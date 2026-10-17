@@ -288,8 +288,8 @@ check("validate of an unknown id is refused",
       run("validate", "--id", "V9", "--decision", "x", ledger=AUTO).returncode != 0)
 run("mode", "autonomous", ledger=AUTO)
 text = run("status", ledger=AUTO).stdout
-check("text status says autonomous mode never merges into nor pushes the main branch",
-      "never merge into or push the main branch" in text, text)
+check("text status says autonomous mode never merges into nor pushes the default branch",
+      "never merge into or push the default branch" in text, text)
 
 CLAIMS = ".superpowers/claims.jsonl"
 run("start", "--slug", "claims", ledger=CLAIMS)

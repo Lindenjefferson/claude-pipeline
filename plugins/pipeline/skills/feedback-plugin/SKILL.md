@@ -10,13 +10,13 @@ The plugin takes delivery feedback only as general rules that hold in any stack.
 1. **Read**, without changing anything:
    - `python "${CLAUDE_PLUGIN_ROOT}/skills/manager/ledger.py" status --json`: metrics (findings per cycle and origin, fix rounds, time and tokens per agent and task), notes, waivers, deferred items with their decisions, lessons.
    - The delivery's quality report in `docs/quality-reports/`, and the lines its branch added to `docs/lessons.md` (`git diff <base>..HEAD -- docs/lessons.md`, with the base from `status`).
-   - `.superpowers/plugin-feedback.md`, if the project keeps one (frictions noted during the delivery).
+   - A file of frictions noted during the delivery, if the project keeps one (for example `.superpowers/plugin-feedback.md`).
    - The plugin version, from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`.
 2. **Keep what the plugin can act on**: a step of the flow that stalled, was skipped or was done twice; a check of the gate, the ledger or a hook that missed a defect or blocked a correct change; an agent instruction that was ignored or misread; where the time or the tokens went, when a flow change would cut it. A lesson about the stack or about this project stays in the project: leave it out, with one line saying so. A lesson that repeats one learned in another project (seen there, or the user says so) is marked as a candidate principle for `checklists/general.md`.
-3. **Write `.superpowers/pedido-plugin.md`**, in the user's language:
-   - **Contexto**: the delivery slug, the plugin version, the mode (supervised or autonomous).
-   - **Métricas**: one short table from the ledger.
-   - **Itens**, numbered: the problem, its evidence (a ledger note, a commit, a path, a measured time) and the general rule proposed.
-   - **Fora**: what was left out and why, one line each.
-   The file leaves the project: no credentials, no real data, no private paths beyond the project's own.
+3. **Write `.superpowers/pedido-plugin.md`** in the user's language, with these sections:
+   - **Context**: the delivery slug, the plugin version, the mode (supervised or autonomous).
+   - **Metrics**: one short table from the ledger.
+   - **Items**, numbered: the problem, its evidence and the general rule proposed.
+   - **Left out**: what was left out and why, one line each.
+   The file leaves the project: evidence is ledger text, paths relative to the project and measured numbers, never product content, real data or credentials.
 4. Tell the user the path, and that they bring it to the plugin's session. Never send it, and never open or change the plugin's repository.
