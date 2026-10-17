@@ -29,7 +29,7 @@ Com você ausente, o modo autônomo do [manager](plugins/pipeline/skills/manager
 
 ## Começo rápido
 
-Requisitos: Claude Code com plugins (a linha de andamento e o `/andamento` pedem a v2.1.287 ou mais nova, testados na v2.1.302), Python 3 e git no `PATH` (o Python com o nome `python`, que os hooks do plugin chamam; no Linux e no macOS, onde costuma haver só `python3`, instale o `python-is-python3` ou crie o link), e o plugin [`superpowers`](https://github.com/obra/superpowers) (`superpowers@claude-plugins-official`, declarado como dependência). Opcional: [graphify](https://github.com/Graphify-Labs/graphify) (`pip install graphifyy`) para o grafo de conhecimento, e o plugin `frontend-design@claude-plugins-official` para a rodada de design das telas.
+Requisitos: Claude Code com plugins (a linha de andamento e o `/andamento` pedem a v2.1.287 ou mais nova, testados na v2.1.302), Python 3 e git no `PATH` (o Python com o nome `python`, que os hooks do plugin chamam; no Linux e no macOS, onde costuma haver só `python3`, instale o `python-is-python3` ou crie o link), e os plugins [`superpowers`](https://github.com/obra/superpowers) (`superpowers@claude-plugins-official`) e `frontend-design@claude-plugins-official` (rodada de design das telas), declarados como dependência; o `kickoff` avisa quando falta um e diz como instalar. Opcional: [graphify](https://github.com/Graphify-Labs/graphify) (`pip install graphifyy`) para o grafo de conhecimento.
 
 ```bash
 # uma vez por máquina
