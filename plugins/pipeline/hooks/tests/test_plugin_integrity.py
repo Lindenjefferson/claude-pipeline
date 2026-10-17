@@ -39,8 +39,8 @@ agents = sorted(p for p in files(".md") if os.sep + "agents" + os.sep in p)
 check("the plugin has its agents", len(agents) >= 4, agents)
 for path in agents:
     meta = front_matter(path)
-    check(f"{os.path.basename(path)} limits its tools (tools or disallowedTools)",
-          "tools" in meta or "disallowedTools" in meta, meta)
+    check(f"{os.path.basename(path)} lists the tools it may use (an allowlist, not a denylist)",
+          "tools" in meta and "disallowedTools" not in meta, meta)
 
 for name in ("discovery", "qa"):
     text = open(os.path.join(ROOT, "agents", name + ".md"), encoding="utf-8").read()
@@ -57,6 +57,13 @@ settings = json.load(open(os.path.join(ROOT, "skills", "kickoff", "templates", "
                           encoding="utf-8"))
 for entry in ("Bash(sudo:*)", "Bash(git push --force:*)", "Bash(git push -f:*)", "Bash(chmod 777:*)"):
     check(f"the kickoff template denies {entry}", entry in settings["deny"], settings["deny"])
+check("the kickoff template asks before every git push", "Bash(git push:*)" in settings.get("ask", []), settings)
+check("the kickoff template guards the scan allowlist with an Edit rule and has no Write rule (never consulted)",
+      "Edit(.pipeline-secrets-allow)" in settings["deny"] and not any(rule.startswith("Write(") for rule in settings["deny"]),
+      settings["deny"])
+check("the kickoff template denies skipping the pre-commit hook wherever the flag sits",
+      {"Bash(git commit *--no-verify*)", "Bash(git commit -n *)", "Bash(git commit * -n *)"} <= set(settings["deny"]),
+      settings["deny"])
 for term in ("sudo", "--force", "chmod 777", "| sh", "| bash"):
     check(f"the kickoff template never allows a command containing {term!r}", term in settings["never_allow"],
           settings["never_allow"])
