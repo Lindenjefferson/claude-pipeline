@@ -2,6 +2,15 @@
 
 Backlog vivo do plugin. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin ou ideia adaptada do ECC) e o esforço estimado (P, M, G). Ao entregar um item, mover para a seção da versão correspondente com o PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
+## 2.8.1 — segurança: achados com prova (PR #22)
+
+Origem: decisão do usuário de separar a segurança da 2.8; ideias da skill `cloudflare/security-audit-skill` (MIT, commit `c1c8a8c`, lida inteira sem instalar nem executar). A skill não é instalada: no Windows os validadores recusam toda entrada, sem sandbox do sistema nada chega a confirmado, o perfil padrão custa de 25 a 50 subagentes e 1,5 a 4 M tokens, e o README instala sem versão fixa (veto a extensões de terceiros). Proposta na [seção C da 2.8](proposta-2.8.md).
+
+- [x] **Achado de segurança com prova**, no `reviewer`: nomeia quem explora, a entrada, a fronteira de confiança cruzada e o resultado, rastreado da entrada ao efeito; status `confirmed`, `needs_validation` (o elo que o código não prova e o teste que decide, Important no máximo, e a rodada de correção escreve esse teste; sem teste possível no projeto, vira Minor e o manager adia ou registra como VALIDAR) ou `rejected` (vai para "Checked with no findings"). A escala critical a low da skill virou as severidades que o ledger já conta: nunca acima do impacto rastreado, Critical quando o achado derrota o controle por inteiro, Important quando só o enfraquece; boa prática sem exploração vira Minor `hardening`. Ledger e gate não mudam.
+- [x] **Caminho mais fraco**: para cada achado de segurança, o `reviewer` confere as outras entradas que chegam ao mesmo efeito.
+- [x] **Checklist**: default de coluna nova certo para as linhas antigas; export e backup no escopo de quem pede; registro excluído logicamente fora de toda leitura; remoção de membro corta todo acesso; mutação confere a origem do pedido.
+- Fora: verificador que tenta refutar cada achado (um agente a mais por achado) e registro de cobertura acumulado entre entregas no gate (mudança grande no gate). Voltam se uma entrega mostrar achado falso ou caminho não examinado.
+
 ## 2.8 — andamento visível e travas do modo autônomo (PR #21)
 
 Origem: a revisão da 2.8 do backlog contra as etapas 4 e 5 do controle-financeiro e a documentação atual do Claude Code, e o pedido do usuário de uma tabela de progresso viva por ciclo. Os itens, o porquê e as escolhas do usuário estão na [proposta](proposta-2.8.md).
@@ -12,7 +21,7 @@ Origem: a revisão da 2.8 do backlog contra as etapas 4 e 5 do controle-financei
 - [x] **Decisões e avisos**: VALIDAR numerados com `validate` e a skill `validar`; `PushNotification` quando o manager para esperando o usuário, no READY e quando o modo autônomo para; skill `feedback-plugin` no fim da entrega.
 - [x] **Rodada de design de tela** (pedido do usuário, a partir de uma sessão de design do controle-financeiro): tela nova ou redesenhada passa por uma página de comparação (menor largura e desktop, todos os temas, dados de exemplo) com a skill `frontend-design`, aprovada junto com o plano; tokens de cor e mock viram insumo do plano, o `reviewer` confere a tela contra eles, e o checklist ganha cores por token com contraste e separação medidos e cores de significado reservadas. O plugin `frontend-design` passa a ser dependência declarada, conferida pelo `kickoff`, que diz como instalar quando falta.
 - [x] **Enxuto**: saíram a duração medida pelo manager e a "promoção de lição" do passo 7 (virou parte do `feedback-plugin`).
-- Fora: segurança (2.8.1), guarda na ferramenta PowerShell, `python3` nos hooks, WSL2, VALIDAR das entregas empilhadas anteriores na faixa (ver backlog).
+- Fora: segurança (na 2.8.1), guarda na ferramenta PowerShell, `python3` nos hooks, WSL2, VALIDAR das entregas empilhadas anteriores na faixa (ver backlog).
 
 ## 2.7.2 — pular o `pre-commit` negado pelo hook, não pela mensagem (PR #20)
 
@@ -133,11 +142,6 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 
 - **Guarda do Bash também na ferramenta PowerShell** (2.7.2): no Windows a sessão principal tem a ferramenta PowerShell, que o `bash-guard.py` não vê (os agentes não a têm). Entra com um leitor das aspas do PowerShell, testado. Esforço: P.
 
-- **2.8.1 — segurança: achados com prova** (decisão do usuário; proposta na [seção C da 2.8](proposta-2.8.md)): ideias da skill `cloudflare/security-audit-skill` (MIT, commit `c1c8a8c`, lida inteira sem instalar nem executar). A skill não é instalada: no Windows os validadores recusam toda entrada, sem sandbox do sistema nada chega a confirmado, o perfil padrão custa de 25 a 50 subagentes e 1,5 a 4 M tokens, e o README instala sem versão fixa (veto a extensões de terceiros). Esforço: P.
-  1. **Achado de segurança com prova**, no `reviewer`: nomeia quem explora, a entrada, a fronteira de confiança cruzada e o resultado observado; boa prática sem impacto demonstrado vira nota de reforço. Veredicto `confirmed`, `needs_validation` (com o bloqueio e o plano para validar) ou `rejected`; severidade de critical a low, nunca acima do impacto demonstrado, com o desempate entre high e medium: o achado derrota o controle por inteiro ou só o enfraquece?
-  2. **Caminho mais fraco**: o `reviewer` pergunta que outras entradas chegam ao mesmo efeito e não foram checadas.
-  3. **Checklist**: só o que falta em `checklists/general.md` (privilégios, redirect, depuração e reset já estão): export e backup no escopo de quem pede; registro excluído logicamente fora de busca, lookup e restauração; default de migration nas linhas antigas; acesso que não sobrevive à remoção de um membro; checagem de origem (CSRF) nas mutações.
-  - Adiados: verificador que tenta refutar cada achado (um agente a mais por achado) e registro de cobertura acumulado entre entregas no gate (mudança grande no gate). Voltam se uma entrega mostrar achado falso ou caminho não examinado.
 - **Custo da entrega com o `ccusage`** (pedido do usuário, a partir de uma sessão de design do controle-financeiro): declarar a CLI `ccusage` como dependência conferida (aviso e instrução de instalação quando falta). Nenhuma parte do plugin chama o `ccusage` hoje (os tokens vêm do aviso de término do agente), e uma dependência sem uso contraria o princípio "enxuto"; entra junto com o uso, por exemplo o custo da entrega no relatório do gate. Cuidado conhecido: com `--offline` ele não tem o preço de todos os modelos, então a checagem não depende do modo offline. Esforço: P.
 
 - **WSL2 para o modo multi-instância** (fora da 2.8): não resolve o gargalo medido (a suíte e2e longa, item 17 da 2.7.0), plugins não carregam nas sessões WSL do app Desktop e custa outra instalação do Claude Code (memória, plugins e configurações à parte), integração mais difícil com o navegador do Windows e hooks e `pipeline.home` reinstalados. Volta se o próprio Windows virar o gargalo; migração só entre entregas. Esforço: P no plugin.
@@ -152,6 +156,8 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 ## Notas de atualização
 
 Termine a entrega em andamento antes de atualizar o plugin.
+
+- **2.8.1**: lê os ledgers da 2.8. Só prompts mudam: o relatório do `reviewer` ganha a linha de achado de segurança (Exploit e Status), e um achado `needs_validation` pede na rodada de correção o teste que o decide.
 
 - **2.8.0**: lê os ledgers da 2.7. O `status --json` muda a lista `validar`: cada item é `{id, text, decision}` (antes, só o texto), para quem lê o JSON por fora do plugin. A linha de andamento e o `/andamento` pedem o Claude Code v2.1.287 ou mais novo e aparecem sozinhos; o resto funciona sem eles. No modo autônomo, push da branch principal, merge nela e `gh pr merge` pela ferramenta Bash passam a ser negados pelo hook, não só pelo prompt (a ferramenta PowerShell segue no backlog). O `frontend-design@claude-plugins-official` passa a ser dependência; se a atualização não o trouxer, instale com `claude plugin install frontend-design@claude-plugins-official` (o `kickoff` avisa).
 
