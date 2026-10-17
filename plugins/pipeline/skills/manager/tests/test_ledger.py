@@ -269,9 +269,27 @@ check("back to supervised: the same cycle asks the user again",
 run("note", "--text", "page size 50", "--validar", ledger=AUTO)
 run("note", "--text", "ruled out a finding", ledger=AUTO)
 state = status(AUTO)
-check("note --validar goes to the VALIDAR list, apart from plain notes",
-      state["validar"] == ["page size 50"] and state["notes"] == ["ruled out a finding"], state)
-check("text status shows the VALIDAR list", "VALIDAR: page size 50" in run("status", ledger=AUTO).stdout)
+check("note --validar goes to the VALIDAR list with an id, apart from plain notes",
+      state["validar"] == [{"id": "V1", "text": "page size 50", "decision": None}]
+      and state["notes"] == ["ruled out a finding"], state)
+text = run("status", ledger=AUTO).stdout
+check("text status shows the VALIDAR list with ids", "VALIDAR V1: page size 50" in text, text)
+run("note", "--text", "sort by date", "--validar", ledger=AUTO)
+r = run("validate", "--id", "V2", "--decision", "user: sort by name", ledger=AUTO)
+state = status(AUTO)
+check("validate records the user's decision on a VALIDAR item",
+      r.returncode == 0 and state["validar"][1] == {"id": "V2", "text": "sort by date", "decision": "user: sort by name"}
+      and state["validar"][0]["decision"] is None, (r.stderr, state["validar"]))
+text = run("status", ledger=AUTO).stdout
+check("text status lists only the pending VALIDAR items, and the decided ones apart",
+      "VALIDAR V1: page size 50" in text and "VALIDAR V2" not in text
+      and "validated V2: sort by date -> user: sort by name" in text, text)
+check("validate of an unknown id is refused",
+      run("validate", "--id", "V9", "--decision", "x", ledger=AUTO).returncode != 0)
+run("mode", "autonomous", ledger=AUTO)
+text = run("status", ledger=AUTO).stdout
+check("text status says autonomous mode never merges into nor pushes the main branch",
+      "never merge into or push the main branch" in text, text)
 
 CLAIMS = ".superpowers/claims.jsonl"
 run("start", "--slug", "claims", ledger=CLAIMS)
@@ -283,6 +301,8 @@ check("a second claim on the same task fails and says how to release", r.returnc
       and "already claimed" in r.stderr and "release --task T1" in r.stderr, r.stderr)
 check("another task can be claimed in parallel", run("claim", "--task", "T2", ledger=CLAIMS).returncode == 0)
 state = status(CLAIMS)
+check("status --json gives the dispatch time of each task in flight",
+      sorted(state["dispatched"]) == ["T1", "T2"] and all(state["dispatched"].values()), state)
 check("status lists what is in flight and the gate waits", sorted(state["in_flight"]) == ["T1", "T2"]
       and state["ready_for_gate"] is False and any("T1" in item and "no report" in item for item in state["pending"]), state)
 check("status --check fails while something is in flight", run("status", "--check", ledger=CLAIMS).returncode == 1)
@@ -331,7 +351,7 @@ run("mode", "autonomous", ledger=WAIVE2)
 add("reviewer", "FAIL", None, 1, ledger=WAIVE2)
 run("waive", "--agent", "reviewer", "--reason", "ruled out", ledger=WAIVE2)
 check("in autonomous mode a waiver goes to the VALIDAR list",
-      status(WAIVE2)["validar"] == ["waived reviewer FAIL: ruled out"], status(WAIVE2))
+      [item["text"] for item in status(WAIVE2)["validar"]] == ["waived reviewer FAIL: ruled out"], status(WAIVE2))
 
 CAP = ".superpowers/cap.jsonl"
 run("start", "--slug", "cap", ledger=CAP)
@@ -417,5 +437,22 @@ try:
 except UnicodeDecodeError:
     utf8 = False
 check("status prints UTF-8 whatever the console encoding", utf8, raw.stdout[-200:])
+
+TOKENS = ".superpowers/tokens.jsonl"
+run("start", "--slug", "tokens", ledger=TOKENS)
+r = run("add", "--agent", "dev", "--task", "T1", "--verdict", "DONE", "--seconds", "211", "--tokens", "98357",
+        ledger=TOKENS)
+run("add", "--agent", "reviewer", "--verdict", "PASS", "--tokens", "40000", ledger=TOKENS)
+run("add", "--agent", "dev", "--task", "fix-1", "--verdict", "DONE", ledger=TOKENS)
+tokens = status(TOKENS)["metrics"]["tokens"]
+check("add --tokens records the tokens of a run, summed per agent, task and cycle",
+      r.returncode == 0 and tokens["agents"] == {"dev": 98357, "reviewer": 40000} and tokens["tasks"] == {"T1": 98357}
+      and status(TOKENS)["metrics"]["cycles"][0]["tokens"] == 138357 and tokens["unmeasured"] == 1, (r.stderr, tokens))
+for bad in ("-5", "many", "1.5"):
+    check(f"--tokens {bad} is refused", run("add", "--agent", "dev", "--task", "T2", "--verdict", "DONE", "--tokens", bad,
+                                            ledger=TOKENS).returncode != 0)
+legacy = status(".superpowers/legacy.jsonl")
+check("an old ledger without tokens reads with no tokens measured",
+      legacy["metrics"]["tokens"]["agents"] == {} and legacy["dispatched"] == {}, legacy["metrics"])
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

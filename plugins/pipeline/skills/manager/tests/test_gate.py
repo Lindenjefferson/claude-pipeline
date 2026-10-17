@@ -157,9 +157,9 @@ commit("plan.md", "# plan\n- AC-T1-1 Given a, When b, Then c.\n- AC-T1-2 Given x
 commit("tests/a.test.txt", "test('AC-T1-1 given a when b then c')\ntest('AC-T1.30 other')\n", "test: a")
 commit("src/x.txt", "AC-T1-2\n", "feat: x")
 ledger_cmd("start", "--slug", "y", "--base", "main", "--plan", "plan.md", "--archive")
-ledger_cmd("add", "--agent", "dev", "--task", "T1", "--verdict", "DONE", "--seconds", "5m")
+ledger_cmd("add", "--agent", "dev", "--task", "T1", "--verdict", "DONE", "--seconds", "5m", "--tokens", "90000")
 ledger_cmd("add", "--agent", "reviewer", "--verdict", "PASS", "--minor", "1", "--origin", "design=1",
-           "--seconds", "1m")
+           "--seconds", "1m", "--tokens", "30000")
 ledger_cmd("add", "--agent", "qa", "--verdict", "PASS", "--seconds", "2m")
 r = gate("--base", "main")
 trace = r.stdout.split("Criteria:")[1].split("\n    ")[1] if "Criteria:" in r.stdout else ""
@@ -190,6 +190,8 @@ ledger_cmd("add", "--agent", "dev", "--task", "fix-1", "--verdict", "DONE")
 ledger_cmd("add", "--agent", "reviewer", "--verdict", "PASS")
 ledger_cmd("mode", "autonomous")
 ledger_cmd("note", "--text", "page size 50", "--validar")
+ledger_cmd("note", "--text", "sort by date", "--validar")
+ledger_cmd("validate", "--id", "V2", "--decision", "user: confirmed")
 r = gate("--base", "main", "--report", "feature-y")
 check("all criteria traced, audit passes, deferred decided: READY",
       r.returncode == 0 and "Auditoria:  PASS" in r.stdout and "Criteria:   PASS" in r.stdout, r.stdout)
@@ -201,8 +203,12 @@ check("the report shows time per cycle, task and agent",
 check("the report shows findings by origin and the deferred decisions",
       "Origins: design 1, assumption 0, plan 0, execution 0, environment 0" in text
       and "- D1 wrap long names -> user: next delivery" in text, text)
-check("the report shows the mode and the VALIDAR list",
-      "Mode: autonomous" in text and "## VALIDAR" in text and "- page size 50" in text, text)
+check("the report shows the mode and the VALIDAR list, each item with the user's decision or pending",
+      "Mode: autonomous" in text and "## VALIDAR" in text and "- V1 page size 50 -> pending" in text
+      and "- V2 sort by date -> user: confirmed" in text, text)
+check("the report shows the tokens per agent and task, and how many runs have none",
+      re.search(r"- Tokens: dev 90000, reviewer 30000 \(\d+ runs? unmeasured\)", text) is not None
+      and "- Task tokens: T1 90000" in text, text)
 
 sh("git", "commit", "-q", "--no-verify", "-m", "docs: quality report y")
 os.makedirs(os.path.join(repo, "e2e", "flows"), exist_ok=True)
