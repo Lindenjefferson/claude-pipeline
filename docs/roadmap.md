@@ -7,11 +7,11 @@ Backlog vivo do plugin. Cada item diz de onde veio (feedback de uma entrega real
 Origem: a revisão da 2.8 do backlog contra as etapas 4 e 5 do controle-financeiro e a documentação atual do Claude Code, e o pedido do usuário de uma tabela de progresso viva por ciclo. Os itens, o porquê e as escolhas do usuário estão na [proposta](proposta-2.8.md).
 
 - [x] **Tempo e tokens reais**: `ledger.py add --tokens`; duração e tokens vêm do aviso de término do agente, nunca de estimativa; `status --json` traz a hora de despacho, o caminho do ledger e as execuções do ciclo; o relatório do gate mostra tokens por agente e tarefa.
-- [x] **Andamento visível**: mod `andamento.js` (linha acima do prompt com entrega aberta, `/andamento` com o painel do ciclo, ciclos anteriores e outras frentes, texto onde nada desenha); só desenha o que o `ledger.py` devolve.
+- [x] **Andamento visível**: mod `andamento.js` (linha acima do prompt com entrega aberta, `/andamento` com o painel do ciclo, ciclos anteriores e outras frentes, texto onde nada desenha); só desenha o que o `ledger.py` devolve. Conferido com `claude -p /andamento` sobre a cópia de um ledger real; a faixa e o painel, numa sessão interativa antes da instalação.
 - [x] **Trava do ✋ 2**: no modo autônomo, o `bash-guard.py` nega push da branch principal, merge nela e `gh pr merge`; a branch de trabalho passa.
 - [x] **Decisões e avisos**: VALIDAR numerados com `validate` e a skill `validar`; `PushNotification` quando o manager para esperando o usuário, no READY e quando o modo autônomo para; skill `feedback-plugin` no fim da entrega.
 - [x] **Rodada de design de tela** (pedido do usuário, a partir de uma sessão de design do controle-financeiro): tela nova ou redesenhada passa por uma página de comparação (menor largura e desktop, todos os temas, dados de exemplo) com a skill `frontend-design`, aprovada junto com o plano; tokens de cor e mock viram insumo do plano, o `reviewer` confere a tela contra eles, e o checklist ganha cores por token com contraste e separação medidos e cores de significado reservadas.
-- [x] **Enxuto**: saíram a duração medida pelo manager e a "promoção de lição" do passo 7 (virou parte do `feedback-plugin`). Ficaram de fora da lista original: statusline, `/frentes` abrindo abas, semáforo, linha do tempo em gráfico, página de telas e `/aprovar`.
+- [x] **Enxuto**: saíram a duração medida pelo manager e a "promoção de lição" do passo 7 (virou parte do `feedback-plugin`).
 - Fora: segurança (2.8.1), guarda na ferramenta PowerShell, `python3` nos hooks, WSL2 (ver backlog).
 
 ## 2.7.2 — pular o `pre-commit` negado pelo hook, não pela mensagem (PR #20)
@@ -149,7 +149,7 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 
 Termine a entrega em andamento antes de atualizar o plugin.
 
-- **2.8.0**: lê os ledgers da 2.7. O `status --json` muda a lista `validar`: cada item é `{id, text, decision}` (antes, só o texto), para quem lê o JSON por fora do plugin. A linha de andamento e o `/andamento` pedem o Claude Code v2.1.287 ou mais novo e aparecem sozinhos; o resto funciona sem eles. No modo autônomo, push da branch principal, merge nela e `gh pr merge` passam a ser negados pelo hook, não só pelo prompt.
+- **2.8.0**: lê os ledgers da 2.7. O `status --json` muda a lista `validar`: cada item é `{id, text, decision}` (antes, só o texto), para quem lê o JSON por fora do plugin. A linha de andamento e o `/andamento` pedem o Claude Code v2.1.287 ou mais novo e aparecem sozinhos; o resto funciona sem eles. No modo autônomo, push da branch principal, merge nela e `gh pr merge` pela ferramenta Bash passam a ser negados pelo hook, não só pelo prompt (a ferramenta PowerShell segue no backlog).
 
 - **2.7.2**: lê os ledgers da 2.7.1. Pular o `pre-commit` passa a ser negado pelo hook do plugin, que ignora a mensagem do commit. Quem rodou o `kickoff` da 2.7.1 apaga à mão do `.claude/settings.json` os deny `Bash(git commit *--no-v*)`, `Bash(git commit * -n *)` e `Bash(git commit * -n)`, que negavam commits cuja mensagem citava a flag, e roda o `kickoff` de novo para receber `Bash(git commit --no-v*)`.
 

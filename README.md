@@ -25,7 +25,7 @@ tamanho → (spec) → plano ✋ → ciclos: dev por tarefa (as independentes em
 4. O `gate.py` confere localmente o ledger, os critérios de aceite com teste, build, tipos, lint, testes, auditoria de dependências e segredos, e grava um relatório de qualidade com as métricas da entrega.
 5. Você decide o merge e o push (✋ 2). Nada sai da máquina sem esse pedido.
 
-Com você ausente, o modo autônomo do [manager](plugins/pipeline/skills/manager/SKILL.md) troca as aprovações por uma lista VALIDAR e nada chega na branch principal. O andamento da entrega aparece numa linha acima do prompt e no painel do `/andamento`.
+Com você ausente, o modo autônomo do [manager](plugins/pipeline/skills/manager/SKILL.md) troca as aprovações por uma lista VALIDAR e não faz merge nem push.
 
 ## Começo rápido
 
