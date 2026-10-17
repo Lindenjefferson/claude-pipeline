@@ -27,7 +27,7 @@ value, such as changeme, example, xxxx, or starting with your_, your- or <); run
 in one case or alternating case; values where almost every character is unique (Shannon entropy of 3.5
 bits/character or more, near the maximum for the length); and, under password/passwd/secret keys, phrases with
 _ that name no code word and unquoted values of 12+ characters with three character classes and a symbol other
-than - . _ $ (a call, a URL or a template does not count).
+than - . _ $ (a call, a URL, a template or code such as a type, a subscript or a qualified name does not count).
 
 Invisible characters: added lines with a zero-width space or word joiner (U+200B, U+2060 to U+2064, U+180E), a
 direction control (U+202A to U+202E, U+2066 to U+2069), a Tag character (U+E0000 to U+E007F) or a BOM anywhere but
@@ -95,6 +95,7 @@ CODE_WORDS = {"value", "input", "new", "old", "plain", "current", "default", "en
 ENV_REFERENCE = re.compile(r"^(?:\$|%\w+%|process\.env\b|os\.environ\b|os\.getenv\b"
                            r"|import\.meta\.env\b|Deno\.env\b|env\()")
 TEMPLATED = re.compile(r"\$\{|\$\(|\{\{|^\$|^%\w+%$")
+CODE_REFERENCE = re.compile(r"[A-Za-z_$][\w$]*(?:\.|::|\?\.|\[|<)")
 PLACEHOLDER = re.compile(r"(?i)^(?:placeholder|example|changeme|x+|\*+)$|^(?:your[_-]|<)")
 SQL_KEYWORDS = {"null", "default", "true", "false", "excluded", "current_user", "session_user",
                 "current_timestamp", "current_setting", "now"}
@@ -199,7 +200,7 @@ def unquoted_secret(name, rest):
 def unquoted_password(name, rest):
     words = rest.split()
     word = words[0].rstrip(",;") if words and PASSWORD_KEY.search(name) else ""
-    if "(" in word or "://" in word or TEMPLATED.search(word) or PLACEHOLDER.search(word):
+    if "(" in word or "://" in word or TEMPLATED.search(word) or PLACEHOLDER.search(word) or CODE_REFERENCE.match(word):
         return False
     return len(word) >= 12 and char_classes(word) >= 3 and bool(re.search(r"[^\w.$-]", word))
 

@@ -1,4 +1,4 @@
-import json, os, subprocess, sys, tempfile
+import json, os, subprocess, sys, tempfile, time
 
 HOOKS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 SCRIPT = os.path.join(HOOKS, "block-dev-server.py")
@@ -53,6 +53,9 @@ check("a quoted message that mentions the command passes",
 check("after a quoted argument, the command itself is still denied",
       run(configured, 'echo "starting; really" && npm run dev')[1] is not None)
 check("a heredoc fed to a shell is still denied", run(configured, "bash <<'EOF'\nnpm run dev\nEOF")[1] is not None)
+start = time.monotonic()
+run(configured, "echo " + "x" * 80000)
+check("a long one-line command is read quickly (well under the hook's 10s timeout)", time.monotonic() - start < 3)
 check("a here-string is not a heredoc: the next line is still read",
       run(configured, 'cat <<< "x"\nnpm run dev')[1] is not None)
 sub = os.path.join(configured, "app")

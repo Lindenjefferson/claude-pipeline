@@ -57,6 +57,15 @@ must_pass = {
     "unquoted short password": "+pass" "word: Senha@123",
     "unquoted templated secret": "+sec" "ret: ${{ secrets.DEPLOY_KEY_2024 }}",
     "unquoted symbols under a key that is not a password": "+api_key_label: " + "Pr0d#Db!" "2024x",
+    "type annotation under a password key": "+    pass" "word: Optional[str] = None",
+    "annotated parameter": "+def login(username: str, pass" "word: Optional[str] = None):",
+    "annotated field": "+    pass" "word: Annotated[str, Field(min_length=8)]",
+    "generic type under a secret key": "+  sec" "ret: Record<string, string>;",
+    "subscript under a password key": "+pass" "word = request.POST[" + q("password") + "]",
+    "nested subscript": "+    pass" "word=settings.DATABASES['default']['PASSWORD'],",
+    "qualified name with ::": "+  pass" "word: Faker::Internet.password",
+    "optional chaining": "+pass" "word = userInput?.Password",
+    "member access with a non-null mark": "+this.pass" "word = this.loginForm.value.Password!;",
 }
 results = []
 hunk = lambda text: f"@@ -0,0 +1,{text.count(chr(10)) + 1} @@\n" + text
