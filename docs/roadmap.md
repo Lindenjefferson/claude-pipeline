@@ -10,6 +10,7 @@ Origem: a revisão da 2.8 do backlog contra as etapas 4 e 5 do controle-financei
 - [x] **Andamento visível**: mod `andamento.js` (linha acima do prompt com entrega aberta, `/andamento` com o painel do ciclo, ciclos anteriores e outras frentes, texto onde nada desenha); só desenha o que o `ledger.py` devolve.
 - [x] **Trava do ✋ 2**: no modo autônomo, o `bash-guard.py` nega push da branch principal, merge nela e `gh pr merge`; a branch de trabalho passa.
 - [x] **Decisões e avisos**: VALIDAR numerados com `validate` e a skill `validar`; `PushNotification` quando o manager para esperando o usuário, no READY e quando o modo autônomo para; skill `feedback-plugin` no fim da entrega.
+- [x] **Rodada de design de tela** (pedido do usuário, a partir de uma sessão de design do controle-financeiro): tela nova ou redesenhada passa por uma página de comparação (menor largura e desktop, todos os temas, dados de exemplo) com a skill `frontend-design`, aprovada junto com o plano; tokens de cor e mock viram insumo do plano, o `reviewer` confere a tela contra eles, e o checklist ganha cores por token com contraste e separação medidos e cores de significado reservadas.
 - [x] **Enxuto**: saíram a duração medida pelo manager e a "promoção de lição" do passo 7 (virou parte do `feedback-plugin`). Ficaram de fora da lista original: statusline, `/frentes` abrindo abas, semáforo, linha do tempo em gráfico, página de telas e `/aprovar`.
 - Fora: segurança (2.8.1), guarda na ferramenta PowerShell, `python3` nos hooks, WSL2 (ver backlog).
 
