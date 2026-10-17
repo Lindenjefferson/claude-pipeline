@@ -16,6 +16,7 @@ Cada componente tem **uma** fonte de verdade, o próprio arquivo. Os outros docu
 | O quê | Onde |
 |---|---|
 | Fluxo de entrega, passos, regras do manager | [`plugins/pipeline/skills/manager/SKILL.md`](plugins/pipeline/skills/manager/SKILL.md) |
+| Validar as decisões tomadas em nome do usuário; pedido de feedback ao plugin | [`skills/validar/SKILL.md`](plugins/pipeline/skills/validar/SKILL.md), [`skills/feedback-plugin/SKILL.md`](plugins/pipeline/skills/feedback-plugin/SKILL.md) |
 | Preparação de um projeto, allowlist de comandos, template do `CLAUDE.md` dos projetos | [`plugins/pipeline/skills/kickoff/SKILL.md`](plugins/pipeline/skills/kickoff/SKILL.md) e [`templates/`](plugins/pipeline/skills/kickoff/templates/) |
 | Papel, escopo e relatório de cada agente | [`plugins/pipeline/agents/`](plugins/pipeline/agents/) (`dev`, `reviewer`, `qa`, `discovery`) |
 | Princípios gerais de qualidade (Invariants, acesso, testes, auth, UI, auditoria) | [`plugins/pipeline/checklists/general.md`](plugins/pipeline/checklists/general.md) |
@@ -23,8 +24,9 @@ Cada componente tem **uma** fonte de verdade, o próprio arquivo. Os outros docu
 | Regras exatas do ledger (ciclos, pendências, métricas) | docstring de [`ledger.py`](plugins/pipeline/skills/manager/ledger.py) |
 | Checagens do gate e relatório de qualidade | docstring de [`gate.py`](plugins/pipeline/skills/manager/gate.py) |
 | Scan de segredos, UTF-8, caracteres invisíveis, allowlist e falso positivo | docstring de [`hooks/pre-commit-secret-scan.py`](plugins/pipeline/hooks/pre-commit-secret-scan.py) |
-| Hooks de sessão e de ferramenta (retomada após compactação, pular o `pre-commit`, servidor de dev solto) | docstrings de [`hooks/session-start.py`](plugins/pipeline/hooks/session-start.py) e [`hooks/bash-guard.py`](plugins/pipeline/hooks/bash-guard.py), registrados em [`hooks/hooks.json`](plugins/pipeline/hooks/hooks.json) |
-| Testes dos scripts | `plugins/pipeline/skills/manager/tests/`, `plugins/pipeline/hooks/tests/` |
+| Hooks de sessão e de ferramenta (retomada após compactação, pular o `pre-commit`, branch principal no modo autônomo, servidor de dev solto) | docstrings de [`hooks/session-start.py`](plugins/pipeline/hooks/session-start.py) e [`hooks/bash-guard.py`](plugins/pipeline/hooks/bash-guard.py), registrados em [`hooks/hooks.json`](plugins/pipeline/hooks/hooks.json) |
+| Linha de andamento e painel `/andamento` (mod) | comentário do topo de [`hooks/andamento.js`](plugins/pipeline/hooks/andamento.js), listado em `modules` no `hooks.json` |
+| Testes dos scripts | `plugins/pipeline/skills/manager/tests/`, `plugins/pipeline/hooks/tests/` (o do mod é `andamento.test.ts`) |
 | Versões entregues, notas de atualização, backlog | [`docs/roadmap.md`](docs/roadmap.md) |
 | Apresentação, começo rápido, componentes em uma linha | [`README.md`](README.md) |
 | Manifesto e marketplace | [`plugins/pipeline/.claude-plugin/plugin.json`](plugins/pipeline/.claude-plugin/plugin.json), [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) |
@@ -38,7 +40,7 @@ O `kickoff` prepara o projeto uma vez. A cada pedido, o `manager` dimensiona o t
 - **Feedback de entregas entra só como regra geral** que garante um bom produto em qualquer stack. O que é de stack ou de projeto volta para o projeto. Uma lição que se repete em dois projetos é candidata a princípio em `checklists/general.md`.
 - **Fonte única por componente.** Comportamento novo vai para o arquivo do componente; README e este `CLAUDE.md` ganham no máximo uma linha com link. Ao mudar um componente, conferir que README, `CLAUDE.md`, `docs/roadmap.md` e os outros componentes que o citam continuam consistentes (mesmos termos, nenhuma cópia). Única cópia permitida: os três princípios acima, idênticos palavra por palavra na seção "Propósito e princípios" do README; as duas cópias mudam juntas, no mesmo commit.
 - **Enxugar ao tocar.** Ao editar um arquivo, remover o que ficou obsoleto, duplicado ou sem uso, e listar o que saiu no PR.
-- **Teste primeiro** para `ledger.py`, `gate.py` e o hook: o teste novo falha antes da mudança. Ledgers de versões anteriores continuam legíveis, ou a quebra vai para as notas de atualização.
+- **Teste primeiro** para `ledger.py`, `gate.py`, os hooks e o mod: o teste novo falha antes da mudança. Ledgers de versões anteriores continuam legíveis, ou a quebra vai para as notas de atualização.
 - Sem datas no texto dos documentos: o git registra quando cada coisa mudou. A origem vai como versão, PR ou "decisão do usuário".
 - Arquivos em UTF-8 e LF (`.gitattributes`). Prompts de skills e agentes em inglês; README, este arquivo e o roadmap em português.
 - Nunca `git commit --no-verify`.
@@ -47,11 +49,12 @@ O `kickoff` prepara o projeto uma vez. A cada pedido, o `manager` dimensiona o t
 
 ```bash
 for t in plugins/pipeline/hooks/tests/test_*.py plugins/pipeline/skills/manager/tests/test_*.py; do python "$t"; done
+(cd plugins/pipeline && claude plugin test)
 claude plugin validate plugins/pipeline
 claude plugin validate .
 ```
 
-Cada arquivo de teste roda sozinho com `python` (sem pytest) e imprime `ALL PASS`.
+Cada arquivo de teste Python roda sozinho com `python` (sem pytest) e imprime `ALL PASS`; o `claude plugin test` roda os testes `.test.ts` do mod.
 
 ## Versão e release
 
