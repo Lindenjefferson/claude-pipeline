@@ -2,6 +2,12 @@
 
 Backlog vivo do plugin. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin ou ideia adaptada do ECC) e o esforço estimado (P, M, G). Ao entregar um item, mover para a seção da versão correspondente com o PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
+## 2.8.2 — abrir uma sessão nova do jeito certo (PR #23)
+
+Origem: pedido do usuário, depois de duas falhas ao abrir a sessão do controle-financeiro a partir de outra sessão: a aba que não achou o arquivo (argumentos do terminal partidos) e a que herdou `CLAUDE_CODE_CHILD_SESSION`, sem transcrição e fora do `ListAgents`.
+
+- [x] **Sessão nova limpa**, no `manager` (frentes em várias sessões): ao abrir ele mesmo um terminal com `claude`, tirar do ambiente as variáveis `CLAUDE*` herdadas, passar a linha de comando inteira, mandar o briefing só depois que o `ListAgents` lista a sessão, e, se ela não subir, avisar o usuário e esperar ele fechar a aba antes de abrir outra.
+
 ## 2.8.1 — segurança: achados com prova (PR #22)
 
 Origem: decisão do usuário de separar a segurança da 2.8; ideias da skill `cloudflare/security-audit-skill` (MIT, commit `c1c8a8c`, lida inteira sem instalar nem executar). A skill não é instalada: no Windows os validadores recusam toda entrada, sem sandbox do sistema nada chega a confirmado, o perfil padrão custa de 25 a 50 subagentes e 1,5 a 4 M tokens, e o README instala sem versão fixa (veto a extensões de terceiros). Proposta na [seção C da 2.8](proposta-2.8.md).
@@ -156,6 +162,8 @@ Fluxo simples e circular, no formato do ECC (`orch-pipeline`, `code-reviewer`, `
 ## Notas de atualização
 
 Termine a entrega em andamento antes de atualizar o plugin.
+
+- **2.8.2**: nada muda para quem atualiza.
 
 - **2.8.1**: lê os ledgers da 2.8. Só prompts mudam: o relatório do `reviewer` ganha a linha de achado de segurança (Exploit e Status), e um achado `needs_validation` pede na rodada de correção o teste que o decide.
 
