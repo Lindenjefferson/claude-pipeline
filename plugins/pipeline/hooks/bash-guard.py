@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
-"""PreToolUse hook (matcher Bash, see hooks.json): denies skipping the secret-scan pre-commit hook, and the
-project's dev server outside background mode.
+"""PreToolUse hook (matcher Bash, see hooks.json): denies skipping the secret-scan pre-commit hook, anything that
+reaches the main branch while the delivery is in autonomous mode, and the project's dev server outside background
+mode.
+
+In autonomous mode (the latest mode entry of the ledger ledger.py finds from the session's directory), denied in the
+foreground or background: a git push of the main branch (named by origin/HEAD, else main or master: as a refspec's
+target, with --all or --mirror, or with no refspec while it is checked out), a git merge while it is checked out
+(--abort and --quit pass), and gh pr merge. Pushing and merging the work branch pass; in supervised mode, or with
+no ledger, nothing here is denied and the ask rule on git push applies.
 
 Skipping the hook is denied in any project, in the foreground or background: a git commit with --no-verify (or an
 unambiguous prefix such as --no-veri) or -n (also inside a cluster such as -nm or -an), a git -c or --config-env
@@ -27,10 +34,12 @@ import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GATE = os.path.join(HERE, "..", "skills", "manager", "gate.py")
+LEDGER = os.path.join(HERE, "..", "skills", "manager", "ledger.py")
 LABEL = "rodar em desenvolvimento"
 
 
@@ -79,6 +88,7 @@ CONFIG_READS = {"--get", "--get-all", "--get-regexp", "--list", "-l", "get", "li
 CONFIG_UNSETS = {"--unset", "--unset-all", "unset"}
 COMMIT_VALUE = set("mFCct")
 COMMIT_ATTACHED = set("uS")
+PUSH_VALUE = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
 COMMIT_LONG_VALUE = {"--message", "--file", "--author", "--date", "--reuse-message", "--reedit-message", "--template",
                      "--fixup", "--squash", "--cleanup", "--trailer", "--pathspec-from-file"}
 
@@ -104,20 +114,20 @@ def hooks_path(key):
     return key.split("=", 1)[0].lower() == "core.hookspath"
 
 
-def skips_hook(command):
-    """True when the command skips the pre-commit hook. A '#' is read as text first (it starts a comment only at
-    the start of a word, which shlex cannot tell); a command that does not parse that way is read again with '#'
-    as a comment, and one that parses neither way passes."""
+def simple_commands(command):
+    """Each simple command the shell runs, as (program, its arguments, the segment's words), looking through
+    wrappers and into a shell's -c and eval. A '#' is read as text first (it starts a comment only at the start of a
+    word, which shlex cannot tell); a command that does not parse that way is read again with '#' as a comment, and
+    one that parses neither way yields nothing."""
     try:
         parsed = segments(command)
     except ValueError:
         try:
             parsed = segments(command, "#")
         except ValueError:
-            return False
-    for words in parsed:
-        if any(re.fullmatch(r"GIT_CONFIG\w*=.*", word) and "core.hookspath" in word.lower() for word in words):
-            return True
+            return
+    for segment in parsed:
+        words = segment
         while words and (words[0] in WRAPPERS or re.fullmatch(r"[A-Za-z_]\w*=.*", words[0])
                          or (words[0].startswith("-") and len(words) > 1)):
             words = words[1:]
@@ -129,32 +139,107 @@ def skips_hook(command):
                 if not word.startswith("-"):
                     break
                 if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", word):
-                    if skips_hook(words[position + 1]):
-                        return True
+                    yield from simple_commands(words[position + 1])
                     break
+        elif program == "eval":
+            yield from simple_commands(" ".join(words[1:]))
+        else:
+            yield program.removesuffix(".exe"), words[1:], segment
+
+
+def git_command(arguments):
+    """The git subcommand and its arguments, past git's own options, and whether those options set core.hooksPath."""
+    rest, override = list(arguments), False
+    while rest and rest[0].startswith("-"):
+        option, _, attached = rest[0].partition("=")
+        if option in ("-c", "--config-env"):
+            override = override or hooks_path(attached or (rest[1] if len(rest) > 1 else ""))
+            rest = rest[1:] if attached else rest[2:]
+        elif option in ("-C", "--git-dir", "--work-tree", "--namespace") and not attached:
+            rest = rest[2:]
+        else:
+            rest = rest[1:]
+    return (rest[0] if rest else ""), rest[1:], override
+
+
+def skips_hook(command):
+    """True when the command skips the pre-commit hook."""
+    for program, arguments, segment in simple_commands(command):
+        if any(re.fullmatch(r"GIT_CONFIG\w*=.*", word) and "core.hookspath" in word.lower() for word in segment):
+            return True
+        if program != "git":
             continue
-        if program == "eval":
-            if skips_hook(" ".join(words[1:])):
-                return True
-            continue
-        if program not in ("git", "git.exe"):
-            continue
-        rest = words[1:]
-        while rest and rest[0].startswith("-"):
-            option, _, attached = rest[0].partition("=")
-            if option in ("-c", "--config-env"):
-                if hooks_path(attached or (rest[1] if len(rest) > 1 else "")):
-                    return True
-                rest = rest[1:] if attached else rest[2:]
-            elif option in ("-C", "--git-dir", "--work-tree", "--namespace") and not attached:
-                rest = rest[2:]
-            else:
-                rest = rest[1:]
-        if rest[:1] == ["config"]:
+        name, rest, override = git_command(arguments)
+        if override:
+            return True
+        if name == "config":
             keys = [i for i, word in enumerate(rest) if word.lower() == "core.hookspath"]
             if keys and not CONFIG_READS & set(rest) and (keys[0] + 1 < len(rest) or CONFIG_UNSETS & set(rest)):
                 return True
-        elif rest[:1] == ["commit"] and commit_skips(rest[1:]):
+        elif name == "commit" and commit_skips(rest):
+            return True
+    return False
+
+
+def git_out(cwd, *args):
+    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def autonomous(cwd):
+    spec = importlib.util.spec_from_file_location("pipeline_ledger", LEDGER)
+    ledger = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ledger)
+    os.chdir(cwd)
+    try:
+        return ledger.autonomous(ledger.read(ledger.default_ledger("status")))
+    except SystemExit:
+        return False
+
+
+def main_branch(cwd):
+    remote = git_out(cwd, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    if remote:
+        return remote.split("/", 1)[-1]
+    return next((name for name in ("main", "master")
+                 if git_out(cwd, "rev-parse", "--verify", "--quiet", "refs/heads/" + name)), None)
+
+
+def push_reaches(arguments, main, current):
+    positional, value_next = [], False
+    for word in arguments:
+        if value_next:
+            value_next = False
+        elif word in ("--all", "--mirror"):
+            return True
+        elif word in PUSH_VALUE:
+            value_next = True
+        elif not word.startswith("-"):
+            positional.append(word)
+    if len(positional) < 2:
+        return current == main
+    for spec in positional[1:]:
+        target = spec.lstrip("+").split(":")[-1].removeprefix("refs/heads/")
+        if target == main or (target == "HEAD" and current == main):
+            return True
+    return False
+
+
+def reaches_main(command, cwd):
+    """True in autonomous mode when the command merges into or pushes the main branch, or merges a pull request."""
+    calls = [(program, git_command(arguments) if program == "git" else ("", arguments, False))
+             for program, arguments, _ in simple_commands(command)]
+    calls = [(program, name, rest) for program, (name, rest, _) in calls
+             if (program == "git" and name in ("push", "merge")) or (program == "gh" and rest[:2] == ["pr", "merge"])]
+    if not calls or not autonomous(cwd):
+        return False
+    main, current = main_branch(cwd), git_out(cwd, "branch", "--show-current")
+    for program, name, rest in calls:
+        if program == "gh":
+            return True
+        if main and name == "push" and push_reaches(rest, main, current):
+            return True
+        if main and name == "merge" and current == main and not {"--abort", "--quit"} & set(rest):
             return True
     return False
 
@@ -189,14 +274,19 @@ def main():
         return
     tool_input = payload.get("tool_input") or {}
     command = tool_input.get("command") or ""
+    cwd = payload.get("cwd") or os.getcwd()
     if skips_hook(command):
         reason = ("This skips the secret-scan pre-commit hook (--no-verify, -n or a core.hooksPath override), and a "
                   "secret committed stays in the history. Commit without it; if the hook blocks, fix what it reports "
                   "(a false positive is allowlisted by the user, as its message explains).")
+    elif reaches_main(command, cwd):
+        reason = ("The delivery is in autonomous mode (the ledger says so), and nothing reaches the main branch without "
+                  "the user: no push to it, no merge into it, no pull request merge. Record what is ready as "
+                  "note --validar and leave the merge and the push for the user's approval when they return.")
     elif tool_input.get("run_in_background"):
         return
     else:
-        dev = dev_command(payload.get("cwd") or os.getcwd())
+        dev = dev_command(cwd)
         if not dev or not runs_it(command, dev):
             return
         reason = (f"`{dev}` is this project's dev server and never returns, so in the foreground it hangs the call and "
