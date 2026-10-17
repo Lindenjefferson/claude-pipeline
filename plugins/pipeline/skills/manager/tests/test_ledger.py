@@ -18,9 +18,9 @@ atexit.register(cleanup)
 results = []
 
 
-def run(*args, ledger=None):
+def run(*args, ledger=None, cwd=None):
     prefix = ["--ledger", ledger] if ledger else []
-    return subprocess.run([sys.executable, LEDGER, *prefix, *args], cwd=repo, capture_output=True, text=True,
+    return subprocess.run([sys.executable, LEDGER, *prefix, *args], cwd=cwd or repo, capture_output=True, text=True,
                           encoding="utf-8")
 
 
@@ -299,6 +299,115 @@ run("claim", "--task", "T3", ledger=CLAIMS)
 add("dev", "NEEDS_CONTEXT", "T3", ledger=CLAIMS)
 check("a task that came back NEEDS_CONTEXT can be claimed again", run("claim", "--task", "T3", ledger=CLAIMS).returncode == 0)
 check("an old ledger without claims has an empty in-flight list", status(".superpowers/legacy.jsonl")["in_flight"] == [])
+
+WAIVE = ".superpowers/waive.jsonl"
+run("start", "--slug", "waive", ledger=WAIVE)
+for agent, verdict, task, count in (("dev", "DONE", "T1", 0), ("reviewer", "FAIL", None, 1), ("qa", "PASS", None, 0)):
+    add(agent, verdict, task, count, ledger=WAIVE)
+r = run("waive", "--agent", "qa", "--reason", "x", ledger=WAIVE)
+check("waive refuses an agent whose latest run is not a FAIL", r.returncode != 0 and "FAIL" in r.stderr, r.stderr)
+check("waive needs a reason", run("waive", "--agent", "reviewer", ledger=WAIVE).returncode != 0)
+unmeasured = status(WAIVE)["metrics"]["time"]["unmeasured"]
+failed_head = status(WAIVE)["reviewer"][0]["head"]
+subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "after the review"], cwd=repo, check=True,
+               capture_output=True)
+r = run("waive", "--agent", "reviewer", "--reason", "the finding is wrong: the caller validates", ledger=WAIVE)
+state = status(WAIVE)
+check("waive accepts the open findings of the latest FAIL: the cycle closes and the ruling is a note",
+      r.returncode == 0 and state["ready_for_gate"] is True
+      and state["notes"] == ["waived reviewer FAIL: the finding is wrong: the caller validates"], (r.stderr, state))
+check("a waiver is not an agent run in the time metrics",
+      state["metrics"]["time"]["unmeasured"] == unmeasured, state["metrics"]["time"])
+check("a waiver keeps the head the agent reviewed",
+      state["reviewer"][0].get("waived") and state["reviewer"][0]["head"] == failed_head, state["reviewer"])
+WAIVE2 = ".superpowers/waive2.jsonl"
+run("start", "--slug", "waive2", ledger=WAIVE2)
+for agent, verdict, task, count in (("dev", "DONE", "T1", 0), ("reviewer", "FAIL", None, 1), ("dev", "DONE", "fix-1", 0)):
+    add(agent, verdict, task, count, ledger=WAIVE2)
+r = run("waive", "--agent", "reviewer", "--reason", "x", ledger=WAIVE2)
+check("waive refuses a FAIL that a later dev run already answered: the fix needs its review",
+      r.returncode != 0 and "review" in r.stderr, r.stderr)
+run("mode", "autonomous", ledger=WAIVE2)
+add("reviewer", "FAIL", None, 1, ledger=WAIVE2)
+run("waive", "--agent", "reviewer", "--reason", "ruled out", ledger=WAIVE2)
+check("in autonomous mode a waiver goes to the VALIDAR list",
+      status(WAIVE2)["validar"] == ["waived reviewer FAIL: ruled out"], status(WAIVE2))
+
+CAP = ".superpowers/cap.jsonl"
+run("start", "--slug", "cap", ledger=CAP)
+run("mode", "autonomous", ledger=CAP)
+add("dev", "DONE", "T1", ledger=CAP)
+add("reviewer", "FAIL", None, 1, ledger=CAP)
+for number in (1, 2):
+    add("dev", "DONE", f"fix-{number}", ledger=CAP)
+    add("reviewer", "FAIL", None, 1, ledger=CAP)
+check("autonomous: the fix rounds go on up to the third",
+      not any("stop the delivery" in item for item in status(CAP)["pending"]), status(CAP)["pending"])
+add("dev", "DONE", "fix-3", ledger=CAP)
+add("reviewer", "FAIL", None, 1, ledger=CAP)
+check("autonomous: still failing after three fix rounds stops the delivery",
+      any("stop the delivery" in item and "note --validar" in item for item in status(CAP)["pending"]),
+      status(CAP)["pending"])
+
+PLAN = ".superpowers/plan.jsonl"
+check("plan before start is refused", run("plan", "--path", "x.md", ledger=PLAN).returncode != 0)
+run("start", "--slug", "plan", ledger=PLAN)
+check("a delivery started before its plan has no plan yet", status(PLAN)["plan"] is None)
+r = run("plan", "--path", "docs/plans/plan.md", ledger=PLAN)
+check("plan records the approved plan for the gate", r.returncode == 0 and status(PLAN)["plan"] == "docs/plans/plan.md",
+      r.stderr)
+
+INPUT = ".superpowers/input.jsonl"
+run("start", "--slug", "input", ledger=INPUT)
+add("dev", "DONE", "T1", ledger=INPUT)
+r = run("add", "--agent", "reviewer", "--verdict", "PASS", "--critical", "1", "--important", "-1", "--origin",
+        "execution=0", ledger=INPUT)
+check("a negative finding count is refused", r.returncode != 0, r.stdout)
+for text in ("1h30", "12m30", "1h5", "m", "h"):
+    check(f"--seconds {text} without the unit of its last number is refused",
+          add("dev", "DONE", "T2", ledger=INPUT, seconds=text).returncode != 0)
+for text, expected in (("90", 90), ("1h", 3600), ("1h30m", 5400), ("12m30s", 750), ("45s", 45)):
+    add("dev", "DONE", f"S{expected}", ledger=INPUT, seconds=text)
+check("durations with units are read", status(INPUT)["metrics"]["time"]["tasks"] == {
+    "S90": 90, "S3600": 3600, "S5400": 5400, "S750": 750, "S45": 45}, status(INPUT)["metrics"]["time"]["tasks"])
+with open(os.path.join(repo, INPUT), "a", encoding="utf-8") as handle:
+    handle.write('{"type": "note", "text": "cut sh\n')
+r = run("status", ledger=INPUT)
+check("a truncated ledger line stops every command with its line number, not a traceback",
+      r.returncode != 0 and "Traceback" not in r.stderr and ":8:" in r.stderr, r.stderr)
+
+worktrees = tempfile.mkdtemp(prefix="ledger_wt_")
+atexit.register(shutil.rmtree, worktrees, True)
+task_tree, front_tree = os.path.join(worktrees, "task"), os.path.join(worktrees, "front")
+for tree in (task_tree, front_tree):
+    subprocess.run(["git", "worktree", "add", "-q", "--detach", tree], cwd=repo, check=True, capture_output=True)
+
+
+def slug_at(cwd):
+    try:
+        return json.loads(run("status", "--json", cwd=cwd).stdout)["slug"]
+    except ValueError:
+        return None
+
+
+os.makedirs(os.path.join(repo, "src", "deep"), exist_ok=True)
+check("from a subfolder, the ledger of the worktree root is used", slug_at(os.path.join(repo, "src", "deep")) == "feature")
+r = run("claim", "--task", "W1", cwd=task_tree)
+check("from a task worktree with no ledger, claim writes to the main worktree's ledger",
+      r.returncode == 0 and "W1" in status()["in_flight"], r.stderr)
+run("release", "--task", "W1", cwd=task_tree)
+subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "task commit"], cwd=task_tree, check=True,
+               capture_output=True)
+run("add", "--agent", "dev", "--task", "W2", "--verdict", "DONE", cwd=task_tree)
+main_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
+check("a run added from a task worktree records the head of the worktree that owns the ledger",
+      [entry for entry in map(json.loads, open(os.path.join(repo, ".superpowers", "ledger.jsonl"), encoding="utf-8"))
+       if entry.get("task") == "W2"][0]["head"] == main_head)
+r = run("start", "--slug", "front", cwd=front_tree)
+check("start in a worktree creates that worktree's own ledger",
+      r.returncode == 0 and os.path.exists(os.path.join(front_tree, ".superpowers", "ledger.jsonl")), r.stderr)
+check("a front worktree with its own ledger keeps using it",
+      slug_at(front_tree) == "front" and status()["slug"] == "feature")
 
 run("note", "--text", "decisão não óbvia")
 raw = subprocess.run([sys.executable, LEDGER, "status"], cwd=repo, capture_output=True,

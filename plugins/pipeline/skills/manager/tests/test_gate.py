@@ -1,4 +1,4 @@
-import atexit, os, shutil, stat, subprocess, sys, tempfile
+import atexit, os, re, shutil, stat, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GATE = os.path.join(HERE, "..", "gate.py")
@@ -186,6 +186,8 @@ r = gate("--base", "main")
 check("a deferred item with no decision: NOT READY",
       r.returncode == 1 and "Ledger:     FAIL" in r.stdout and "deferred D1" in r.stdout, r.stdout)
 ledger_cmd("resolve", "--id", "D1", "--decision", "user: next delivery")
+ledger_cmd("add", "--agent", "dev", "--task", "fix-1", "--verdict", "DONE")
+ledger_cmd("add", "--agent", "reviewer", "--verdict", "PASS")
 ledger_cmd("mode", "autonomous")
 ledger_cmd("note", "--text", "page size 50", "--validar")
 r = gate("--base", "main", "--report", "feature-y")
@@ -216,7 +218,7 @@ def criteria_with(globs):
 
 r = criteria_with("tests/* e2e/**/*.spec.txt")
 check("**/ matches zero or more folders: tests at the folder root and in a subfolder are found",
-      "Criteria:   PASS" in r.stdout and "warning" not in r.stdout, r.stdout)
+      "Criteria:   PASS" in r.stdout and "test glob" not in r.stdout, r.stdout)
 r = criteria_with("tests/* e2e/*.spec.txt")
 trace = r.stdout.split("Criteria:")[1].split("\n    ")[1] if "Criteria:" in r.stdout else ""
 check("* stays within one folder: a test in a subfolder is not found",
@@ -231,5 +233,145 @@ r = criteria_with("tests/* e2e/**/*.spec.txt [!]x [z-a].txt")
 check("an invalid glob is a warning that names it, not a crash",
       "Criteria:   PASS" in r.stdout and "warning: invalid test glob '[!]x'" in r.stdout
       and "warning: invalid test glob '[z-a].txt'" in r.stdout, r.stdout + r.stderr[-300:])
+
+repo = os.path.join(base_dir, "repo2")
+os.makedirs(repo)
+sh("git", "init", "-q", "-b", "main")
+sh("git", "config", "user.email", "t@t.com")
+sh("git", "config", "user.name", "t")
+write(".gitignore", ".superpowers/\n")
+write("check_reports.py", "import subprocess, sys\n"
+      "names = subprocess.run(['git', 'ls-files', 'docs/quality-reports'], capture_output=True, text=True).stdout.split()\n"
+      "sys.exit(1 if any('PRIVATE-MARK' in open(n, encoding='utf-8').read() for n in names) else 0)\n")
+sh("git", "add", ".gitignore", "check_reports.py")
+COMANDOS = f"# p\n\n## Comandos\n\n- Testes: `{PY} check_reports.py`\n"
+commit("CLAUDE.md", COMANDOS, "base")
+sh("git", "switch", "-q", "-c", "feat/z")
+ledger_cmd("start", "--slug", "z", "--base", "main")
+commit("src.txt", "a\n", "feat: a")
+
+
+def close_cycle(task="T1"):
+    ledger_cmd("add", "--agent", "dev", "--task", task, "--verdict", "DONE")
+    ledger_cmd("add", "--agent", "reviewer", "--verdict", "PASS")
+    ledger_cmd("add", "--agent", "qa", "--verdict", "PASS")
+
+
+close_cycle()
+ledger_cmd("note", "--text", "kept the PRIVATE-MARK folder out")
+r = gate("--base", "main", "--report", "z")
+folder = os.path.join(repo, "docs", "quality-reports")
+check("the project's tests run with the quality report in place: a note they refuse makes the gate NOT READY",
+      r.returncode == 1 and "Testes:     FAIL" in r.stdout, r.stdout)
+check("NOT READY with --report leaves no report and a clean tree",
+      not (os.path.isdir(folder) and os.listdir(folder)) and sh("git", "status", "--porcelain") == "", r.stdout)
+
+ledger_cmd("start", "--slug", "z2", "--archive")
+close_cycle()
+head = sh("git", "rev-parse", "HEAD").strip()
+r = gate("--report", "z2")
+check("without --base the gate uses the base the ledger recorded at start",
+      r.returncode == 0 and f"GATE {head[:7]}..{head[:7]}" in r.stdout, r.stdout)
+check("READY with --report stages the report the tests already saw",
+      "docs/quality-reports/" in sh("git", "diff", "--cached", "--name-only"), r.stdout)
+sh("git", "commit", "-q", "--no-verify", "-m", "docs: quality report")
+r = gate("--base", "nope")
+check("an invalid --base is an error, not a silent fallback",
+      r.returncode != 0 and "READY" not in r.stdout and "nope" in r.stderr, r.stdout + r.stderr)
+
+commit("docs/lessons.md", "- lock before checking\n", "docs: lesson")
+r = gate()
+check("commits after the last review that touch only lessons or quality reports keep the gate READY",
+      r.returncode == 0, r.stdout)
+sh("git", "switch", "-q", "-c", "side", "main")
+commit("side.txt", "s\n", "feat: side front")
+sh("git", "switch", "-q", "feat/z")
+sh("git", "merge", "-q", "--no-ff", "--no-edit", "side")
+r = gate()
+check("a merged front (merge commit) is not counted as an unreviewed commit", r.returncode == 0, r.stdout)
+commit("late.txt", "late\n", "feat: late, no ledger entry")
+r = gate()
+check("a commit after the last review with no ledger entry: NOT READY, naming the file",
+      r.returncode == 1 and "Reviewed:" in r.stdout and "late.txt" in r.stdout, r.stdout)
+close_cycle("fix-1")
+r = gate()
+check("the reviewer on that commit makes the gate READY again", r.returncode == 0, r.stdout)
+
+commit(".pipeline-secrets-allow", "# user entries\n", "chore: the user allowlists a false positive")
+r = gate()
+check("a commit of the secret-scan allowlist (the user's file) after the last review keeps the gate READY",
+      r.returncode == 0, r.stdout)
+commit("z.test.txt", "test('AC-Z1-1 given z')\n", "test: z")
+commit("docs/plan.md", "# plan\n- AC-Z1-1 Given z.\n## Errata\n", "docs: plan z")
+close_cycle("fix-0")
+ledger_cmd("plan", "--path", os.path.join(repo, "docs", "plan.md"))
+commit("docs/plan.md", "# plan\n- AC-Z1-1 Given z.\n## Errata\n- renumbered\n", "docs: errata")
+r = gate()
+check("an Errata commit on a plan recorded with an absolute path keeps the gate READY", r.returncode == 0, r.stdout)
+os.makedirs(folder, exist_ok=True)
+write(f"docs/quality-reports/{__import__('datetime').date.today().isoformat()}-left.md", "# half a report\n")
+sh("git", "add", "docs/quality-reports")
+r = gate("--report", "left")
+check("a draft report left staged by a killed gate run is cleared by the next run of the same report",
+      r.returncode == 0 and "Clean tree: PASS" in r.stdout, r.stdout)
+sh("git", "commit", "-q", "--no-verify", "-m", "docs: quality report left")
+r = gate("--cmd", "Testes=")
+check("an empty test command is not configured: NOT READY",
+      r.returncode == 1 and "Testes:     FAIL" in r.stdout and "not configured" in r.stdout, r.stdout)
+r = gate("--cmd", f"Lint={PY} -c \"open('src.txt', 'a').write('x')\"")
+check("a command that rewrites a tracked file: NOT READY, naming it",
+      r.returncode == 1 and "Unchanged:  FAIL" in r.stdout and "src.txt" in r.stdout, r.stdout)
+sh("git", "checkout", "--", "src.txt")
+
+commit("CLAUDE.md", COMANDOS + "- Testes (e2e): `" + PY + " -c \"print('e2e ok')\"`\n"
+       + "- Lint: ` `\n", "docs: e2e line")
+close_cycle("fix-2")
+r = gate("--report", "z3")
+check("two lines with the same label both run, each under its own name",
+      r.returncode == 0 and "running Testes: " in r.stdout and "running Testes (e2e): " in r.stdout
+      and re.search(r"Testes \(e2e\):\s+PASS", r.stdout), r.stdout)
+check("a blank command line counts as not configured", "Lint:" in r.stdout and "running Lint" not in r.stdout,
+      r.stdout)
+check("a Comandos section changed in the branch is a warning with the diff",
+      "warning: the Comandos section of CLAUDE.md changed" in r.stdout and "+- Testes (e2e)" in r.stdout, r.stdout)
+name = [entry for entry in os.listdir(folder) if "z3" in entry]
+text = open(os.path.join(folder, name[0]), encoding="utf-8").read() if name else ""
+check("the report shows the changed Comandos section for approval 2",
+      "## Comandos changed" in text and "+- Testes (e2e)" in text, text)
+sh("git", "reset", "-q", "--hard")
+commit("CLAUDE.md", COMANDOS.replace("check_reports.py", "-c \"import sys; sys.exit(1)\""), "docs: failing tests")
+close_cycle("fix-3")
+r = gate()
+check("the branch's own command still runs (the change is shown, not ignored)",
+      r.returncode == 1 and "Testes:     FAIL" in r.stdout, r.stdout)
+
+sh("git", "reset", "-q", "--hard", "HEAD~1")
+commit(".env.produção", "X=1\n", "env with an accented name")
+r = gate()
+check("an .env file with an accented name in the branch: NOT READY",
+      r.returncode == 1 and re.search(r"Secrets:\s+FAIL", r.stdout) and ".env.produ" in r.stdout, r.stdout)
+sh("git", "reset", "-q", "--hard", "HEAD~1")
+sh("git", "switch", "-q", "main")
+commit(".env", "X=1\n", "an old mistake on main")
+sh("git", "switch", "-q", "-c", "feat/drop-env")
+ledger_cmd("start", "--slug", "drop", "--archive")
+sh("git", "rm", "-q", ".env")
+sh("git", "commit", "-q", "--no-verify", "-m", "remove the tracked env")
+close_cycle()
+r = gate()
+check("a branch that only removes a tracked .env file passes the secret check",
+      re.search(r"Secrets:\s+PASS", r.stdout), r.stdout)
+
+sh("git", "config", "log.diffMerges", "cc")
+sh("git", "switch", "-q", "-c", "side-secret")
+commit("side.txt", "s\n", "feat: side")
+sh("git", "switch", "-q", "feat/drop-env")
+sh("git", "merge", "-q", "--no-ff", "--no-commit", "side-secret")
+write("merged.txt", SECRET)
+sh("git", "add", "merged.txt")
+sh("git", "commit", "-q", "--no-verify", "-m", "merge with a secret added in the merge itself")
+r = gate()
+check("a secret added in a merge commit is found even with log.diffMerges=cc in the git config",
+      re.search(r"Secrets:\s+FAIL", r.stdout) and "merged.txt" in r.stdout, r.stdout)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

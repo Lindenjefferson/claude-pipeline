@@ -5,10 +5,13 @@
                         is kept as pre-commit.pipeline-chained and runs first. A pre-push hook left by
                         an older version of this scanner is removed.
   --pre-commit          scans the index git is about to commit (git sets GIT_INDEX_FILE for it) and
-                        blocks on .env-style files and secret-looking lines (cloud keys, tokens,
-                        private keys, JWTs other than the public anon key, password/secret
-                        assignments with a literal value), and blocks added lines that are not valid
-                        UTF-8 or hold invisible characters (see below).
+                        blocks on added or changed .env-style files (removing one passes) and
+                        secret-looking added lines (cloud keys, tokens, private keys, JWTs other than
+                        the public anon key, password/secret assignments with a literal value), and
+                        blocks added lines that are not valid UTF-8 or hold invisible characters (see
+                        below). Lines are read by the hunk headers of the diff, so an added line that
+                        starts with ++ is content; NUL bytes are dropped first, so a UTF-16 file is
+                        scanned too. File names come from -z listings, so a non-ASCII name is seen.
   --fingerprint         prints the fingerprints of the flagged lines read from stdin (a diff, or a
                         file with --path <path>).
 
@@ -23,7 +26,8 @@ import.meta.env.X, %VAR%). Still blocked: secret-looking quoted literals (a plac
 value, such as changeme, example, xxxx, or starting with your_, your- or <); runs of 16+ characters without _
 in one case or alternating case; values where almost every character is unique (Shannon entropy of 3.5
 bits/character or more, near the maximum for the length); and, under password/passwd/secret keys, phrases with
-_ that name no code word.
+_ that name no code word and unquoted values of 12+ characters with three character classes and a symbol other
+than - . _ $ (a call, a URL, a template or code such as a type, a subscript or a qualified name does not count).
 
 Invisible characters: added lines with a zero-width space or word joiner (U+200B, U+2060 to U+2064, U+180E), a
 direction control (U+202A to U+202E, U+2066 to U+2069), a Tag character (U+E0000 to U+E007F) or a BOM anywhere but
@@ -40,13 +44,14 @@ because the installed pre-commit shim runs only this script. It has no allowlist
 
 False positive: the user (never an agent: kickoff denies agents edits to the file) adds the line
 `<fingerprint>  # reason` to .pipeline-secrets-allow at the repo root and stages it; the block message gives
-the fingerprint, and --fingerprint lists them (git diff --cached | python <this file> --fingerprint; for a
+the fingerprint, and --fingerprint lists them (git diff --cached --text | python <this file> --fingerprint; for a
 whole file, --fingerprint --path <path> < <path>). A fingerprint is the sha256 of the file path and the line
 with whitespace collapsed: it frees only that exact line in that file, and editing either needs a new entry.
 The list is read from the index, so only staged entries count; there is no in-code suppression, and a real
 secret is removed and rotated, never allowlisted. This stops accidental leaks, not a determined bypass (git
 commit --no-verify skips it); server-side push protection (e.g. GitHub secret scanning) is the last line."""
 import base64
+import codecs
 import collections
 import hashlib
 import json
@@ -61,7 +66,7 @@ PATTERNS = [
     ("AWS access key", r"AKIA[0-9A-Z]{16}"),
     ("GitHub token", r"gh[pousr]_[A-Za-z0-9]{20,}"),
     ("Slack token", r"xox[baprs]-[A-Za-z0-9-]{10,}"),
-    ("private key header", r"-----BEGIN (RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----"),
+    ("private key header", r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----"),
     ("Stripe live key", r"[rs]k_live_[0-9A-Za-z]{16,}"),
     ("Supabase secret key", r"sb_secret_[A-Za-z0-9_\-]{20,}"),
     ("Anthropic API key", r"sk-ant-[A-Za-z0-9_\-]{20,}"),
@@ -90,6 +95,7 @@ CODE_WORDS = {"value", "input", "new", "old", "plain", "current", "default", "en
 ENV_REFERENCE = re.compile(r"^(?:\$|%\w+%|process\.env\b|os\.environ\b|os\.getenv\b"
                            r"|import\.meta\.env\b|Deno\.env\b|env\()")
 TEMPLATED = re.compile(r"\$\{|\$\(|\{\{|^\$|^%\w+%$")
+CODE_REFERENCE = re.compile(r"[A-Za-z_$][\w$]*(?:\.|::|\?\.|\[|<)")
 PLACEHOLDER = re.compile(r"(?i)^(?:placeholder|example|changeme|x+|\*+)$|^(?:your[_-]|<)")
 SQL_KEYWORDS = {"null", "default", "true", "false", "excluded", "current_user", "session_user",
                 "current_timestamp", "current_setting", "now"}
@@ -109,21 +115,29 @@ class HookError(Exception):
     pass
 
 
-def git(args, cwd, env=None, data=None, timeout=30):
-    feed = {"input": data} if data is not None else {"stdin": subprocess.DEVNULL}
+def git_bytes(args, cwd):
     try:
-        result = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, env=env,
-                                encoding="utf-8", errors="replace", timeout=timeout, **feed)
-        return result.returncode, result.stdout or ""
+        result = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, stdin=subprocess.DEVNULL, timeout=30)
+        return result.returncode, result.stdout or b""
     except Exception:
-        return 1, ""
+        return 1, b""
 
 
-def git_checked(args, cwd, env=None, data=None):
-    code, out = git(args, cwd, env, data=data) if data is not None else git(args, cwd, env)
+def git(args, cwd):
+    code, out = git_bytes(args, cwd)
+    return code, out.decode("utf-8", "replace")
+
+
+def git_checked(args, cwd):
+    code, out = git_bytes(args, cwd)
     if code != 0:
         raise HookError("git " + " ".join(args[:2]) + " failed")
     return out
+
+
+def names(listing):
+    """The paths of a -z name listing (git quotes nothing there, so a non-ASCII name stays as it is)."""
+    return sorted({name.strip("\n") for name in listing.decode("utf-8", "replace").split("\0")} - {""})
 
 
 def char_classes(value):
@@ -183,6 +197,14 @@ def unquoted_secret(name, rest):
     return not written_identifier(name, value)
 
 
+def unquoted_password(name, rest):
+    words = rest.split()
+    word = words[0].rstrip(",;") if words and PASSWORD_KEY.search(name) else ""
+    if "(" in word or "://" in word or TEMPLATED.search(word) or PLACEHOLDER.search(word) or CODE_REFERENCE.match(word):
+        return False
+    return len(word) >= 12 and char_classes(word) >= 3 and bool(re.search(r"[^\w.$-]", word))
+
+
 def assigns_secret(text):
     position = 0
     while True:
@@ -199,7 +221,7 @@ def assigns_secret(text):
             content = rest[1:closing] if closing > 0 else rest[1:]
             if quoted_secret(content):
                 return True
-        elif unquoted_secret(name, rest):
+        elif unquoted_secret(name, rest) or unquoted_password(name, rest):
             return True
 
 
@@ -221,30 +243,49 @@ def line_findings(line):
     return labels
 
 
-def added_entries(diff):
-    path = None
-    for line in diff.splitlines():
-        if line.startswith("+++ "):
-            path = line[4:].strip()
-            path = path[2:] if path.startswith("b/") else None if path == "/dev/null" else path
-        elif line.startswith("+"):
-            yield path, line[1:]
+HUNK = re.compile(rb"@@ -\S+ \+(\d+)(?:,(\d+))? @@")
 
 
-def allowlist_lines(cwd, rev=""):
-    code, text = git(["show", f"{rev}:{ALLOWLIST_FILE}"], cwd)
-    if code != 0:
-        return {}
-    lines = {}
-    for line in text.splitlines():
-        entry = line.split("#", 1)[0].strip().lower()
-        if re.fullmatch(r"[0-9a-f]{64}", entry):
-            lines.setdefault(entry, line.strip())
-    return lines
+def diff_path(header):
+    name = header.strip()
+    if name.startswith(b'"') and name.endswith(b'"'):
+        name = codecs.escape_decode(name[1:-1])[0]
+    path = name.decode("utf-8", "replace")
+    return path[2:] if path.startswith("b/") else None if path == "/dev/null" else path
+
+
+def diff_lines(diff):
+    """(path, line number, raw bytes) of every added line of a unified diff, counted by its hunk headers, so an
+    added line that starts with ++ is content and a +++ header is only read between hunks."""
+    if isinstance(diff, str):
+        diff = diff.encode("utf-8", "replace")
+    path, number, remaining = None, 0, 0
+    for raw in diff.split(b"\n"):
+        if remaining <= 0:
+            hunk = HUNK.match(raw)
+            if raw.startswith(b"+++ "):
+                path = diff_path(raw[4:])
+            elif hunk:
+                number = int(hunk.group(1))
+                remaining = int(hunk.group(2) if hunk.group(2) is not None else 1)
+            continue
+        if raw.startswith((b"-", b"\\")):
+            continue
+        if raw.startswith(b"+"):
+            yield path, number, raw[1:]
+        number += 1
+        remaining -= 1
+
+
+def text_of(raw):
+    # why: a UTF-16 file has a NUL after (or before) every ASCII character, which hides a key from every pattern
+    return raw.replace(b"\0", b"").decode("utf-8", "replace")
 
 
 def load_allowlist(cwd, rev=""):
-    return set(allowlist_lines(cwd, rev))
+    code, text = git(["show", f"{rev}:{ALLOWLIST_FILE}"], cwd)
+    entries = (line.split("#", 1)[0].strip().lower() for line in text.splitlines()) if code == 0 else ()
+    return {entry for entry in entries if re.fullmatch(r"[0-9a-f]{64}", entry)}
 
 
 def scan(diff, names, allowed=frozenset()):
@@ -255,14 +296,15 @@ def scan(diff, names, allowed=frozenset()):
     if env_files:
         findings.append(".env-style file(s): " + ", ".join(env_files))
     seen = set()
-    for path, line in added_entries(diff):
+    for path, _, raw in diff_lines(diff):
+        line = text_of(raw)
         labels = line_findings(line)
         if not labels:
             continue
         mark = fingerprint(path, line)
-        if mark in allowed or (path, mark) in seen:
+        if mark in allowed or mark in seen:
             continue
-        seen.add((path, mark))
+        seen.add(mark)
         where = f" in {path}" if path else " in added lines"
         findings.append(f"possible {', '.join(labels)}{where} (fingerprint {mark})")
     return findings
@@ -274,20 +316,21 @@ ALLOW_HINT = ("\n\nFor a false positive, leave that line out and commit the rest
               "entries count; you may not edit "
               "or stage that file yourself. The fingerprint covers the file path and the line, "
               "so any edit to either changes it. To list the fingerprints of flagged lines: git "
-              "diff --cached | python \"" + os.path.abspath(__file__).replace("\\", "/")
+              "diff --cached --text | python \"" + os.path.abspath(__file__).replace("\\", "/")
               + "\" --fingerprint")
 
 
 def print_fingerprints():
     given = sys.argv[sys.argv.index("--path") + 1] if "--path" in sys.argv[:-1] else None
-    text = sys.stdin.buffer.read().decode("utf-8", "replace")
-    diff = re.search(r"^(diff --git|@@ )", text, re.M)
+    data = sys.stdin.buffer.read()
+    diff = re.search(rb"^(diff --git|@@ )", data, re.M)
     if not diff and given is None:
         sys.stderr.write("Plain text input needs --path <file path relative to the repo root>, "
                          "because the fingerprint covers the path.\n")
         sys.exit(2)
-    entries = added_entries(text) if diff else ((given, line) for line in text.splitlines())
-    for path, line in entries:
+    entries = diff_lines(data) if diff else ((given, 0, raw) for raw in data.split(b"\n"))
+    for path, _, raw in entries:
+        line = text_of(raw)
         labels = line_findings(line)
         if labels:
             print(f"{fingerprint(path, line)}  # {path or '-'}: {', '.join(labels)}")
@@ -322,38 +365,12 @@ exit 1
 INVISIBLE = re.compile(r"[\u180e\u200b\u2060-\u2064\u202a-\u202e\u2066-\u2069\ufeff\U000e0000-\U000e007f]")
 
 
-def added_lines(cwd):
-    """(path, line number, raw bytes) of every added line of the staged text files, from a -U0 diff."""
-    try:
-        done = subprocess.run(["git", "diff", "--cached", "--no-ext-diff", "--no-textconv", "-U0", "--"] + EXCLUDES,
-                              cwd=cwd, capture_output=True, stdin=subprocess.DEVNULL, timeout=30)
-    except Exception:
-        raise HookError("git diff failed")
-    if done.returncode != 0:
-        raise HookError("git diff failed")
-    path, number, remaining = None, 0, 0
-    for raw in done.stdout.split(b"\n"):
-        if remaining == 0:
-            if raw.startswith(b"+++ "):
-                name = raw[4:].decode("utf-8", "replace").strip().strip('"')
-                path = name[2:] if name.startswith("b/") else None
-            elif raw.startswith(b"@@"):
-                hunk = re.match(rb"@@ -\S+ \+(\d+)(?:,(\d+))? @@", raw)
-                if hunk:
-                    number = int(hunk.group(1))
-                    remaining = int(hunk.group(2) if hunk.group(2) is not None else 1)
-            continue
-        if raw.startswith(b"+"):
-            yield path, number, raw[1:]
-            number += 1
-            remaining -= 1
-
-
 def text_problems(cwd):
     """({path: (first line, count)} not valid UTF-8, {path: (first line, count, first code point)} with
-    invisible characters) over the added lines."""
+    invisible characters) over the added lines of the staged text files."""
     bad, hidden = {}, {}
-    for path, number, raw in added_lines(cwd):
+    diff = git_checked(["diff", "--cached", "--no-ext-diff", "--no-textconv", "-U0", "--"] + EXCLUDES, cwd)
+    for path, number, raw in diff_lines(diff):
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError:
@@ -371,9 +388,9 @@ def text_problems(cwd):
 
 def pre_commit():
     cwd = os.getcwd()
-    names = git_checked(["diff", "--cached", "--name-only"], cwd)
+    staged = names(git_checked(["diff", "--cached", "--name-only", "-z", "--diff-filter=d"], cwd))
     diff = git_checked(["diff", "--cached", "--no-ext-diff", "--no-textconv", "--text", "--"] + EXCLUDES, cwd)
-    findings = scan(diff, names.splitlines(), load_allowlist(cwd))
+    findings = scan(diff, staged, load_allowlist(cwd))
     bad_encoding, hidden = text_problems(cwd)
     if findings:
         sys.stderr.write("Secret scan blocked this commit. The changes being committed contain:\n- "

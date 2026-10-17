@@ -18,7 +18,7 @@ Cada componente tem **uma** fonte de verdade, o próprio arquivo. Os outros docu
 | Fluxo de entrega, passos, regras do manager | [`plugins/pipeline/skills/manager/SKILL.md`](plugins/pipeline/skills/manager/SKILL.md) |
 | Preparação de um projeto, allowlist de comandos, template do `CLAUDE.md` dos projetos | [`plugins/pipeline/skills/kickoff/SKILL.md`](plugins/pipeline/skills/kickoff/SKILL.md) e [`templates/`](plugins/pipeline/skills/kickoff/templates/) |
 | Papel, escopo e relatório de cada agente | [`plugins/pipeline/agents/`](plugins/pipeline/agents/) (`dev`, `reviewer`, `qa`, `discovery`) |
-| Princípios gerais de qualidade (Invariantes, acesso, testes, auth, UI, auditoria) | [`plugins/pipeline/checklists/general.md`](plugins/pipeline/checklists/general.md) |
+| Princípios gerais de qualidade (Invariants, acesso, testes, auth, UI, auditoria) | [`plugins/pipeline/checklists/general.md`](plugins/pipeline/checklists/general.md) |
 | O que spec e plano respondem (pré-mortem, premissas, domínio) | [`plugins/pipeline/skills/manager/templates/spec-checklist.md`](plugins/pipeline/skills/manager/templates/spec-checklist.md) |
 | Regras exatas do ledger (ciclos, pendências, métricas) | docstring de [`ledger.py`](plugins/pipeline/skills/manager/ledger.py) |
 | Checagens do gate e relatório de qualidade | docstring de [`gate.py`](plugins/pipeline/skills/manager/gate.py) |

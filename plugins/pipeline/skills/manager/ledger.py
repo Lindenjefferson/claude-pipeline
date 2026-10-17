@@ -8,6 +8,8 @@
   claim   --task <id>                                         a dev run dispatched; refused if the task is in flight or done
   release --task <id>                                         frees a claim whose run was lost
   note    --text <text> [--validar]                           a decision taken on the user's behalf
+  waive   --agent reviewer|qa --reason <text>                 accepts the open findings of that agent's latest FAIL
+  plan    --path <path>                                       the approved plan, when start ran before it existed
   mode    autonomous|supervised                               the user turned autonomous mode on, or is back
   defer   --text <text>                                       an item left for later; prints its id (D1, D2...)
   resolve --id <id> --decision <text>                         the final decision on a deferred item
@@ -25,9 +27,15 @@ A fix round (task fix-N) and the cleanup task (task cleanup) stay in the current
 a reviewer pass, and qa again only when a FAIL came before them. Every finding carries its origin (design,
 assumption, plan, execution, environment); --seconds takes 90, 12m, 1h5m or 12m30s. A deferred item with no
 decision keeps the delivery from the gate. start --archive moves an existing delivery to ledger-<old-slug>.jsonl next
-to the ledger first. --check exits 1 while anything is pending, so the gate can rely on it. In autonomous mode a
-cycle that still fails after a fix round does not ask the user (the fix rounds go on); notes marked --validar are
-listed apart, for the user to confirm on return. A ledger with no mode entry is supervised."""
+to the ledger first. --check exits 1 while anything is pending, so the gate can rely on it. A cycle whose reviewer or
+qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on up to three, then the
+delivery stops. waive is refused when the dev ran after that FAIL (the fix needs its review); it records the reason
+as a note and counts as that agent's PASS at the head it reviewed. Notes marked --validar (and waivers in autonomous
+mode) are listed apart, for the user to confirm on return. A ledger with no mode entry is supervised.
+
+Without --ledger, the ledger is .superpowers/ledger.jsonl at the root of the current worktree, or of the main
+worktree when the current one has none (a task worktree), except for start, which always uses the current one. A
+line that is not JSON stops every command with its line number, so a truncated write is never skipped silently."""
 import argparse
 import datetime
 import json
@@ -44,23 +52,49 @@ VERDICTS = {
 }
 ORIGINS = ("design", "assumption", "plan", "execution", "environment")
 SEVERITIES = ("critical", "important", "minor")
-FIX_ROUNDS = 2
+FIX_ROUNDS = {False: 1, True: 3}
 FIX_TASK = re.compile(r"fix-\d+", re.IGNORECASE)
 FOLLOW_UP = re.compile(r"fix-\d+|cleanup", re.IGNORECASE)
-DURATION = re.compile(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?")
+DURATION = re.compile(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?|(\d+)")
+LEDGER = os.path.join(".superpowers", "ledger.jsonl")
 
 
-def git_head(rev="HEAD"):
-    result = subprocess.run(["git", "rev-parse", "--verify", "--quiet", rev + "^{commit}"], capture_output=True,
-                            text=True)
-    return result.stdout.strip() if result.returncode == 0 else None
+def git_head(rev="HEAD", ledger=None):
+    where = os.path.dirname(os.path.abspath(ledger)) if ledger else None
+    for cwd in ([where] if where and os.path.isdir(where) else []) + [None]:
+        result = subprocess.run(["git", "rev-parse", "--verify", "--quiet", rev + "^{commit}"], capture_output=True,
+                                text=True, cwd=cwd)
+        if result.returncode == 0:
+            return result.stdout.strip()
+    return None
+
+
+def git_path(*args):
+    result = subprocess.run(["git", "rev-parse", *args], capture_output=True, text=True)
+    return os.path.abspath(result.stdout.strip()) if result.returncode == 0 and result.stdout.strip() else None
+
+
+def default_ledger(command):
+    top = git_path("--show-toplevel")
+    here = os.path.join(top, LEDGER) if top else LEDGER
+    common = git_path("--git-common-dir")
+    main = os.path.join(os.path.dirname(common), LEDGER) if common else here
+    return here if os.path.exists(here) or command == "start" or not os.path.exists(main) else main
 
 
 def read(path):
     if not os.path.exists(path):
         return []
+    entries = []
     with open(path, encoding="utf-8") as handle:
-        return [json.loads(line) for line in handle if line.strip()]
+        for number, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            try:
+                entries.append(json.loads(line))
+            except ValueError as error:
+                sys.exit(f"{path}:{number}: not a ledger entry ({error}); fix or remove that line by hand")
+    return entries
 
 
 def write(path, entry):
@@ -124,10 +158,13 @@ def cycle_state(cycle, autonomous=False):
         pending.append(f"qa FAIL ({checks[-1]['open']} open): dev fixes every finding in one batch")
     elif last_qa < needs_qa:
         pending.append("qa has not re-run the scenarios the fix touched")
+    rounds = FIX_ROUNDS[autonomous]
     for agent, done in (("reviewer", reviews), ("qa", checks)):
         failed = sum(1 for entry in done if entry["verdict"] == "FAIL")
-        if not autonomous and done and done[-1]["verdict"] == "FAIL" and failed >= FIX_ROUNDS:
-            pending.append(f"{agent} still fails after a fix round: ask the user")
+        if done and done[-1]["verdict"] == "FAIL" and failed > rounds:
+            pending.append(f"{agent} still fails after {rounds} fix rounds: stop the delivery and record the open "
+                           "findings as note --validar" if autonomous else
+                           f"{agent} still fails after a fix round: ask the user")
     return state, pending
 
 
@@ -146,7 +183,7 @@ def start(args):
     if entries and not args.archive:
         sys.exit(f"{args.ledger} already has a delivery ({entries[0].get('slug')}); "
                  "run start --archive to move it to ledger-<slug>.jsonl and start fresh")
-    base = git_head(args.base)
+    base = git_head(args.base, args.ledger)
     if base is None:
         sys.exit(f"not a commit: {args.base}")
     if entries:
@@ -161,8 +198,8 @@ def seconds(text):
     match = DURATION.fullmatch(text.strip()) if text and text.strip() else None
     if not match or not any(match.groups()):
         sys.exit(f"--seconds must look like 90, 12m, 1h5m or 12m30s, not {text!r}")
-    hours, minutes, rest = (int(part or 0) for part in match.groups())
-    return hours * 3600 + minutes * 60 + rest
+    hours, minutes, rest, bare = (int(part or 0) for part in match.groups())
+    return hours * 3600 + minutes * 60 + rest + bare
 
 
 def origins(text, total):
@@ -190,7 +227,8 @@ def add(args):
         sys.exit("FAIL needs open Critical/Important findings (--critical or --important > 0) and PASS none")
     entry = {"type": "run", "agent": args.agent, "task": args.task, "verdict": args.verdict, "open": blocking,
              "critical": args.critical, "important": args.important, "minor": args.minor,
-             "origin": origins(args.origin, blocking + args.minor), "head": git_head() or "", "summary": args.summary}
+             "origin": origins(args.origin, blocking + args.minor), "head": git_head(ledger=args.ledger) or "",
+             "summary": args.summary}
     if args.seconds is not None:
         entry["seconds"] = seconds(args.seconds)
     write(args.ledger, entry)
@@ -238,6 +276,31 @@ def note(args):
         entry["validar"] = True
     write(args.ledger, entry)
     print("noted (VALIDAR)" if args.validar else "noted")
+
+
+def waive(args):
+    entries = read(args.ledger)
+    if not entries:
+        sys.exit("no delivery started: run start first")
+    cycle = cycles(entries)[-1]
+    done = [index for index, entry in enumerate(cycle) if entry["agent"] == args.agent]
+    if not done or cycle[done[-1]]["verdict"] != "FAIL":
+        sys.exit(f"the latest {args.agent} run of the cycle is not a FAIL: nothing to waive")
+    if any(entry["agent"] == "dev" for entry in cycle[done[-1] + 1:]):
+        sys.exit(f"the dev ran after that {args.agent} FAIL: run the {args.agent} on the fix to review it instead")
+    text = f"waived {args.agent} FAIL: {args.reason}"
+    write(args.ledger, {"type": "note", "text": text, **({"validar": True} if autonomous(entries) else {})})
+    write(args.ledger, {"type": "run", "agent": args.agent, "task": "", "verdict": "PASS", "open": 0, "critical": 0,
+                        "important": 0, "minor": 0, "origin": {}, "head": cycle[done[-1]].get("head", ""),
+                        "summary": "", "waived": args.reason})
+    print(text)
+
+
+def plan(args):
+    if not read(args.ledger):
+        sys.exit("no delivery started: run start first")
+    write(args.ledger, {"type": "plan", "plan": args.path})
+    print(f"plan {args.path}")
 
 
 def autonomous(entries):
@@ -316,6 +379,8 @@ def metrics(entries):
                           "elapsed": elapsed(cycle), "agents": agents})
     time = {"agents": {}, "tasks": {}, "unmeasured": 0}
     for entry in runs(entries):
+        if entry.get("waived") is not None:
+            continue
         if entry.get("seconds") is None:
             time["unmeasured"] += 1
             continue
@@ -339,7 +404,9 @@ def status(args):
     pending += [f"dev {task} dispatched at {at}, no report yet (add it when it reports, or release --task {task})"
                 for task, at in held.items()]
     pending += [f"deferred {item['id']} has no decision: {item['text']}" for item in items if not item["decision"]]
-    report = {"slug": entries[0].get("slug"), "base": entries[0].get("base"), "plan": entries[0].get("plan"),
+    plans = [entry["plan"] for entry in entries if entry["type"] == "plan"]
+    report = {"slug": entries[0].get("slug"), "base": entries[0].get("base"),
+              "plan": plans[-1] if plans else entries[0].get("plan"),
               "cycle": len(groups), "in_flight": list(held), "tasks": {task: entry["verdict"] for task, entry in state["tasks"].items()},
               "reviewer": state["reviewer"], "qa": state["qa"], "pending": pending,
               "autonomous": auto, "deferred": items,
@@ -371,12 +438,19 @@ def status(args):
         sys.exit(1)
 
 
+def count(text):
+    if not text.isdigit():
+        raise argparse.ArgumentTypeError(f"a finding count is a whole number of 0 or more, not {text!r}")
+    return int(text)
+
+
 def main():
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--ledger", default=".superpowers/ledger.jsonl")
+    parser.add_argument("--ledger", help="default: .superpowers/ledger.jsonl at the root of this worktree, or of "
+                                         "the main worktree when this one has none")
     commands = parser.add_subparsers(dest="command", required=True)
     command = commands.add_parser("start")
     command.add_argument("--slug", required=True)
@@ -389,7 +463,7 @@ def main():
     command.add_argument("--task", default="")
     command.add_argument("--verdict", required=True)
     for severity in SEVERITIES:
-        command.add_argument(f"--{severity}", type=int, default=0)
+        command.add_argument(f"--{severity}", type=count, default=0)
     command.add_argument("--origin", default="", help="design=N,assumption=N,plan=N,execution=N,environment=N")
     command.add_argument("--seconds", help="how long the run took: 90, 12m, 1h5m or 12m30s")
     command.add_argument("--summary", default="")
@@ -402,6 +476,13 @@ def main():
     command.add_argument("--text", required=True)
     command.add_argument("--validar", action="store_true", help="the user validates this decision on return")
     command.set_defaults(run=note)
+    command = commands.add_parser("waive")
+    command.add_argument("--agent", required=True, choices=("reviewer", "qa"))
+    command.add_argument("--reason", required=True)
+    command.set_defaults(run=waive)
+    command = commands.add_parser("plan")
+    command.add_argument("--path", required=True)
+    command.set_defaults(run=plan)
     command = commands.add_parser("mode")
     command.add_argument("mode", choices=("autonomous", "supervised"))
     command.set_defaults(run=mode)
@@ -421,6 +502,7 @@ def main():
     command.add_argument("--check", action="store_true")
     command.set_defaults(run=status)
     args = parser.parse_args()
+    args.ledger = args.ledger or default_ledger(args.command)
     args.run(args)
 
 
