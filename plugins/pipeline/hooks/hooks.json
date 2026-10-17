@@ -1,5 +1,5 @@
 {
-  "description": "Gives the manager the delivery ledger back after a compaction or a resumed session; denies the project's dev server outside background mode.",
+  "description": "Gives the manager the delivery ledger back after a compaction or a resumed session; denies skipping the secret-scan pre-commit hook and the project's dev server outside background mode.",
   "hooks": {
     "PreToolUse": [
       {
@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/block-dev-server.py\"",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/bash-guard.py\"",
             "timeout": 10
           }
         ]
