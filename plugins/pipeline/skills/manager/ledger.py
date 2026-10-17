@@ -2,12 +2,13 @@
 """Delivery ledger: one JSON line per agent run, grouped in cycles, so the manager sees what is pending.
 
   start   --slug <slug> [--base <rev>] [--plan <path>] [--archive]       once per delivery
-  add     --agent dev --task <id> --verdict <v> [--seconds <duration>] [--summary <text>]
+  add     --agent dev --task <id> --verdict <v> [--seconds <duration>] [--tokens N] [--summary <text>]
   add     --agent reviewer|qa --verdict PASS|FAIL [--critical N --important N --minor N --origin <origin>=N,...]
-          [--seconds <duration>]
+          [--seconds <duration>] [--tokens N]
   claim   --task <id>                                         a dev run dispatched; refused if the task is in flight or done
   release --task <id>                                         frees a claim whose run was lost
   note    --text <text> [--validar]                           a decision taken on the user's behalf
+  validate --id <id> --decision <text>                        the user's decision on a VALIDAR item (V1, V2...)
   waive   --agent reviewer|qa --reason <text>                 accepts the open findings of that agent's latest FAIL
   plan    --path <path>                                       the approved plan, when start ran before it existed
   mode    autonomous|supervised                               the user turned autonomous mode on, or is back
@@ -25,13 +26,16 @@ It closes when the latest reviewer PASS came after the latest dev run, qa PASSed
 task, and qa ran again after every fix of a blocking (FAIL) finding. The next regular dev run opens the next cycle.
 A fix round (task fix-N) and the cleanup task (task cleanup) stay in the current cycle, even a closed one: they need
 a reviewer pass, and qa again only when a FAIL came before them. Every finding carries its origin (design,
-assumption, plan, execution, environment); --seconds takes 90, 12m, 1h5m or 12m30s. A deferred item with no
-decision keeps the delivery from the gate. start --archive moves an existing delivery to ledger-<old-slug>.jsonl next
-to the ledger first. --check exits 1 while anything is pending, so the gate can rely on it. A cycle whose reviewer or
-qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on up to three, then the
-delivery stops. waive is refused when the dev ran after that FAIL (the fix needs its review); it records the reason
-as a note and counts as that agent's PASS at the head it reviewed. Notes marked --validar (and waivers in autonomous
-mode) are listed apart, for the user to confirm on return. A ledger with no mode entry is supervised.
+assumption, plan, execution, environment); --seconds takes 90, 12m, 1h5m or 12m30s, and --seconds and --tokens
+come from the agent's completion notification, never an estimate (a run without it goes unmeasured). A deferred item
+with no decision keeps the delivery from the gate. start --archive moves an existing delivery to
+ledger-<old-slug>.jsonl next to the ledger first. --check exits 1 while anything is pending, so the gate can rely on
+it. A cycle whose reviewer or qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on
+up to three, then the delivery stops. waive is refused when the dev ran after that FAIL (the fix needs its review); it
+records the reason as a note and counts as that agent's PASS at the head it reviewed. Notes marked --validar (and
+waivers in autonomous mode) are listed apart, numbered V1, V2... in the order written, for the user to confirm on
+return; validate records the decision, and status lists the items still waiting apart from the decided ones. A
+ledger with no mode entry is supervised.
 
 Without --ledger, the ledger is .superpowers/ledger.jsonl at the root of the current worktree, or of the main
 worktree when the current one has none (a task worktree), except for start, which always uses the current one. A
@@ -231,6 +235,8 @@ def add(args):
              "summary": args.summary}
     if args.seconds is not None:
         entry["seconds"] = seconds(args.seconds)
+    if args.tokens is not None:
+        entry["tokens"] = args.tokens
     write(args.ledger, entry)
     print(f"{args.agent}{' ' + args.task if args.task else ''}: {args.verdict} (cycle {len(cycles(read(args.ledger)))})")
 
@@ -276,6 +282,28 @@ def note(args):
         entry["validar"] = True
     write(args.ledger, entry)
     print("noted (VALIDAR)" if args.validar else "noted")
+
+
+def validar(entries):
+    items, decisions = [], {}
+    for entry in entries:
+        if entry["type"] == "note" and entry.get("validar"):
+            items.append({"id": f"V{len(items) + 1}", "text": entry["text"], "decision": None})
+        elif entry["type"] == "validate":
+            decisions[entry["id"]] = entry["decision"]
+    for item in items:
+        item["decision"] = decisions.get(item["id"])
+    return items
+
+
+def validate(args):
+    entries = read(args.ledger)
+    if args.id not in {item["id"] for item in validar(entries)}:
+        sys.exit(f"no VALIDAR item {args.id}")
+    if not args.decision.strip():
+        sys.exit("--decision needs the user's answer, not an empty text")
+    write(args.ledger, {"type": "validate", "id": args.id, "decision": args.decision})
+    print(f"{args.id} validated")
 
 
 def waive(args):
@@ -376,20 +404,25 @@ def metrics(entries):
                 agents[entry["agent"]] = agents.get(entry["agent"], 0) + entry["seconds"]
         fixes = {entry["task"] for entry in cycle if is_task(entry, FIX_TASK)}
         per_cycle.append({"cycle": number, **counts, "fix_rounds": len(fixes), "seconds": sum(agents.values()),
-                          "elapsed": elapsed(cycle), "agents": agents})
-    time = {"agents": {}, "tasks": {}, "unmeasured": 0}
-    for entry in runs(entries):
-        if entry.get("waived") is not None:
-            continue
-        if entry.get("seconds") is None:
-            time["unmeasured"] += 1
-            continue
-        time["agents"][entry["agent"]] = time["agents"].get(entry["agent"], 0) + entry["seconds"]
-        if entry["agent"] == "dev":
-            time["tasks"][entry["task"]] = time["tasks"].get(entry["task"], 0) + entry["seconds"]
+                          "elapsed": elapsed(cycle), "agents": agents,
+                          "tokens": sum(entry.get("tokens") or 0 for entry in cycle)})
+    measured = [entry for entry in runs(entries) if entry.get("waived") is None]
     lessons = [{"text": entry["text"], "check": entry.get("check", "")} for entry in entries
                if entry["type"] == "lesson"]
-    return {"cycles": per_cycle, "origins": found, "time": time, "lessons": lessons}
+    return {"cycles": per_cycle, "origins": found, "time": totals(measured, "seconds"),
+            "tokens": totals(measured, "tokens"), "lessons": lessons}
+
+
+def totals(entries, key):
+    sums = {"agents": {}, "tasks": {}, "unmeasured": 0}
+    for entry in entries:
+        if entry.get(key) is None:
+            sums["unmeasured"] += 1
+            continue
+        sums["agents"][entry["agent"]] = sums["agents"].get(entry["agent"], 0) + entry[key]
+        if entry["agent"] == "dev":
+            sums["tasks"][entry["task"]] = sums["tasks"].get(entry["task"], 0) + entry[key]
+    return sums
 
 
 def status(args):
@@ -405,20 +438,21 @@ def status(args):
                 for task, at in held.items()]
     pending += [f"deferred {item['id']} has no decision: {item['text']}" for item in items if not item["decision"]]
     plans = [entry["plan"] for entry in entries if entry["type"] == "plan"]
-    report = {"slug": entries[0].get("slug"), "base": entries[0].get("base"),
+    report = {"slug": entries[0].get("slug"), "base": entries[0].get("base"), "ledger": os.path.abspath(args.ledger),
               "plan": plans[-1] if plans else entries[0].get("plan"),
-              "cycle": len(groups), "in_flight": list(held), "tasks": {task: entry["verdict"] for task, entry in state["tasks"].items()},
-              "reviewer": state["reviewer"], "qa": state["qa"], "pending": pending,
+              "cycle": len(groups), "in_flight": list(held), "dispatched": held,
+              "tasks": {task: entry["verdict"] for task, entry in state["tasks"].items()},
+              "reviewer": state["reviewer"], "qa": state["qa"], "runs": groups[-1], "pending": pending,
               "autonomous": auto, "deferred": items,
               "notes": [entry["text"] for entry in entries if entry["type"] == "note" and not entry.get("validar")],
-              "validar": [entry["text"] for entry in entries if entry["type"] == "note" and entry.get("validar")],
+              "validar": validar(entries),
               "metrics": metrics(entries), "ready_for_gate": not pending}
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:
         print(f"delivery {report['slug']} (base {str(report['base'])[:12]}), cycle {report['cycle']}")
         if auto:
-            print("mode: autonomous (approvals become VALIDAR notes; never merge or push)")
+            print("mode: autonomous (approvals become VALIDAR notes; never merge into or push the default branch)")
         for task, verdict in report["tasks"].items():
             print(f"- {task}: {verdict}")
         for agent in ("reviewer", "qa"):
@@ -428,8 +462,9 @@ def status(args):
             print(f"pending: {item}")
         for text in report["notes"]:
             print(f"note: {text}")
-        for text in report["validar"]:
-            print(f"VALIDAR: {text}")
+        for item in report["validar"]:
+            print(f"VALIDAR {item['id']}: {item['text']}" if item["decision"] is None
+                  else f"validated {item['id']}: {item['text']} -> {item['decision']}")
         for item in items:
             if item["decision"]:
                 print(f"deferred {item['id']}: {item['text']} -> {item['decision']}")
@@ -440,7 +475,7 @@ def status(args):
 
 def count(text):
     if not text.isdigit():
-        raise argparse.ArgumentTypeError(f"a finding count is a whole number of 0 or more, not {text!r}")
+        raise argparse.ArgumentTypeError(f"a count is a whole number of 0 or more, not {text!r}")
     return int(text)
 
 
@@ -465,7 +500,8 @@ def main():
     for severity in SEVERITIES:
         command.add_argument(f"--{severity}", type=count, default=0)
     command.add_argument("--origin", default="", help="design=N,assumption=N,plan=N,execution=N,environment=N")
-    command.add_argument("--seconds", help="how long the run took: 90, 12m, 1h5m or 12m30s")
+    command.add_argument("--seconds", help="how long the run took, from its completion notification: 90, 12m, 1h5m or 12m30s")
+    command.add_argument("--tokens", type=count, help="the tokens the run used, from its completion notification")
     command.add_argument("--summary", default="")
     command.set_defaults(run=add)
     for name, run in (("claim", claim), ("release", release)):
@@ -476,6 +512,10 @@ def main():
     command.add_argument("--text", required=True)
     command.add_argument("--validar", action="store_true", help="the user validates this decision on return")
     command.set_defaults(run=note)
+    command = commands.add_parser("validate")
+    command.add_argument("--id", required=True)
+    command.add_argument("--decision", required=True)
+    command.set_defaults(run=validate)
     command = commands.add_parser("waive")
     command.add_argument("--agent", required=True, choices=("reviewer", "qa"))
     command.add_argument("--reason", required=True)

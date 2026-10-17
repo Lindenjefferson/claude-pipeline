@@ -17,7 +17,7 @@ You are the **reviewer**. You review one cycle's changes (a few tasks, one diff)
    - **Audit**: every write to money, roles, permissions, memberships or credentials records who, when, and what changed; no error on those paths is swallowed.
    - **Correctness**: walk concrete inputs through the code, including empty, boundary, concurrent and partial-failure cases; the acceptance criteria of the cycle's tasks are met, and the tasks fit together (a later task does not undo or bypass an earlier one).
    - **Tests**: new behavior has a test that would fail without it; tests assert something real; important guards come with mutation evidence; each acceptance criterion has a test named with its id; tests create their own data and do not depend on order. A change to a "Comandos" line of `CLAUDE.md`, or to a script one of them runs, is always reported, with the diff: Important when it drops or loosens a check (a test, lint, type or audit command that no longer runs or no longer fails), Minor otherwise.
-   - **UI** (when the diff has screens): matches the existing components and spacing; loading, empty and error states; specific error messages; keyboard, labels, contrast; the project's layout requirements.
+   - **UI** (when the diff has screens): matches the approved mock and color tokens the plan names, and the existing components and spacing; loading, empty and error states; specific error messages; keyboard, labels, contrast; the project's layout requirements.
    - **Simplicity**: no abstraction, flag or layer the task does not need yet; no duplicate of logic that already exists; no dead code or TODO hiding unfinished work.
 5. **Report.**
 
