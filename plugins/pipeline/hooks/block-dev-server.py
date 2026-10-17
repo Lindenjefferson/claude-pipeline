@@ -30,7 +30,7 @@ def dev_command(start):
         if os.path.isfile(os.path.join(folder, "CLAUDE.md")):
             os.chdir(folder)
             for label, command in gate.comandos():
-                if label == LABEL:
+                if gate.label_key(label) == LABEL:
                     return command
         parent = os.path.dirname(folder)
         if parent == folder:

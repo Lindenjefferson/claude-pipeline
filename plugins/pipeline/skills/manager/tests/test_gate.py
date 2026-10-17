@@ -327,4 +327,21 @@ r = gate()
 check("the branch's own command still runs (the change is shown, not ignored)",
       r.returncode == 1 and "Testes:     FAIL" in r.stdout, r.stdout)
 
+sh("git", "reset", "-q", "--hard", "HEAD~1")
+commit(".env.produção", "X=1\n", "env with an accented name")
+r = gate()
+check("an .env file with an accented name in the branch: NOT READY",
+      r.returncode == 1 and re.search(r"Secrets:\s+FAIL", r.stdout) and ".env.produ" in r.stdout, r.stdout)
+sh("git", "reset", "-q", "--hard", "HEAD~1")
+sh("git", "switch", "-q", "main")
+commit(".env", "X=1\n", "an old mistake on main")
+sh("git", "switch", "-q", "-c", "feat/drop-env")
+ledger_cmd("start", "--slug", "drop", "--archive")
+sh("git", "rm", "-q", ".env")
+sh("git", "commit", "-q", "--no-verify", "-m", "remove the tracked env")
+close_cycle()
+r = gate()
+check("a branch that only removes a tracked .env file passes the secret check",
+      re.search(r"Secrets:\s+PASS", r.stdout), r.stdout)
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

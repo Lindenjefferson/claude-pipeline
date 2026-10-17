@@ -31,6 +31,9 @@ must_flag = {
     "unquoted token = value": "+token = abcdefghijklmnopqrstuv1234",
     "quoted dotted literal": '+api_key: "abc.def.ghi.jkl.mno.pqr"',
     "remote Redis URL with password": "+REDIS_URL=redis://default:Xk29fLq81@cache.example.com:6379",
+    "PGP private key block": "+-----BEGIN PGP " "PRIVATE KEY BLOCK-----",
+    "encrypted private key": "+-----BEGIN ENCRYPTED " "PRIVATE KEY-----",
+    "PKCS#8 private key": "+-----BEGIN " "PRIVATE KEY-----",
 }
 must_pass = {
     "anon JWT (public by design)": f"+NEXT_PUBLIC_SUPABASE_ANON_KEY={anon}",
@@ -47,14 +50,16 @@ must_pass = {
     "property set from a call": "+  refreshToken: createRefreshTokenFor(user),",
     "docker-compose service URL": "+DATABASE_URL=postgresql://postgres:postgres@db:5432/app",
     "docker-compose redis URL": "+REDIS_URL=redis://default:redispass@redis:6379",
+    "public key header": "+-----BEGIN PGP " "PUBLIC KEY BLOCK-----",
 }
 results = []
+hunk = lambda line: "@@ -0,0 +1 @@\n" + line
 for name, line in must_flag.items():
-    ok = bool(m.scan(line, []))
+    ok = bool(m.scan(hunk(line), []))
     results.append(ok)
     print("PASS" if ok else "FAIL", "flags:", name)
 for name, line in must_pass.items():
-    ok = not m.scan(line, [])
+    ok = not m.scan(hunk(line), [])
     results.append(ok)
     print("PASS" if ok else "FAIL", "allows:", name)
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
