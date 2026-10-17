@@ -284,6 +284,9 @@ text = run("status", ledger=AUTO).stdout
 check("text status lists only the pending VALIDAR items, and the decided ones apart",
       "VALIDAR V1: page size 50" in text and "VALIDAR V2" not in text
       and "validated V2: sort by date -> user: sort by name" in text, text)
+check("validate with an empty decision is refused",
+      run("validate", "--id", "V1", "--decision", "  ", ledger=AUTO).returncode != 0
+      and status(AUTO)["validar"][0]["decision"] is None)
 check("validate of an unknown id is refused",
       run("validate", "--id", "V9", "--decision", "x", ledger=AUTO).returncode != 0)
 run("mode", "autonomous", ledger=AUTO)
