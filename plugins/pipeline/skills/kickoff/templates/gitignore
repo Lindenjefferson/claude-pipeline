@@ -18,3 +18,4 @@ Thumbs.db
 
 # claude code (personal, per machine; the shared allowlist lives in .claude/settings.json)
 .claude/settings.local.json
+CLAUDE.local.md
