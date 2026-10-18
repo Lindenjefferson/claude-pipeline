@@ -1,4 +1,4 @@
-import atexit, os, re, shutil, stat, subprocess, sys, tempfile
+import atexit, os, re, shutil, stat, subprocess, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GATE = os.path.join(HERE, "..", "gate.py")
@@ -260,16 +260,30 @@ check("the commands run in the shell of the Bash tool: a variable before the com
 commit("CLAUDE.md", claude_md(test_files="tests/* e2e/**/*.spec.txt", audit=True).replace(
        "\n\n## Outra seção", "\n- Tempo máximo de cada comando do gate, em minutos (padrão 15): `0.05`\n\n## Outra seção"),
        "docs: gate timeout")
-r = gate("--base", "main", "--cmd", f"Lint={PY} -c \"import time; time.sleep(8)\"")
+marker = os.path.join(base_dir, "late.txt").replace("\\", "/")
+started = time.monotonic()
+r = gate("--base", "main", "--cmd", f"Lint=sleep 30; echo late > '{marker}'")
 check("the Comandos line sets the time limit of each command",
       re.search(r"Lint:\s+FAIL", r.stdout) and "timed out after 3s" in r.stdout, r.stdout)
+check("a command that runs past the limit is stopped there, not waited for", time.monotonic() - started < 25,
+      f"{time.monotonic() - started:.0f}s")
 check("the time limit line is not run as a command", "running Tempo" not in r.stdout, r.stdout)
+if os.name != "nt":
+    time.sleep(30 - (time.monotonic() - started) + 2)
+    check("a command stopped at the limit leaves no child process running", not os.path.exists(marker))
+for value in ("`inf`", "30", "`1e9`"):
+    commit("CLAUDE.md", claude_md(test_files="tests/* e2e/**/*.spec.txt", audit=True).replace(
+           "\n\n## Outra seção", f"\n- Tempo máximo de cada comando do gate, em minutos (padrão 15): {value}\n\n"
+           "## Outra seção"), f"docs: gate time limit {value}")
+    r = gate("--base", "main")
+    check(f"a time limit that is no number of minutes up to a day is a warning and the default: {value}",
+          "warning: invalid Tempo máximo" in r.stdout and re.search(r"Lint:\s+PASS", r.stdout),
+          r.stdout + r.stderr[-300:])
 commit("CLAUDE.md", claude_md(test_files="tests/* e2e/**/*.spec.txt", audit=True).replace(
-       "\n\n## Outra seção", "\n- Tempo máximo de cada comando do gate, em minutos (padrão 15): `inf`\n\n## Outra seção"),
-       "docs: a gate time limit that is no number of minutes")
+       "\n\n## Outra seção", "\n- Tempo máximo de cada comando do gate, em minutos (padrão 15): _(número entre crases)_"
+       "\n\n## Outra seção"), "docs: gate time limit placeholder")
 r = gate("--base", "main")
-check("an invalid time limit is a warning and the default, not a crash",
-      "warning: invalid Tempo máximo" in r.stdout and re.search(r"Lint:\s+PASS", r.stdout), r.stdout + r.stderr[-300:])
+check("the template's placeholder is no time limit and no warning", "warning: invalid Tempo" not in r.stdout, r.stdout)
 
 repo = os.path.join(base_dir, "repo2")
 os.makedirs(repo)

@@ -48,13 +48,13 @@ O `kickoff` prepara o projeto uma vez. A cada pedido, o `manager` dimensiona o t
 ## Testar e validar
 
 ```bash
-for t in plugins/pipeline/hooks/tests/test_*.py plugins/pipeline/skills/manager/tests/test_*.py; do python "$t"; done
+for t in plugins/pipeline/hooks/tests/test_*.py plugins/pipeline/skills/manager/tests/test_*.py; do sh plugins/pipeline/hooks/python.sh "$t"; done
 (cd plugins/pipeline && claude plugin test)
 claude plugin validate plugins/pipeline
 claude plugin validate .
 ```
 
-Cada arquivo de teste Python roda sozinho com `python` (no Linux, `python3`; sem pytest) e imprime `ALL PASS`; o `claude plugin test` roda os testes `.test.ts` do mod.
+Cada arquivo de teste Python roda sozinho com o Python 3 (sem pytest) e imprime `ALL PASS`; o `claude plugin test` roda os testes `.test.ts` do mod.
 
 ## Versão e release
 

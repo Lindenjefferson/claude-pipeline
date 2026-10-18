@@ -482,14 +482,17 @@ def status(args):
     groups = cycles(entries)
     auto = autonomous(entries)
     state, pending = cycle_state(groups[-1], auto)
+    closed = not pending
     items = deferred(entries)
     held = in_flight(entries)
+    # a task in flight again after a verdict that was not done is no step: its run is pending below
+    kept = [(text, step) for text, step in zip(pending, state["steps"]) if step.get("task") not in held]
+    pending = [text for text, _ in kept]
     pending += [f"dev {task} dispatched at {at}, no report yet (add it when it reports, or release --task {task})"
                 for task, at in held.items()]
     pending += [f"deferred {item['id']} has no decision: {item['text']}" for item in items if not item["decision"]]
-    closed = not cycle_state(groups[-1], auto)[1]
-    steps = state["steps"] + [{"step": "decide", "id": item["id"], "text": item["text"]}
-                              for item in items if not item["decision"]]
+    steps = [step for _, step in kept] + [{"step": "decide", "id": item["id"], "text": item["text"]}
+                                          for item in items if not item["decision"]]
     plans = [entry["plan"] for entry in entries if entry["type"] == "plan"]
     report = {"slug": entries[0].get("slug"), "base": entries[0].get("base"), "ledger": os.path.abspath(args.ledger),
               "plan": plans[-1] if plans else entries[0].get("plan"),
