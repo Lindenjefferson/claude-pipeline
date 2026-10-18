@@ -16,6 +16,29 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 - **WSL2 para o modo multi-instância** (2.8): não resolve o gargalo medido (a suíte e2e longa, item 17 da [proposta 2.7.0](proposta-2.7.0.md)); plugins não carregam nas sessões WSL do app Desktop; custa outra instalação do Claude Code (memória, plugins e configurações à parte), integração mais difícil com o navegador do Windows e hooks e `pipeline.home` reinstalados. Volta se o próprio Windows virar o gargalo; migração só entre entregas. Esforço: P no plugin.
 - Recusado: revisão externa no gate (2.6.0). O `open-code-review` exige CLI Node e chave de um provedor de LLM e envia o diff para fora; o `reviewer` já cobre isso, e o gate é sem LLM de propósito.
 
+## 2.8.5 — independente da stack do projeto (PR #26)
+
+Origem: pedido do usuário ("garantir que o projeto pipeline não vai depender da tecnologia no qual o projeto que ele está criando roda"), com uma revisão do plugin inteiro contra produtos de outras stacks e de outros tipos (biblioteca, CLI, app de celular, jogo, firmware).
+
+- [x] **Id do critério em teste com nome de identificador**: em Rust, Go, Python, Java ou C#, o nome do teste não aceita hífen, e o gate dava NOT READY com o teste escrito. O gate passa a reconhecer o id com `_` no lugar de `-` e `.`, em maiúsculas ou minúsculas (`ac_t3_2`, `test_AC_T3_2`); um id mais longo (`AC-T3-21`, `ac_t3_2_1`) continua sendo outro id. O `dev`, o `qa`, o checklist geral e o manager dizem a forma.
+- [x] **Comandos do gate no shell da ferramenta Bash**: no Windows, o gate rodava os "Comandos" no cmd.exe, onde `./gradlew test` e `RUST_LOG=1 cargo test` falham, enquanto os agentes rodam no Git Bash. Agora roda no Git Bash (nunca no `bash.exe` do WSL), ou no bash ou sh nos outros sistemas, e o template diz que os comandos são escritos para esse shell.
+- [x] **Tempo máximo por comando do gate**: linha nova em "Comandos" (padrão de 15 minutos), para builds e suítes mais longas; um valor que não é número de minutos vira aviso e fica o padrão.
+- [x] **Template e prompts sem forma de web**:
+  - a documentação de API pública deixa de contar como comentário proibido;
+  - o pré-mortem por escrita vale para o dado que outro ator ou uma leitura posterior usa, e aceita "n/a" com o motivo;
+  - as capturas e a rodada de design usam os formatos de tela que o projeto lista (linha nova em "Fluxo de entrega"), em vez de "menor largura e desktop";
+  - um princípio geral vale quando o produto tem aquela superfície, e "teste automatizado de interface" substitui "e2e";
+  - o `qa` não depende de navegador e sabe o que fazer quando o produto não roda na máquina (firmware, loja, serviço pago);
+  - as linhas do template e as recomendações do kickoff ganham a condição ("se houver", "quando guarda dados com regras de acesso").
+- [x] **`frontend-design` só para produtos com tela**: continua declarado como dependência, mas o kickoff só para por ele quando o produto tem telas.
+- [x] **Kickoff portátil**: as correções do graphify (passo 8.5) deixam o `sed -i -E`, que no macOS cria arquivos `-E` soltos e não troca nada, e passam a ser feitas com a ferramenta Edit.
+- [x] **Merge do GitLab no modo autônomo**: o guarda do Bash também nega `glab mr merge` (e o apelido `accept`) e a API de merge request.
+- [x] **Arquivo `.env` sem segredo**: um arquivo `.env` que o framework espera no repositório (valores padrão de teste) passa quando o usuário põe no `.pipeline-secrets-allow` a impressão digital do caminho, que a mensagem de bloqueio informa; as linhas dele continuam escaneadas. A mensagem do JWT perde o nome de fornecedor.
+- Ficaram como estão, com o motivo:
+  - os lock files de outros ecossistemas continuam escaneados: a revisão não achou falso positivo neles, e excluí-los pelo `.gitattributes` abriria um desvio que um agente controla;
+  - o `never_allow` do kickoff continua barrando `publish` e `rm -rf` também em passos locais (`dotnet publish`): o custo é uma pergunta ao usuário, que decide;
+  - o guarda na ferramenta PowerShell e o `python3` dos hooks seguem no backlog.
+
 ## 2.8.4 — andamento legível, em português, com o que falta (PR #25)
 
 Origem: pedido do usuário, olhando a linha da etapa 5 do controle-financeiro (`pipeline · etapa-5-celular-pwa-producao · cycle 3 · autonomous · ▶ TR.2 34m · reviewer — · qa — · VALIDAR 2 · next: reviewer has not reviewed the latest changes`).
@@ -80,6 +103,7 @@ Origem: a revisão da 2.8 do backlog contra as etapas 4 e 5 do controle-financei
 
 Termine a entrega em andamento antes de atualizar o plugin. Ao pular versões, leia as notas de cada uma, da mais antiga para a mais nova.
 
+- **2.8.5**: lê os ledgers da 2.8.4. No Windows, o gate passa a rodar os "Comandos" no Git Bash em vez do cmd.exe, como o `dev` e o `qa` já rodavam: um comando escrito só para o cmd.exe (`%VAR%`, `\` nos caminhos) precisa ser reescrito. Rode o `kickoff` de novo para receber as linhas novas do template ("Tempo máximo" em "Comandos", "Formatos de tela" em "Fluxo de entrega" e a regra da documentação de API).
 - **2.8.4**: lê os ledgers da 2.8.3. A linha de andamento e o `/andamento` passam a ser em português. Numa entrega em andamento, peça ao manager para rodar `ledger.py scope` para cada ciclo do plano, para a linha mostrar quantas tarefas e ciclos faltam; sem isso ela mostra o resto normalmente.
 - **2.8.3**: lê os ledgers da 2.8.2. Rode o `kickoff` de novo para receber o `CLAUDE.local.md` (fora do git), com a linha do pico por cópia (memória e disco), e a linha nova do `.gitignore`; sem o número, o manager mede a primeira cópia.
 - **2.8.2**: nada muda para quem atualiza.
