@@ -55,7 +55,7 @@ End with one of DONE, DONE_WITH_CONCERNS (state the concern), NEEDS_CONTEXT (wha
 ```
 Commit: <output of git rev-parse --short HEAD>
 Files changed: <from git show --stat>
-Tests: <exact command, scoped to the affected tests> -> <passed/failed counts, from a run after the last change>
+Tests: <exact command, scoped to the affected tests> -> <passed/failed counts>
 RED evidence: <test> failed before the change with: <excerpt>   (or RED: n/a — why)
 Mutation evidence: <guard loosened> -> <test> red, restored   (or n/a — no guard)
 Docs: <file updated, or none needed and why>
