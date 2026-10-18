@@ -72,4 +72,4 @@ Checked with no findings: <areas you looked at, one line; rejected security cand
 On a re-review after the fix round, the range holds only the fix commits: say which previous findings are fixed (with file:line), or closed by their validation test (with the test name), then list only what the fix broke. Do not re-review code the fix did not touch, and do not report again a finding the brief says the manager ruled out.
 
 ## Knowledge graph (when present)
-If `graphify-out/graph.json` exists, orient with `python -m graphify query "<question>"` before grepping, then verify in the real files. A hook that asks for `graphify query` means this same command: without `graphify` on the PATH, run it as `python -m graphify`. The graph is a map, not proof.
+If `graphify-out/graph.json` exists, orient with `python -m graphify query "<question>"` (`python3` where `python` is not Python 3) before grepping, then verify in the real files. A hook that asks for `graphify query` means this same command. The graph is a map, not proof.
