@@ -7,12 +7,13 @@
 - **Não escrever comentários nem docstrings em classes, funções ou componentes** para explicar o que fazem. O código deve se explicar por nomes e estrutura.
 - A documentação vive em [`docs/`](docs/README.md), um arquivo por módulo (`docs/NN-nome-do-modulo.md`), seguindo o template de `docs/README.md`.
 - **Toda rodada de código que criar, alterar ou remover algo de um módulo atualiza o `docs/` daquele módulo na mesma rodada** (arquivos-chave, classes/funções principais, decisões de design com o porquê, fluxo de dados, dependências e **Status**). O agente `dev` faz isso na mesma tarefa.
-- Única exceção de comentário inline: um "porquê" realmente não óbvio (restrição escondida, workaround de bug específico), em uma linha. Nunca "o que" a função faz.
+- A documentação da API pública (quando o projeto é uma biblioteca ou expõe uma API a outros programas), no formato da ferramenta de documentação da linguagem, não conta como comentário: segue a convenção da linguagem.
+- Exceção de comentário inline: um "porquê" realmente não óbvio (restrição escondida, workaround de bug específico), em uma linha. Nunca "o que" a função faz.
 - Arquivos de **especificação** (decididos antes de codar) não mudam a cada PR. `docs/` descreve o código real. Se divergirem, o código manda: atualizar o doc do módulo e, se for mudança de decisão, registrar também na spec.
 
 ## Comandos
 
-Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o `gate.py` roda as linhas Build, Typecheck, Lint, Testes e Auditoria antes de qualquer merge (só Testes é obrigatória). Preencher assim que a stack existir, com o comando entre crases (ex.: `- Testes:` seguido do comando de testes entre crases):
+Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o `gate.py` roda as linhas Build, Typecheck, Lint, Testes e Auditoria antes de qualquer merge (só Testes é obrigatória). Preencher assim que a stack existir, com o comando entre crases (ex.: `- Testes:` seguido do comando de testes entre crases). Cada comando é escrito para o shell da ferramenta Bash (no Windows, o Git Bash), onde os agentes e o `gate.py` o rodam:
 
 - Instalar dependências: _(comando)_
 - Rodar em desenvolvimento (o servidor de dev; o hook do plugin o nega fora do modo background): _(comando)_
@@ -23,9 +24,10 @@ Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o
 - Testes afetados (um arquivo ou filtro, para o `dev`): _(comando)_
 - Arquivos de teste (globs separados por espaço; o `gate.py` procura neles o id de cada critério de aceite): _(globs)_
 - Auditoria (vulnerabilidades das dependências; opcional): _(comando)_
+- Tempo máximo de cada comando do gate, em minutos (padrão 15): _(número entre crases, só quando um comando passa disso)_
 - Verificação de interface (se houver tela): _(comando)_
 - Servidor para a verificação de interface (o mesmo que o runner sobe, com as variáveis do ambiente de teste; quem sobe o servidor à mão usa este): _(comando)_
-- Migrations (aplicar/criar): _(comando)_
+- Migrations (aplicar/criar; se houver): _(comando)_
 
 ## Execução em paralelo
 
@@ -36,7 +38,7 @@ O `manager` roda em paralelo, cada uma numa worktree do git, as tarefas que não
 - Como preparar as dependências de uma cópia (o `manager` faz antes de despachar): _(reaproveitar as dependências já instaladas ou instalar; copiar o arquivo de ambiente)_
 - Pasta de saída dos testes por execução: _(a variável de ambiente que o runner lê; o `qa` usa sempre uma pasta própria)_
 - Limites do ambiente de teste que atrapalham execuções simultâneas e como afrouxá-los só no ambiente local: _(ex.: taxa de login)_
-- Testes de interface reaproveitam uma sessão autenticada pronta em vez de autenticar a cada teste: _(como)_
+- Testes de interface reaproveitam uma sessão autenticada pronta em vez de autenticar a cada teste (se houver login): _(como)_
 - Recursos que não dá para isolar (a verificação que os usa roda uma tarefa por vez): _(ex.: limite de taxa de um serviço externo, um serviço único)_
 - Números sequenciais reservados no plano: _(ex.: migrations)_
 
@@ -49,6 +51,7 @@ A skill `manager` conduz cada entrega, do tamanho do pedido ao `gate.py` (o flux
 - O que não dá para virar checagem automática (teste, helper, lint) vira uma linha em `docs/lessons.md`, que o `dev` e o `reviewer` leem.
 - O hook `pre-commit` do git (instalado pelo `kickoff`) bloqueia commits com arquivos `.env` ou linhas com cara de segredo. Nunca usar `--no-verify` nem mexer em `.git/hooks`: um segredo commitado fica no histórico.
 - Cada entrega aprovada pelo `gate.py` gera um relatório em `docs/quality-reports/`.
+- Formatos de tela que a rodada de design, as capturas e a revisão visual cobrem (se houver tela): _(ex.: a menor largura suportada e o desktop; celular e tablet; a resolução do jogo)_
 - Ambiente de testes antes de produção: _(onde a entrega é publicada primeiro, como as migrations passam por ele, como fazer backup e reverter)_
 
 ## Regras que valem sempre

@@ -240,6 +240,37 @@ check("an invalid glob is a warning that names it, not a crash",
       "Criteria:   PASS" in r.stdout and "warning: invalid test glob '[!]x'" in r.stdout
       and "warning: invalid test glob '[z-a].txt'" in r.stdout, r.stdout + r.stderr[-300:])
 
+commit("plan.md", "# plan\n- AC-T1-1 a\n- AC-T1-2 b\n- AC-T1.3 c\n- AC-T2-1 d\n- AC-T2-2 e\n- AC-T3-1 f\n- AC-T3-2 g\n"
+       "- AC-T3.3 h\n- AC-T3-4 i\n- AC-T3-5 j\n## Errata\n", "docs: plan T3")
+commit("tests/ids.test.txt", "fn ac_t3_1_given_f() {}\ndef test_AC_T3_2_given_g():\nfunc Test_AC_T3_3(t *testing.T)\n"
+       "test('AC-T3-40 other')\ntest('AC-T3-4.1 other')\nfn ac_t3_5_1_given_j() {}\n", "test: identifier names")
+r = criteria_with("tests/* e2e/**/*.spec.txt")
+trace = r.stdout.split("Criteria:")[1].split("\n    ")[1] if "Criteria:" in r.stdout else ""
+check("a test named by an identifier carries the id with _ for - and . in any case; a longer id is another id",
+      "Criteria:   FAIL" in r.stdout and "AC-T3-4" in trace and "AC-T3-1" not in trace and "AC-T3-2" not in trace
+      and "AC-T3.3" not in trace and "AC-T3-5" in trace, r.stdout)
+commit("tests/ids.test.txt", "fn ac_t3_1_given_f() {}\ndef test_AC_T3_2_given_g():\nfunc Test_AC_T3_3(t *testing.T)\n"
+       "#[test] fn ac_t3_4() {}\nfn ac_t3_5_given_j() {}\n", "test: the last ids")
+r = gate("--base", "main")
+check("every id found in identifier-named tests: traceability passes", "Criteria:   PASS" in r.stdout, r.stdout)
+
+r = gate("--base", "main", "--cmd", f"Lint=CI=1 {PY} -c \"import os, sys; sys.exit(os.environ.get('CI') != '1')\"")
+check("the commands run in the shell of the Bash tool: a variable before the command is set",
+      re.search(r"Lint:\s+PASS", r.stdout), r.stdout)
+commit("CLAUDE.md", claude_md(test_files="tests/* e2e/**/*.spec.txt", audit=True).replace(
+       "\n\n## Outra seção", "\n- Tempo máximo de cada comando do gate, em minutos (padrão 15): `0.05`\n\n## Outra seção"),
+       "docs: gate timeout")
+r = gate("--base", "main", "--cmd", f"Lint={PY} -c \"import time; time.sleep(8)\"")
+check("the Comandos line sets the time limit of each command",
+      re.search(r"Lint:\s+FAIL", r.stdout) and "timed out after 3s" in r.stdout, r.stdout)
+check("the time limit line is not run as a command", "running Tempo" not in r.stdout, r.stdout)
+commit("CLAUDE.md", claude_md(test_files="tests/* e2e/**/*.spec.txt", audit=True).replace(
+       "\n\n## Outra seção", "\n- Tempo máximo de cada comando do gate, em minutos (padrão 15): `inf`\n\n## Outra seção"),
+       "docs: a gate time limit that is no number of minutes")
+r = gate("--base", "main")
+check("an invalid time limit is a warning and the default, not a crash",
+      "warning: invalid Tempo máximo" in r.stdout and re.search(r"Lint:\s+PASS", r.stdout), r.stdout + r.stderr[-300:])
+
 repo = os.path.join(base_dir, "repo2")
 os.makedirs(repo)
 sh("git", "init", "-q", "-b", "main")

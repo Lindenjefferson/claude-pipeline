@@ -6,11 +6,11 @@ mode.
 In autonomous mode (the latest mode entry of the ledger ledger.py finds from the session's directory), denied in the
 foreground or background: a git push of the default branch (named by origin/HEAD, else init.defaultBranch, main or
 master: as a refspec's target, with --all or --mirror, or with no refspec while it is checked out; --tags alone
-passes), a git merge while it is checked out (--abort and --quit pass), and a pull request merge (gh pr merge, also
-behind gh's own options, and gh api on pulls/<n>/merge). A git checkout or switch earlier in the same command counts
-as what is checked out for the rest of it; a cd does not, so the check reads the session's directory. Pushing and
-merging the work branch pass; in supervised mode, or with no ledger, nothing here is denied and the ask rule on git
-push applies.
+passes), a git merge while it is checked out (--abort and --quit pass), and a pull request merge (gh pr merge or
+glab mr merge or accept, also behind the tool's own options, and its api on pulls/<n>/merge or
+merge_requests/<n>/merge). A git checkout or switch earlier in the same command counts as what is checked out for
+the rest of it; a cd does not, so the check reads the session's directory. Pushing and merging the work branch pass;
+in supervised mode, or with no ledger, nothing here is denied and the ask rule on git push applies.
 
 Skipping the hook is denied in any project, in the foreground or background: a git commit with --no-verify (or an
 unambiguous prefix such as --no-veri) or -n (also inside a cluster such as -nm or -an), a git -c or --config-env
@@ -243,8 +243,9 @@ def switched_to(arguments):
 
 def merges_pull_request(arguments):
     pairs = zip(arguments, arguments[1:])
-    return any(pair == ("pr", "merge") for pair in pairs) or (
-        arguments[:1] == ["api"] and any(re.search(r"pulls/\d+/merge\b", word) for word in arguments))
+    return any(pair in (("pr", "merge"), ("mr", "merge"), ("mr", "accept")) for pair in pairs) or (
+        arguments[:1] == ["api"]
+        and any(re.search(r"(pulls|merge_requests)/\d+/merge\b", word) for word in arguments))
 
 
 def reaches_main(command, cwd):
@@ -256,14 +257,14 @@ def reaches_main(command, cwd):
             name, rest, _ = git_command(arguments)
             if name in ("push", "merge", "checkout", "switch"):
                 calls.append((program, name, rest))
-        elif program == "gh":
+        elif program in ("gh", "glab"):
             calls.append((program, "", arguments))
-    if not any(name in ("push", "merge") or (program == "gh" and merges_pull_request(rest))
+    if not any(name in ("push", "merge") or (program != "git" and merges_pull_request(rest))
                for program, name, rest in calls) or not autonomous(cwd):
         return False
     main, current = main_branch(cwd), git_out(cwd, "branch", "--show-current")
     for program, name, rest in calls:
-        if program == "gh":
+        if program != "git":
             if merges_pull_request(rest):
                 return True
         elif name in ("checkout", "switch"):

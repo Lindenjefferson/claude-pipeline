@@ -105,4 +105,24 @@ sh(repo, "git", "add", "config.py")
 r = sh(repo, "git", "commit", "-q", "-m", "real secret", check=False)
 check("the installed git hook blocks a real secret", r.returncode != 0 and "in config.py" in r.stderr, r.stderr[-300:])
 
+sh(repo, "git", "reset", "-q", "--hard")
+write(".env.test", "PORT=3000\n")
+sh(repo, "git", "add", ".env.test")
+decision, reason = commit_check()
+env_mark = re.search(r"\.env\.test \(fingerprint ([0-9a-f]{64})\)", reason)
+check("an .env-style file is blocked, and the message gives the fingerprint of its path",
+      decision == "DENY" and env_mark is not None, reason)
+write(".pipeline-secrets-allow", f"{fixture_mark}  # test fixture, not a credential\n"
+      f"{env_mark.group(1) if env_mark else '-'}  # defaults the framework versions, no secret\n")
+sh(repo, "git", "add", "-A")
+decision, reason = commit_check()
+check("a staged entry with that fingerprint lets that .env-style file in", decision == "ALLOW", reason)
+write(".env.test", "PORT=3000\n" + REAL + "\n")
+write(".env.local", "PORT=3001\n")
+sh(repo, "git", "add", "-A")
+decision, reason = commit_check()
+check("the lines of an allowed .env-style file are still scanned", decision == "DENY" and "in .env.test" in reason,
+      reason)
+check("another .env-style file still blocks", ".env.local (fingerprint" in reason, reason)
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
