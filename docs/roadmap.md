@@ -16,7 +16,7 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 - **WSL2 para o modo multi-instância** (2.8): não resolve o gargalo medido (a suíte e2e longa, item 17 da [proposta 2.7.0](proposta-2.7.0.md)); plugins não carregam nas sessões WSL do app Desktop; custa outra instalação do Claude Code (memória, plugins e configurações à parte), integração mais difícil com o navegador do Windows e hooks e `pipeline.home` reinstalados. Volta se o próprio Windows virar o gargalo; migração só entre entregas. Esforço: P no plugin.
 - Recusado: revisão externa no gate (2.6.0). O `open-code-review` exige CLI Node e chave de um provedor de LLM e envia o diff para fora; o `reviewer` já cobre isso, e o gate é sem LLM de propósito.
 
-## 2.8.3 — recurso esgotado não para o modo autônomo
+## 2.8.3 — recurso esgotado não para o modo autônomo (PR #24)
 
 Origem: feedback da etapa 5 do controle-financeiro, com a regra do usuário ("no modo autônomo, tomar a melhor decisão e seguir, desde que não seja algo danoso"). O sistema matou a preparação de uma worktree por falta de memória, e o manager apagou o heartbeat e ficou esperando o usuário.
 
