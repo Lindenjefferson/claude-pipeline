@@ -24,7 +24,7 @@ Cada componente tem **uma** fonte de verdade, o próprio arquivo. Os outros docu
 | Regras exatas do ledger (ciclos, pendências, métricas) | docstring de [`ledger.py`](plugins/pipeline/skills/manager/ledger.py) |
 | Checagens do gate e relatório de qualidade | docstring de [`gate.py`](plugins/pipeline/skills/manager/gate.py) |
 | Scan de segredos, UTF-8, caracteres invisíveis, allowlist e falso positivo | docstring de [`hooks/pre-commit-secret-scan.py`](plugins/pipeline/hooks/pre-commit-secret-scan.py) |
-| Hooks de sessão e de ferramenta (retomada após compactação, pular o `pre-commit`, branch principal no modo autônomo, servidor de dev solto) | docstrings de [`hooks/session-start.py`](plugins/pipeline/hooks/session-start.py) e [`hooks/bash-guard.py`](plugins/pipeline/hooks/bash-guard.py), registrados em [`hooks/hooks.json`](plugins/pipeline/hooks/hooks.json) |
+| Hooks de sessão e de ferramenta (retomada após compactação, pular o `pre-commit`, branch principal no modo autônomo, servidor de dev solto) | docstrings de [`hooks/session-start.py`](plugins/pipeline/hooks/session-start.py) e [`hooks/bash-guard.py`](plugins/pipeline/hooks/bash-guard.py), registrados em [`hooks/hooks.json`](plugins/pipeline/hooks/hooks.json); a escolha entre `python` e `python3`, no topo de [`hooks/python.sh`](plugins/pipeline/hooks/python.sh) |
 | Linha de andamento e painel `/andamento` (mod) | comentário do topo de [`hooks/andamento.js`](plugins/pipeline/hooks/andamento.js), listado em `modules` no `hooks.json` |
 | Testes dos scripts | `plugins/pipeline/skills/manager/tests/`, `plugins/pipeline/hooks/tests/` (o do mod é `andamento.test.ts`) |
 | Versões entregues, notas de atualização, backlog | [`docs/roadmap.md`](docs/roadmap.md) |
@@ -54,7 +54,7 @@ claude plugin validate plugins/pipeline
 claude plugin validate .
 ```
 
-Cada arquivo de teste Python roda sozinho com `python` (sem pytest) e imprime `ALL PASS`; o `claude plugin test` roda os testes `.test.ts` do mod.
+Cada arquivo de teste Python roda sozinho com `python` (no Linux, `python3`; sem pytest) e imprime `ALL PASS`; o `claude plugin test` roda os testes `.test.ts` do mod.
 
 ## Versão e release
 

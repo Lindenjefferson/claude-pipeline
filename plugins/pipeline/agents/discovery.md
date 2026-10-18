@@ -22,7 +22,7 @@ You are the **discovery** agent. You do the unglamorous, time-consuming part of 
 
 ## Build the knowledge graph from the base
 The graph is built once from the raw sources, then queried by every later step so nobody re-reads the sources from scratch.
-- If `graphify-out/graph.json` already exists, query it first (`python -m graphify query "<question>"`, `path`, `explain`) and only re-extract what changed (`python -m graphify update .` covers code; new or changed documents need the `/graphify <path> --update` skill flow).
+- If `graphify-out/graph.json` already exists, query it first (`python -m graphify query "<question>"`, `path`, `explain`; `python3` where `python` is not Python 3) and only re-extract what changed (`python -m graphify update .` covers code; new or changed documents need the `/graphify <path> --update` skill flow).
 - If it does not exist and the sources are worth mapping (more than a couple of files), build it with the `graphify` skill (`/graphify <path>`), pointing it at the folder holding the raw sources and any existing code/docs. For a reference site, save its relevant pages with `python -m graphify add <url>` so they enter the graph.
 - Never treat the graph as proof: its EXTRACTED edges come from the sources, INFERRED and AMBIGUOUS edges are guesses. Report INFERRED/AMBIGUOUS material as open questions, and confirm every rule against the actual source before listing it as extracted.
 - Do not commit `graphify-out/`; it must be git-ignored.

@@ -28,7 +28,7 @@ def front_matter(path):
 
 
 hidden = []
-for path in files(".md", ".py", ".json", ".jsonl", ".gitignore", ".txt", ".js", ".ts"):
+for path in files(".md", ".py", ".json", ".jsonl", ".gitignore", ".txt", ".js", ".ts", ".sh"):
     for number, line in enumerate(open(path, encoding="utf-8").read().split("\n"), 1):
         for found in scan.INVISIBLE.finditer(line):
             if not (found.group() == chr(0xFEFF) and number == 1 and found.start() == 0):
