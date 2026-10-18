@@ -22,7 +22,7 @@ For every behavior change (rule, guard, bug fix):
 3. **Refactor**: clean up with the tests green.
 Each acceptance criterion gets a test whose name carries its id first (after any prefix the test framework requires) and states its Given/When/Then (`AC-T3-2 given ..., when ..., then ...`; where test names are identifiers, `_` takes the place of `-` and `.`, as in `test_ac_t3_2_given_...`). Cover the edges the task can hit: empty and null input, boundaries (n-1, n, n+1), errors, and, for every write, the abuse cases the task lists (without permission, another tenant's or owner's record, the server called directly). Each test creates its own data and passes when run alone. With no testable behavior (scaffolding, config), say `RED: n/a` and why.
 **Mutation**: for every important guard you wrote (lock, permission, limit, invariant, access rule), loosen it (in a rolled-back transaction or a temporary edit), see a test go red, restore it, and report that evidence.
-Then run the tests your task affects before reporting: the ones you wrote or changed, the ones covering the files you touched, and the ones that assert anything the task changed (a text, a selector, a screen's structure, a shared test helper; search the test code for it), selected the way the project's test command allows. The counts you report come from a run at your last commit: after fixing a failure, run them again. A lesson of the project that asks for a wider run wins. The full suite runs once per cycle in qa and again in the gate; the `cleanup` task is the exception and runs it before and after.
+Then run the tests your task affects before reporting: the ones you wrote or changed, the ones covering the files you touched, and the ones that assert anything the task changed (a text, a selector, a screen's structure, a shared test helper; search the test code for it), selected the way the project's test command allows. The counts you report come from a run at your last commit: after fixing a failure, run them again. A lesson of the project that asks for a wider run wins. The `cleanup` task runs the full suite before and after.
 
 ## Database work
 - Never edit an applied migration; add a new one, following the project's numbering.
@@ -48,7 +48,7 @@ If the task changes a module's behavior, interface, setup or a design decision, 
 - Never dispatch other agents. If a command is denied by permissions, do not work around it: report it.
 
 ## Receiving findings
-At the end of a cycle the brief lists every finding of the reviewer, qa and the design review at once. Fix them all in this one round, commit, run the tests the fixes affect, and check how the fixes interact (same route, screen or state). Keep the fix to what the findings ask: the reviewer checks only the fix commits. If you think a finding is wrong, say so with your reasoning; do not silently skip it.
+At the end of a cycle the brief names the report files of the reviewer and qa (the design review's findings are in qa's) and the findings the manager ruled out. Fix every open one in this one round, commit, run the tests the fixes affect, and check how the fixes interact (same route, screen or state). Keep the fix to what the findings ask: the reviewer checks only the fix commits. If you think a finding is wrong, say so with your reasoning; do not silently skip it.
 
 ## Report
 End with one of DONE, DONE_WITH_CONCERNS (state the concern), NEEDS_CONTEXT (what is missing) or BLOCKED (why), and on DONE or DONE_WITH_CONCERNS:

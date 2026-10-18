@@ -29,7 +29,7 @@ merge base with the default branch. With --report, the gate writes and stages do
 (checks, commits, ledger mode and notes, the VALIDAR list with the user's decision or pending, deferred decisions, a
 changed "Comandos" section and the delivery metrics: findings per cycle and origin, fix rounds, time per cycle, task
 and agent, tokens per agent and task, lessons added and automated) before running the commands, so the project's
-own tests check it too; the metrics also give each spec or plan review loop its rounds and findings); READY rewrites
+own tests check it too (the metrics also give each spec or plan review loop its rounds and findings); READY rewrites
 its check lines, NOT READY removes it, and a draft of the same report left staged by a run that was killed is removed
 first."""
 import argparse
