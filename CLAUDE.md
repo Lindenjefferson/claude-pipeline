@@ -37,7 +37,13 @@ O `kickoff` prepara o projeto uma vez. A cada pedido, o `manager` dimensiona o t
 
 ## Regras para mudar o plugin
 
-- **Feedback de entregas entra só como regra geral** que garante um bom produto em qualquer stack. O que é de stack ou de projeto volta para o projeto. Uma lição que se repete em dois projetos é candidata a princípio em `checklists/general.md`.
+- **Toda ideia passa pelo mesmo filtro antes de entrar**, venha de uma entrega, de uma revisão ou de outro modelo:
+  1. o problema é conferido no código, de preferência com um teste que falha, e não só na descrição de quem o relatou;
+  2. a mudança cabe nos três princípios: regra geral que garante um bom produto em qualquer stack (o que é de stack ou de projeto volta para o projeto), no arquivo do componente e sem cópia;
+  3. tirar ou juntar regras vem antes de acrescentar; uma sugestão que só acrescenta diz por que vale o custo;
+  4. o que muda o desenho do fluxo (tirar uma etapa, mudar quem faz o quê, mexer na segurança) vai para o usuário decidir.
+
+  Antes de fechar cada versão, uma revisão do diff inteiro e dos arquivos que ele toca tira o que ficou repetido, específico de stack, impossível de conferir ou sem uso. Uma lição que se repete em dois projetos é candidata a princípio em `checklists/general.md`.
 - **Fonte única por componente.** Comportamento novo vai para o arquivo do componente; README e este `CLAUDE.md` ganham no máximo uma linha com link. Ao mudar um componente, conferir que README, `CLAUDE.md`, `docs/roadmap.md` e os outros componentes que o citam continuam consistentes (mesmos termos, nenhuma cópia). Única cópia permitida: os três princípios acima, idênticos palavra por palavra na seção "Propósito e princípios" do README; as duas cópias mudam juntas, no mesmo commit.
 - **Enxugar ao tocar.** Ao editar um arquivo, remover o que ficou obsoleto, duplicado ou sem uso, e listar o que saiu no PR.
 - **Teste primeiro** para `ledger.py`, `gate.py`, os hooks e o mod: o teste novo falha antes da mudança. Ledgers de versões anteriores continuam legíveis, ou a quebra vai para as notas de atualização.
