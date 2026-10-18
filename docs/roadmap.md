@@ -45,6 +45,8 @@ Origem: lições do ciclo R da etapa 5 do controle-financeiro, que o usuário pe
   - **Checagens duplicadas ou impossíveis**: o `reviewer` deixa de conferir o id do critério no nome do teste (o gate e o `qa` conferem) e a evidência de mutação, que está no relatório do `dev` e não no diff: o manager a confere ao integrar, ao lado da linha `Tests:`;
   - **Próxima ação definida** para NEEDS_CONTEXT, BLOCKED e relatório sem veredito, no passo 4.1 do manager.
 
+- [x] **Velocidade das entregas** (pedido do usuário, investigado pelo Fable nos ledgers do controle-financeiro): o ciclo R levou 11h49m, e mais da metade foi rodada de correção. Teste instável passa a ser achado Important, de origem `environment`: um teste com corrida voltou em três rodadas, e um prazo de espera maior foi aceito como correção. O manager também confere a linha `Mock:` do relatório antes de integrar, para uma tela que não foi comparada com o mock voltar ao `dev` antes do qa.
+
 Números que esta versão deve mudar, que o `feedback-plugin` da próxima entrega traz: rodadas de correção por ciclo e achados de origem `execution` e `environment` por ciclo (testes afetados conferidos, revisão de design, helper com uma dona só); horas por ciclo (verificação que não cabe na memória, gate que para no limite); notas de correção de tempo e execuções sem medida (relatórios em arquivo, zero recusado).
 
 ## 2.8.6 — Linux e Windows, revisão de design contra o mock (PR #27)
