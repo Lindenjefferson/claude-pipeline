@@ -34,6 +34,7 @@ O `manager` roda em paralelo, cada uma numa worktree do git, as tarefas que não
 - Como rodar N cópias ao mesmo tempo (o que muda por worktree): _(porta, variáveis de ambiente, dados de teste)_
 - Armazenamento de dados por cópia: _(outra instância com portas próprias ou um esquema por cópia; ou "compartilhado", e a verificação que grava roda uma tarefa por vez)_
 - Como preparar as dependências de uma cópia (o `manager` faz antes de despachar): _(reaproveitar as dependências já instaladas ou instalar; copiar o arquivo de ambiente)_
+- Quanto uma cópia ocupa no pico, com a preparação e o armazenamento de dados: _(memória e disco; ou "a medir")_
 - Pasta de saída dos testes por execução: _(a variável de ambiente que o runner lê; o `qa` usa sempre uma pasta própria)_
 - Limites do ambiente de teste que atrapalham execuções simultâneas e como afrouxá-los só no ambiente local: _(ex.: taxa de login)_
 - Testes de interface reaproveitam uma sessão autenticada pronta em vez de autenticar a cada teste: _(como)_
