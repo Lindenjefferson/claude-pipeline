@@ -2,14 +2,15 @@
 """Delivery ledger: one JSON line per agent run, grouped in cycles, so the manager sees what is pending.
 
   start   --slug <slug> [--base <rev>] [--plan <path>] [--archive]       once per delivery
-  add     --agent dev --task <id> --verdict <v> [--seconds <duration>] [--tokens N] [--summary <text>]
+  add     --agent dev --task <id> --verdict <v> [--seconds <duration>] [--tokens N]
   add     --agent reviewer|qa --verdict PASS|FAIL [--critical N --important N --minor N --origin <origin>=N,...]
-          [--seconds <duration>] [--tokens N]
+          [--report <path>] [--seconds <duration>] [--tokens N]
+  add     --agent reviewer --task spec|plan --verdict PASS|FAIL ...       one round of the spec or plan review loop
   claim   --task <id>                                         a dev run dispatched; refused if the task is in flight or done
   release --task <id>                                         frees a claim whose run was lost
   note    --text <text> [--validar]                           a decision taken on the user's behalf
   validate --id <id> --decision <text>                        the user's decision on a VALIDAR item (V1, V2...)
-  waive   --agent reviewer|qa --reason <text>                 accepts the open findings of that agent's latest FAIL
+  waive   --agent reviewer|qa [--task spec|plan] --reason <text>   accepts the open findings of that agent's latest FAIL
   plan    --path <path>                                       the approved plan, when start ran before it existed
   scope   --cycle <name> --tasks <id,id,...>                  the tasks of one plan cycle, in plan order
   mode    autonomous|supervised                               the user turned autonomous mode on, or is back
@@ -27,9 +28,10 @@ It closes when the latest reviewer PASS came after the latest dev run, qa PASSed
 task, and qa ran again after every fix of a blocking (FAIL) finding. The next regular dev run opens the next cycle.
 A fix round (task fix-N) and the cleanup task (task cleanup) stay in the current cycle, even a closed one: they need
 a reviewer pass, and qa again only when a FAIL came before them. Every finding carries its origin (design,
-assumption, plan, execution, environment); --seconds takes 90, 12m, 1h5m or 12m30s, and --seconds and --tokens
-come from the agent's completion notification, never an estimate (a run without it goes unmeasured). A deferred item
-with no decision keeps the delivery from the gate. start --archive moves an existing delivery to
+assumption, plan, execution, environment); --report keeps the path of the file the manager saved the agent's report
+in, so a FAIL still open names it; --seconds takes 90, 12m, 1h5m or 12m30s, and --seconds and --tokens come from the
+agent's completion notification, never an estimate (a run without it goes unmeasured, and 0 is refused). A deferred
+item with no decision keeps the delivery from the gate. start --archive moves an existing delivery to
 ledger-<old-slug>.jsonl next to the ledger first. --check exits 1 while anything is pending, so the gate can rely on
 it. A cycle whose reviewer or qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on
 up to three, then the delivery stops. waive is refused when the dev ran after that FAIL (the fix needs its review); it
@@ -38,9 +40,18 @@ waivers in autonomous mode) are listed apart, numbered V1, V2... in the order wr
 return; validate records the decision, and status lists the items still waiting apart from the decided ones. A
 ledger with no mode entry is supervised.
 
-status --json also gives the pending items as data and where the delivery is in its plan. steps: one
-{"step": dev|reviewer|qa|fix|ask|stop|decide, ...} per pending item, with its detail (task and verdict, agent and
-open findings, a qa re-run, a deferred id and text); a task in flight is no step. scope: the plan cycles recorded
+A reviewer run with --task spec or plan is one round of that review loop, before the code: it is no part of any
+cycle, and its findings, time and tokens are counted apart in the metrics. While the latest round is a FAIL, status
+asks for the next round; after the 3rd FAIL it asks the user, or in autonomous mode allows a 4th round that checks
+only the corrections of the open findings (its PASS goes with those findings as note --validar) and then stops the
+delivery. waive --task closes the loop when the user accepts the open findings.
+
+status --json also gives the pending items as data and where the delivery is in its plan. from: the commit the
+current cycle's diff starts at, for the reviewer's and qa's range: the base for cycle 1, else the head the run that
+closed the previous cycle recorded (a commit made after it and before this cycle's first task, such as an errata,
+falls in the range too). steps: one {"step": dev|reviewer|qa|fix|review|ask|stop|decide, ...} per pending item,
+with its detail (task and verdict, agent, open findings and the report path, a qa re-run, a review round and its
+report, a deferred id and text); a task in flight is no step. scope: the plan cycles recorded
 with scope, in the order first recorded (a later scope for a cycle replaces its tasks in place, an empty one removes
 it), each with the tasks that have no DONE run yet; the current cycle (the one holding the task in flight, else the
 latest task); and how many tasks and cycles are left (a cycle whose tasks are done counts until it closes). With no
@@ -66,6 +77,8 @@ VERDICTS = {
 ORIGINS = ("design", "assumption", "plan", "execution", "environment")
 SEVERITIES = ("critical", "important", "minor")
 FIX_ROUNDS = {False: 1, True: 3}
+REVIEW_ROUNDS = {False: 3, True: 4}
+REVIEWS = ("spec", "plan")
 DONE = ("DONE", "DONE_WITH_CONCERNS")
 FIX_TASK = re.compile(r"fix-\d+", re.IGNORECASE)
 FOLLOW_UP = re.compile(r"fix-\d+|cleanup", re.IGNORECASE)
@@ -118,12 +131,28 @@ def write(path, entry):
         handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
+def is_review(entry):
+    return entry["agent"] == "reviewer" and (entry.get("task") or "") in REVIEWS
+
+
 def runs(entries):
-    return [entry for entry in entries if entry["type"] == "run"]
+    return [entry for entry in entries if entry["type"] == "run" and not is_review(entry)]
+
+
+def reviews(entries, task=None):
+    return [entry for entry in entries if entry["type"] == "run" and is_review(entry) and task in (None, entry["task"])]
 
 
 def is_task(entry, pattern):
     return entry["agent"] == "dev" and bool(pattern.fullmatch(entry.get("task") or ""))
+
+
+def where(entry):
+    return f", report {entry['report']}" if entry.get("report") else ""
+
+
+def report_of(entry):
+    return {"report": entry["report"]} if entry.get("report") else {}
 
 
 def cycles(entries):
@@ -172,13 +201,13 @@ def cycle_state(cycle, autonomous=False):
     if last_review < last_dev:
         need("reviewer has not reviewed the latest changes", "reviewer")
     elif reviews[-1]["verdict"] == "FAIL":
-        need(f"reviewer FAIL ({reviews[-1]['open']} open): dev fixes every finding in one batch", "fix",
-             agent="reviewer", open=reviews[-1]["open"])
+        need(f"reviewer FAIL ({reviews[-1]['open']} open{where(reviews[-1])}): dev fixes every finding in one batch",
+             "fix", agent="reviewer", open=reviews[-1]["open"], **report_of(reviews[-1]))
     if not checks or last_qa < work:
         need("qa has not run on the cycle's tasks", "qa")
     elif checks[-1]["verdict"] == "FAIL" and last_qa > last_dev:
-        need(f"qa FAIL ({checks[-1]['open']} open): dev fixes every finding in one batch", "fix",
-             agent="qa", open=checks[-1]["open"])
+        need(f"qa FAIL ({checks[-1]['open']} open{where(checks[-1])}): dev fixes every finding in one batch",
+             "fix", agent="qa", open=checks[-1]["open"], **report_of(checks[-1]))
     elif last_qa < needs_qa:
         need("qa has not re-run the scenarios the fix touched", "qa", rerun=True)
     rounds = FIX_ROUNDS[autonomous]
@@ -191,6 +220,35 @@ def cycle_state(cycle, autonomous=False):
             else:
                 need(f"{agent} still fails after a fix round: ask the user", "ask", agent=agent)
     return state, pending
+
+
+def review_state(entries, autonomous=False):
+    pending, steps = [], []
+    for task in REVIEWS:
+        done = reviews(entries, task)
+        if not done or done[-1]["verdict"] != "FAIL":
+            continue
+        last, rounds, limit = done[-1], len(done), REVIEW_ROUNDS[autonomous]
+        if rounds < limit:
+            text = f"{task} review round {rounds} FAIL ({last['open']} open{where(last)}): "
+            final = autonomous and rounds == limit - 1
+            text += ("a last round checks only the corrections of the open findings; on PASS they become note --validar"
+                     if final else "apply the corrections and dispatch the reviewer on them again")
+            steps.append({"step": "review", "task": task, "round": rounds + 1, "open": last["open"], **report_of(last),
+                          **({"last": True} if final else {})})
+        elif autonomous:
+            text = f"{task} review still fails after {rounds} rounds: stop the delivery and record the open findings as note --validar"
+            steps.append({"step": "stop", "task": task, "rounds": rounds})
+        else:
+            text = f"{task} review still fails after {rounds} rounds: ask the user"
+            steps.append({"step": "ask", "task": task, "rounds": rounds})
+        pending.append(text)
+    return pending, steps
+
+
+def cycle_from(entries, groups):
+    previous = groups[-2] if len(groups) > 1 else []
+    return (previous[-1].get("head") or None) if previous else entries[0].get("base")
 
 
 def archive_path(ledger, slug):
@@ -224,7 +282,10 @@ def seconds(text):
     if not match or not any(match.groups()):
         sys.exit(f"--seconds must look like 90, 12m, 1h5m or 12m30s, not {text!r}")
     hours, minutes, rest, bare = (int(part or 0) for part in match.groups())
-    return hours * 3600 + minutes * 60 + rest + bare
+    total = hours * 3600 + minutes * 60 + rest + bare
+    if total == 0:
+        sys.exit("--seconds 0 is no measurement: leave it out when the run went unmeasured")
+    return total
 
 
 def origins(text, total):
@@ -247,19 +308,28 @@ def add(args):
         sys.exit(f"{args.agent} verdict must be one of {', '.join(sorted(VERDICTS[args.agent]))}")
     if args.agent == "dev" and not args.task:
         sys.exit("dev runs need --task")
+    if args.agent != "dev" and args.task and not (args.agent == "reviewer" and args.task in REVIEWS):
+        sys.exit("--task on a reviewer run is spec or plan (one round of that review loop); qa runs take none")
+    if args.agent == "dev" and args.report:
+        sys.exit("--report keeps the file of a reviewer or qa report; the dev's report is checked before integrating")
     blocking = args.critical + args.important
     if args.agent in ("reviewer", "qa") and (args.verdict == "FAIL") != (blocking > 0):
         sys.exit("FAIL needs open Critical/Important findings (--critical or --important > 0) and PASS none")
     entry = {"type": "run", "agent": args.agent, "task": args.task, "verdict": args.verdict, "open": blocking,
              "critical": args.critical, "important": args.important, "minor": args.minor,
-             "origin": origins(args.origin, blocking + args.minor), "head": git_head(ledger=args.ledger) or "",
-             "summary": args.summary}
+             "origin": origins(args.origin, blocking + args.minor), "head": git_head(ledger=args.ledger) or ""}
+    if args.report:
+        entry["report"] = args.report
     if args.seconds is not None:
         entry["seconds"] = seconds(args.seconds)
     if args.tokens is not None:
+        if args.tokens == 0:
+            sys.exit("--tokens 0 is no measurement: leave it out when the run went unmeasured")
         entry["tokens"] = args.tokens
     write(args.ledger, entry)
-    print(f"{args.agent}{' ' + args.task if args.task else ''}: {args.verdict} (cycle {len(cycles(read(args.ledger)))})")
+    label = f"{args.agent}{' ' + args.task if args.task else ''}: {args.verdict}"
+    print(f"{label} (round {len(reviews(read(args.ledger), args.task))})" if is_review(entry)
+          else f"{label} (cycle {len(cycles(read(args.ledger)))})")
 
 
 def in_flight(entries):
@@ -331,17 +401,26 @@ def waive(args):
     entries = read(args.ledger)
     if not entries:
         sys.exit("no delivery started: run start first")
-    cycle = cycles(entries)[-1]
-    done = [index for index, entry in enumerate(cycle) if entry["agent"] == args.agent]
-    if not done or cycle[done[-1]]["verdict"] != "FAIL":
-        sys.exit(f"the latest {args.agent} run of the cycle is not a FAIL: nothing to waive")
-    if any(entry["agent"] == "dev" for entry in cycle[done[-1] + 1:]):
-        sys.exit(f"the dev ran after that {args.agent} FAIL: run the {args.agent} on the fix to review it instead")
-    text = f"waived {args.agent} FAIL: {args.reason}"
+    if args.task:
+        if args.agent != "reviewer":
+            sys.exit("--task names a spec or plan review loop, which only the reviewer runs")
+        done = reviews(entries, args.task)
+        if not done or done[-1]["verdict"] != "FAIL":
+            sys.exit(f"the latest {args.task} review is not a FAIL: nothing to waive")
+        failed = done[-1]
+    else:
+        cycle = cycles(entries)[-1]
+        done = [index for index, entry in enumerate(cycle) if entry["agent"] == args.agent]
+        if not done or cycle[done[-1]]["verdict"] != "FAIL":
+            sys.exit(f"the latest {args.agent} run of the cycle is not a FAIL: nothing to waive")
+        if any(entry["agent"] == "dev" for entry in cycle[done[-1] + 1:]):
+            sys.exit(f"the dev ran after that {args.agent} FAIL: run the {args.agent} on the fix to review it instead")
+        failed = cycle[done[-1]]
+    text = f"waived {args.agent} {args.task + ' ' if args.task else ''}FAIL: {args.reason}"
     write(args.ledger, {"type": "note", "text": text, **({"validar": True} if autonomous(entries) else {})})
-    write(args.ledger, {"type": "run", "agent": args.agent, "task": "", "verdict": "PASS", "open": 0, "critical": 0,
-                        "important": 0, "minor": 0, "origin": {}, "head": cycle[done[-1]].get("head", ""),
-                        "summary": "", "waived": args.reason})
+    write(args.ledger, {"type": "run", "agent": args.agent, "task": args.task, "verdict": "PASS", "open": 0,
+                        "critical": 0, "important": 0, "minor": 0, "origin": {}, "head": failed.get("head", ""),
+                        "waived": args.reason})
     print(text)
 
 
@@ -436,18 +515,22 @@ def elapsed(cycle):
     return int((max(ends) - min(starts)).total_seconds())
 
 
+def classify(entry, found):
+    classified = entry.get("origin") or {}
+    for name, count in classified.items():
+        found[name] += count
+    total = sum(entry.get(key, 0) for key in SEVERITIES)
+    total += max(entry.get("open", 0) - entry.get("critical", 0) - entry.get("important", 0), 0)
+    found["unclassified"] += total - sum(classified.values())
+
+
 def metrics(entries):
     per_cycle, found = [], {name: 0 for name in ORIGINS + ("unclassified",)}
     for number, cycle in enumerate(cycles(entries), 1):
         passes = [entry for entry in cycle if entry["agent"] in ("reviewer", "qa")]
         counts = {key: sum(entry.get(key, 0) for entry in passes) for key in SEVERITIES + ("open",)}
         for entry in passes:
-            classified = entry.get("origin") or {}
-            for name, count in classified.items():
-                found[name] += count
-            total = sum(entry.get(key, 0) for key in SEVERITIES)
-            total += max(entry.get("open", 0) - entry.get("critical", 0) - entry.get("important", 0), 0)
-            found["unclassified"] += total - sum(classified.values())
+            classify(entry, found)
         agents = {}
         for entry in cycle:
             if entry.get("seconds") is not None:
@@ -456,10 +539,19 @@ def metrics(entries):
         per_cycle.append({"cycle": number, **counts, "fix_rounds": len(fixes), "seconds": sum(agents.values()),
                           "elapsed": elapsed(cycle), "agents": agents,
                           "tokens": sum(entry.get("tokens") or 0 for entry in cycle)})
-    measured = [entry for entry in runs(entries) if entry.get("waived") is None]
+    loops = {}
+    for entry in reviews(entries):
+        if entry.get("waived") is not None:
+            continue
+        loop = loops.setdefault(entry["task"], {"rounds": 0, **{key: 0 for key in SEVERITIES}, "seconds": 0, "tokens": 0})
+        loop["rounds"] += 1
+        for key in SEVERITIES + ("seconds", "tokens"):
+            loop[key] += entry.get(key) or 0
+        classify(entry, found)
+    measured = [entry for entry in runs(entries) + reviews(entries) if entry.get("waived") is None]
     lessons = [{"text": entry["text"], "check": entry.get("check", "")} for entry in entries
                if entry["type"] == "lesson"]
-    return {"cycles": per_cycle, "origins": found, "time": totals(measured, "seconds"),
+    return {"cycles": per_cycle, "reviews": loops, "origins": found, "time": totals(measured, "seconds"),
             "tokens": totals(measured, "tokens"), "lessons": lessons}
 
 
@@ -485,18 +577,19 @@ def status(args):
     closed = not pending
     items = deferred(entries)
     held = in_flight(entries)
+    loops, steps = review_state(entries, auto)
     # a task in flight again after a verdict that was not done is no step: its run is pending below
     kept = [(text, step) for text, step in zip(pending, state["steps"]) if step.get("task") not in held]
-    pending = [text for text, _ in kept]
+    pending = loops + [text for text, _ in kept]
     pending += [f"dev {task} dispatched at {at}, no report yet (add it when it reports, or release --task {task})"
                 for task, at in held.items()]
     pending += [f"deferred {item['id']} has no decision: {item['text']}" for item in items if not item["decision"]]
-    steps = [step for _, step in kept] + [{"step": "decide", "id": item["id"], "text": item["text"]}
-                                          for item in items if not item["decision"]]
+    steps += [step for _, step in kept] + [{"step": "decide", "id": item["id"], "text": item["text"]}
+                                           for item in items if not item["decision"]]
     plans = [entry["plan"] for entry in entries if entry["type"] == "plan"]
     report = {"slug": entries[0].get("slug"), "base": entries[0].get("base"), "ledger": os.path.abspath(args.ledger),
               "plan": plans[-1] if plans else entries[0].get("plan"),
-              "cycle": len(groups), "in_flight": list(held), "dispatched": held,
+              "cycle": len(groups), "from": cycle_from(entries, groups), "in_flight": list(held), "dispatched": held,
               "tasks": {task: entry["verdict"] for task, entry in state["tasks"].items()},
               "reviewer": state["reviewer"], "qa": state["qa"], "runs": groups[-1], "pending": pending,
               "steps": steps, "scope": progress(entries, closed, held),
@@ -507,7 +600,8 @@ def status(args):
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:
-        print(f"delivery {report['slug']} (base {str(report['base'])[:12]}), cycle {report['cycle']}")
+        print(f"delivery {report['slug']} (base {str(report['base'])[:12]}), cycle {report['cycle']}"
+              + (f" from {report['from'][:12]}" if report["from"] else ""))
         if auto:
             print("mode: autonomous (approvals become VALIDAR notes; never merge into or push the default branch)")
         for task, verdict in report["tasks"].items():
@@ -557,9 +651,9 @@ def main():
     for severity in SEVERITIES:
         command.add_argument(f"--{severity}", type=count, default=0)
     command.add_argument("--origin", default="", help="design=N,assumption=N,plan=N,execution=N,environment=N")
+    command.add_argument("--report", help="the file the manager saved a reviewer or qa report in")
     command.add_argument("--seconds", help="how long the run took, from its completion notification: 90, 12m, 1h5m or 12m30s")
     command.add_argument("--tokens", type=count, help="the tokens the run used, from its completion notification")
-    command.add_argument("--summary", default="")
     command.set_defaults(run=add)
     for name, run in (("claim", claim), ("release", release)):
         command = commands.add_parser(name)
@@ -575,6 +669,7 @@ def main():
     command.set_defaults(run=validate)
     command = commands.add_parser("waive")
     command.add_argument("--agent", required=True, choices=("reviewer", "qa"))
+    command.add_argument("--task", default="", choices=("",) + REVIEWS, help="the spec or plan review loop to close")
     command.add_argument("--reason", required=True)
     command.set_defaults(run=waive)
     command = commands.add_parser("plan")
