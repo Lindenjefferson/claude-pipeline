@@ -1,16 +1,19 @@
-// Mod (Claude Code v2.1.287 or later): the delivery's progress, drawn from `ledger.py status --json`. While the
-// ledger of this worktree has a delivery, one line above the prompt says the cycle, the tasks in flight with their
-// time, the reviewer and qa verdicts, the VALIDAR items waiting and what comes next. /andamento opens a pane with
-// the current cycle's runs, the earlier cycles, what is pending and the other fronts (each worktree with a ledger of
-// its own), and answers in text where nothing draws. Every rule stays in ledger.py: this file only lays it out. It
-// checks the ledger file every 5 s and runs ledger.py again only when the file changed, or once a minute (every 5
-// minutes while there is no ledger file); a ledger.py failure (a broken ledger, no python) shows in the band and the
-// pane instead of passing for "no delivery". Other mods' band content is kept below the line.
+// Mod (Claude Code v2.1.287 or later): the delivery's progress, drawn from `ledger.py status --json`, in Portuguese
+// (the user reads it; the ledger's own text stays in English for the manager). While the ledger of this worktree has
+// a delivery, one line above the prompt says the plan cycle, the tasks in flight with their time, a verdict no next
+// step covers, what comes next, the tasks and cycles left and the VALIDAR items waiting. /andamento opens a pane with
+// what is left per cycle, the current cycle's runs, the next steps, the earlier cycles and the other fronts (each
+// worktree with a ledger of its own), and answers in text where nothing draws. Every rule stays in ledger.py (its
+// steps and scope): this file only lays them out. It checks the ledger file every 5 s and runs ledger.py again only
+// when the file changed, or once a minute (every 5 minutes while there is no ledger file); a ledger.py failure (a
+// broken ledger, no python) shows in the band and the pane instead of passing for "no delivery". Other mods' band
+// content is kept below the line.
 
 const PANE = 'andamento'
 const POLL_MS = 5000
 const REFRESH_MS = 60000
 const IDLE_REFRESH_MS = 300000
+const AGENT = { reviewer: 'revisão', qa: 'qa' }
 
 let report = null
 let failure = null
@@ -19,37 +22,82 @@ let mtime = null
 let lastRead = -Infinity
 let fronts = []
 
+function clock(minutes) {
+  return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}`
+}
+
 export function since(at, now) {
-  const minutes = Math.max(0, Math.floor((now - Date.parse(at)) / 60000))
-  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h${minutes % 60}m`
+  return clock(Math.max(0, Math.floor((now - Date.parse(at)) / 60000)))
 }
 
 export function duration(seconds) {
   if (seconds === undefined || seconds === null) return '-'
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.round(seconds / 60)
-  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h${minutes % 60}m`
+  return seconds < 60 ? `${seconds} s` : clock(Math.round(seconds / 60))
+}
+
+function plural(count, one, many) {
+  return `${count} ${count === 1 ? one : many}`
+}
+
+function listed(items) {
+  return items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} e ${items[items.length - 1]}`
+}
+
+function thousands(count) {
+  return String(count).replace(/\B(?=(\d{3})+(?!\d))/g, '.')
 }
 
 function waiting(r) {
   return (r.validar || []).filter((item) => typeof item === 'object' && item.decision === null)
 }
 
-function nextSteps(r) {
-  const flying = Object.keys(r.dispatched || {})
-  return (r.pending || []).filter((item) => !flying.some((task) => item.startsWith(`dev ${task} dispatched`)))
+function title(r) {
+  const scope = r.scope
+  const cycle = !scope ? `ciclo ${r.cycle}`
+    : scope.current === String(scope.position) ? `ciclo ${scope.position} de ${scope.total}`
+    : `ciclo ${scope.current} (${scope.position} de ${scope.total})`
+  return [String(r.slug).replace(/[-_]+/g, ' '), cycle, ...(r.autonomous ? ['autônomo'] : [])].join(' · ')
+}
+
+function left(scope) {
+  return `${plural(scope.tasks_left, 'tarefa', 'tarefas')} em ${plural(scope.cycles_left, 'ciclo', 'ciclos')}`
+}
+
+// One step of ledger.py's steps, spelled out.
+function said(step) {
+  const agent = AGENT[step.agent] ?? step.agent
+  switch (step.step) {
+    case 'dev': return step.task ? `dev na ${step.task} (voltou ${step.verdict})` : 'primeira tarefa do dev'
+    case 'reviewer': return 'revisão'
+    case 'qa': return step.rerun ? 'qa de novo nos cenários da correção' : 'qa'
+    case 'fix': return `correção (${plural(step.open, 'achado', 'achados')} ${step.agent === 'qa' ? 'do qa' : 'da revisão'})`
+    case 'ask': return `falar com você (${agent} ainda reprova depois da correção)`
+    case 'stop': return `parar e registrar como VALIDAR (${agent} ainda reprova depois de ${step.rounds} rodadas)`
+    case 'decide': return `decidir ${step.id}: ${step.text}`
+    default: return step.step
+  }
 }
 
 export function bandLine(r, now) {
-  const parts = [`pipeline · ${r.slug} · cycle ${r.cycle}`]
-  if (r.autonomous) parts.push('autonomous')
-  for (const [task, at] of Object.entries(r.dispatched || {})) parts.push(`▶ ${task} ${since(at, now)}`)
-  for (const agent of ['reviewer', 'qa']) parts.push(`${agent} ${(r[agent] || [])[0]?.verdict ?? '—'}`)
+  const parts = [title(r)]
+  const running = Object.entries(r.dispatched || {}).map(([task, at]) => `na ${task} há ${since(at, now)}`)
+  if (running.length) parts.push(`dev ${listed(running)}`)
+  const steps = r.steps || []
+  for (const agent of ['reviewer', 'qa']) {
+    const verdict = (r[agent] || [])[0]
+    if (!verdict || steps.some((step) => step.step === agent || step.agent === agent)) continue
+    parts.push(verdict.verdict === 'PASS' ? `${AGENT[agent]} ok`
+      : `${AGENT[agent]} reprovou (${plural(verdict.open, 'aberto', 'abertos')})`)
+  }
+  if (r.ready_for_gate) parts.push('pronto para o gate')
+  else if (steps.length) {
+    const decide = steps.filter((step) => step.step === 'decide').map((step) => step.id)
+    const next = steps.filter((step) => step.step !== 'decide').map((step) => said(step))
+    parts.push(`depois: ${listed(decide.length ? [...next, `decidir ${listed(decide)}`] : next)}`)
+  }
+  if (r.scope && r.scope.tasks_left) parts.push(`${r.scope.tasks_left === 1 ? 'falta' : 'faltam'} ${left(r.scope)}`)
   const items = waiting(r).length
-  if (items) parts.push(`VALIDAR ${items}`)
-  const next = nextSteps(r)
-  if (r.ready_for_gate) parts.push('ready for gate')
-  else if (next.length) parts.push(`next: ${next[0]}`)
+  if (items) parts.push(items === 1 ? '1 decisão espera você' : `${items} decisões esperam você`)
   return parts.join(' · ')
 }
 
@@ -61,43 +109,50 @@ function row(cells) {
 export function paneLines(r, fronts, now, failure = null) {
   const lines = []
   if (r) {
-    lines.push(`${r.slug} · cycle ${r.cycle}${r.autonomous ? ' · autonomous' : ''}`, '')
-    lines.push(row(['Agent', 'Task', 'Verdict', 'Time', 'Tokens']))
+    lines.push(title(r), '')
+    if (r.scope && r.scope.tasks_left) {
+      lines.push(`${r.scope.tasks_left === 1 ? 'Falta' : 'Faltam'} ${left(r.scope)}:`)
+      for (const cycle of r.scope.cycles) {
+        if (cycle.left.length) lines.push(`- ciclo ${cycle.cycle}: ${cycle.left.join(', ')}`)
+      }
+      lines.push('')
+    }
+    lines.push(row(['Agente', 'Tarefa', 'Veredito', 'Tempo', 'Tokens']))
     for (const run of r.runs || []) {
-      const verdict = run.agent === 'dev' ? run.verdict : `${run.verdict}${run.open ? ` (${run.open} open)` : ''}`
-      lines.push(row([run.agent, run.task || '-', run.waived ? `${verdict}, waived` : verdict, duration(run.seconds),
-                      run.tokens ?? '-']))
+      const verdict = run.agent === 'dev' ? run.verdict : `${run.verdict}${run.open ? ` (${run.open} abertos)` : ''}`
+      lines.push(row([run.agent, run.task || '-', run.waived ? `${verdict}, dispensado` : verdict, duration(run.seconds),
+                      run.tokens ? thousands(run.tokens) : '-']))
     }
     for (const [task, at] of Object.entries(r.dispatched || {})) {
-      lines.push(row(['dev', task, 'running', since(at, now), '-']))
+      lines.push(row(['dev', task, 'rodando', since(at, now), '-']))
     }
-    const next = nextSteps(r)
-    lines.push('', r.ready_for_gate ? 'Ready for gate.' : 'Pending:')
-    for (const item of next) lines.push(`- ${item}`)
+    if (r.ready_for_gate) lines.push('', 'Pronto para o gate.')
+    else if ((r.steps || []).length) lines.push('', 'Depois:', ...r.steps.map((step) => `- ${said(step)}`))
     const items = waiting(r)
     if (items.length) {
-      lines.push('', 'VALIDAR (waiting for the user):')
+      lines.push('', 'Decisões que esperam você (VALIDAR):')
       for (const item of items) lines.push(`- ${item.id} ${item.text}`)
     }
     const earlier = ((r.metrics || {}).cycles || []).slice(0, -1)
     if (earlier.length) {
-      lines.push('', 'Earlier cycles:')
+      lines.push('', 'Ciclos anteriores:')
       for (const cycle of earlier) {
-        lines.push(`- cycle ${cycle.cycle}: ${cycle.critical} Critical, ${cycle.important} Important, ${cycle.minor} ` +
-                   `Minor; ${cycle.fix_rounds} fix round${cycle.fix_rounds === 1 ? '' : 's'}; ` +
-                   `${duration(cycle.seconds)} agent time` +
-                   (cycle.tokens ? `, ${cycle.tokens} tokens` : ''))
+        lines.push(`- ciclo ${cycle.cycle}: ${cycle.critical} Critical, ${cycle.important} Important, ${cycle.minor} ` +
+                   `Minor; ${plural(cycle.fix_rounds, 'rodada', 'rodadas')} de correção; ` +
+                   `${duration(cycle.seconds)} de agente` +
+                   (cycle.tokens ? `, ${thousands(cycle.tokens)} tokens` : ''))
       }
     }
   } else {
-    lines.push(failure ? `ledger.py failed: ${failure}` : 'No delivery open in this worktree.')
+    lines.push(failure ? `ledger.py falhou: ${failure}` : 'Nenhuma entrega aberta nesta worktree.')
   }
   if (fronts.length) {
-    lines.push('', 'Other fronts:')
+    lines.push('', 'Outras frentes:')
     for (const front of fronts) {
       const flying = Object.keys(front.report.dispatched || {}).length
-      lines.push(`- ${front.name}: ${front.report.slug} · cycle ${front.report.cycle} · ${flying} running · ` +
-                 (front.report.ready_for_gate ? 'ready for gate' : `${nextSteps(front.report).length} pending`))
+      lines.push(`- ${front.name}: ${title({ ...front.report, autonomous: false })} · ${flying} rodando · ` +
+                 (front.report.ready_for_gate ? 'pronto para o gate'
+                   : plural((front.report.steps || []).length, 'pendente', 'pendentes')))
     }
   }
   return lines
@@ -178,7 +233,7 @@ export function register(on) {
     })
     try {
       await $.command.register({ name: 'andamento', immediate: true,
-                                 description: 'Delivery progress: the cycle, the agents, what is pending, other fronts' })
+                                 description: 'Andamento da entrega: o ciclo, os agentes, o que falta e as outras frentes' })
     } catch {}
     return next(e)
   })
@@ -205,7 +260,7 @@ export function register(on) {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if ((!report && !failure) || e.props.hasSurvey) return next(e)
     const { Box, Text } = $.ui.resolve(e)
-    const text = report ? bandLine(report, await $.clock.now()) : `pipeline · ledger.py failed: ${failure}`
+    const text = report ? bandLine(report, await $.clock.now()) : `pipeline · ledger.py falhou: ${failure}`
     const line = Text({ wrap: 'truncate-end', dimColor: e.props.isWorking, children: [text] })
     const theirs = await next(e)
     return Box({ flexDirection: 'column', children: theirs ? [line, theirs] : [line] })

@@ -464,4 +464,64 @@ legacy = status(".superpowers/legacy.jsonl")
 check("an old ledger without tokens reads with no tokens measured",
       legacy["metrics"]["tokens"]["agents"] == {} and legacy["dispatched"] == {}, legacy["metrics"])
 
+STEPS = ".superpowers/steps.jsonl"
+run("start", "--slug", "steps", ledger=STEPS)
+check("status --json gives the next steps as data: no dev task yet", status(STEPS)["steps"] == [{"step": "dev"}],
+      status(STEPS).get("steps"))
+add("dev", "NEEDS_CONTEXT", "T1", ledger=STEPS)
+check("an unfinished task is a dev step with its verdict",
+      status(STEPS)["steps"] == [{"step": "dev", "task": "T1", "verdict": "NEEDS_CONTEXT"}], status(STEPS)["steps"])
+add("dev", "DONE", "T1", ledger=STEPS)
+check("after the tasks, the steps are the review and qa", status(STEPS)["steps"] == [{"step": "reviewer"}, {"step": "qa"}],
+      status(STEPS)["steps"])
+add("reviewer", "FAIL", open_count=2, ledger=STEPS)
+add("qa", "PASS", ledger=STEPS)
+check("a failed review is a fix step with the agent and its open findings",
+      status(STEPS)["steps"] == [{"step": "fix", "agent": "reviewer", "open": 2}], status(STEPS)["steps"])
+add("dev", "DONE", "fix-1", ledger=STEPS)
+check("after a fix of a FAIL, the steps are the review and the qa re-run",
+      status(STEPS)["steps"] == [{"step": "reviewer"}, {"step": "qa", "rerun": True}], status(STEPS)["steps"])
+add("reviewer", "FAIL", open_count=1, ledger=STEPS)
+check("a review still failing after the fix round asks the user (supervised)",
+      {"step": "ask", "agent": "reviewer"} in status(STEPS)["steps"], status(STEPS)["steps"])
+run("claim", "--task", "T2", ledger=STEPS)
+run("defer", "--text", "page size", ledger=STEPS)
+steps = status(STEPS)["steps"]
+check("a task in flight is no step (the band shows it running), a deferred item with no decision is",
+      not any(step.get("task") == "T2" for step in steps) and {"step": "decide", "id": "D1", "text": "page size"} in steps,
+      steps)
+
+SCOPE = ".superpowers/scope.jsonl"
+check("scope before start is refused",
+      run("scope", "--cycle", "1", "--tasks", "T1", ledger=".superpowers/none.jsonl").returncode != 0)
+run("start", "--slug", "scope", ledger=SCOPE)
+check("a ledger with no scope has none in status", status(SCOPE)["scope"] is None, status(SCOPE).get("scope"))
+for name, tasks in (("1", "T1.1, T1.2"), ("R", "TR.1"), ("2", "T2.1")):
+    r = run("scope", "--cycle", name, "--tasks", tasks, ledger=SCOPE)
+check("scope records the tasks of one plan cycle", r.returncode == 0 and "2" in r.stdout, r.stderr)
+check("status --json gives the plan cycles in order, the tasks left, and where the delivery is",
+      status(SCOPE)["scope"] == {"cycles": [{"cycle": "1", "tasks": ["T1.1", "T1.2"], "left": ["T1.1", "T1.2"]},
+                                            {"cycle": "R", "tasks": ["TR.1"], "left": ["TR.1"]},
+                                            {"cycle": "2", "tasks": ["T2.1"], "left": ["T2.1"]}],
+                                 "current": "1", "position": 1, "total": 3, "tasks_left": 4, "cycles_left": 3},
+      status(SCOPE)["scope"])
+run("scope", "--cycle", "R", "--tasks", "TR.1,TR.2", ledger=SCOPE)
+run("scope", "--cycle", "2", "--tasks", "", ledger=SCOPE)
+scope = status(SCOPE)["scope"]
+check("scope again replaces that cycle in place, and with no tasks removes it",
+      [(item["cycle"], item["tasks"]) for item in scope["cycles"]] == [("1", ["T1.1", "T1.2"]), ("R", ["TR.1", "TR.2"])]
+      and scope["total"] == 2, scope)
+add("dev", "DONE", "T1.1", ledger=SCOPE)
+add("dev", "DONE_WITH_CONCERNS", "T1.2", ledger=SCOPE)
+scope = status(SCOPE)["scope"]
+check("a cycle whose tasks are done still counts as left until its review and qa pass",
+      scope["tasks_left"] == 2 and scope["cycles_left"] == 2 and scope["current"] == "1", scope)
+add("reviewer", "PASS", ledger=SCOPE)
+add("qa", "PASS", ledger=SCOPE)
+check("a closed cycle is no longer left", status(SCOPE)["scope"]["cycles_left"] == 1, status(SCOPE)["scope"])
+run("claim", "--task", "TR.1", ledger=SCOPE)
+scope = status(SCOPE)["scope"]
+check("the current cycle is the one of the task in flight or the latest task",
+      scope["current"] == "R" and scope["position"] == 2, scope)
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

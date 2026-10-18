@@ -64,7 +64,7 @@ O marketplace também pode vir direto do GitHub (`claude plugin marketplace add 
 | [Hook de segredos e UTF-8](plugins/pipeline/hooks/pre-commit-secret-scan.py) | `pre-commit` do git que bloqueia `.env`, linhas com cara de segredo e linhas adicionadas que não são UTF-8 ou têm caracteres invisíveis; o docstring explica falso positivo e a correção. |
 | [Hook de retomada](plugins/pipeline/hooks/session-start.py) | `SessionStart` (`compact` e `resume`): devolve ao manager o `status` do ledger. Registrado em [`hooks.json`](plugins/pipeline/hooks/hooks.json). |
 | [Guarda do Bash](plugins/pipeline/hooks/bash-guard.py) | `PreToolUse` em `Bash`: nega pular o `pre-commit` (`--no-verify`, `-n`, `core.hooksPath`), o que chega na branch principal no modo autônomo e o comando da linha "Rodar em desenvolvimento" do `CLAUDE.md` do projeto fora do modo background. |
-| [Andamento](plugins/pipeline/hooks/andamento.js) | Mod do Claude Code: com entrega aberta, uma linha acima do prompt com o ciclo, as tarefas em andamento e o que falta; `/andamento` abre o painel com a tabela do ciclo e as outras frentes. |
+| [Andamento](plugins/pipeline/hooks/andamento.js) | Mod do Claude Code: com entrega aberta, uma linha em português acima do prompt com o ciclo do plano, as tarefas em andamento, o que vem depois e quantas tarefas e ciclos faltam; `/andamento` abre o painel com a tabela do ciclo e as outras frentes. |
 
 ## Atualização
 
