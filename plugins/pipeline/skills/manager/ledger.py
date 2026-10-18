@@ -11,6 +11,7 @@
   validate --id <id> --decision <text>                        the user's decision on a VALIDAR item (V1, V2...)
   waive   --agent reviewer|qa --reason <text>                 accepts the open findings of that agent's latest FAIL
   plan    --path <path>                                       the approved plan, when start ran before it existed
+  scope   --cycle <name> --tasks <id,id,...>                  the tasks of one plan cycle, in plan order
   mode    autonomous|supervised                               the user turned autonomous mode on, or is back
   defer   --text <text>                                       an item left for later; prints its id (D1, D2...)
   resolve --id <id> --decision <text>                         the final decision on a deferred item
@@ -37,6 +38,14 @@ waivers in autonomous mode) are listed apart, numbered V1, V2... in the order wr
 return; validate records the decision, and status lists the items still waiting apart from the decided ones. A
 ledger with no mode entry is supervised.
 
+status --json also gives the pending items as data and where the delivery is in its plan. steps: one
+{"step": dev|reviewer|qa|fix|ask|stop|decide, ...} per pending item, with its detail (task and verdict, agent and
+open findings, a qa re-run, a deferred id and text); a task in flight is no step. scope: the plan cycles recorded
+with scope, in the order first recorded (a later scope for a cycle replaces its tasks in place, an empty one removes
+it), each with the tasks that have no DONE run yet; the current cycle (the one holding the task in flight, else the
+latest task); and how many tasks and cycles are left (a cycle whose tasks are done counts until it closes). With no
+scope recorded, scope is null.
+
 Without --ledger, the ledger is .superpowers/ledger.jsonl at the root of the current worktree, or of the main
 worktree when the current one has none (a task worktree), except for start, which always uses the current one. A
 line that is not JSON stops every command with its line number, so a truncated write is never skipped silently."""
@@ -57,6 +66,7 @@ VERDICTS = {
 ORIGINS = ("design", "assumption", "plan", "execution", "environment")
 SEVERITIES = ("critical", "important", "minor")
 FIX_ROUNDS = {False: 1, True: 3}
+DONE = ("DONE", "DONE_WITH_CONCERNS")
 FIX_TASK = re.compile(r"fix-\d+", re.IGNORECASE)
 FOLLOW_UP = re.compile(r"fix-\d+|cleanup", re.IGNORECASE)
 DURATION = re.compile(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?|(\d+)")
@@ -145,30 +155,41 @@ def cycle_state(cycle, autonomous=False):
         elif entry["agent"] == "qa":
             checks.append(entry)
             last_qa = index
-    state = {"tasks": tasks, "reviewer": reviews[-1:], "qa": checks[-1:]}
-    pending = [f"dev {task}: {entry['verdict']}" for task, entry in tasks.items()
-               if entry["verdict"] not in ("DONE", "DONE_WITH_CONCERNS")]
+    pending, steps = [], []
+    state = {"tasks": tasks, "reviewer": reviews[-1:], "qa": checks[-1:], "steps": steps}
+
+    def need(text, step, **detail):
+        pending.append(text)
+        steps.append({"step": step, **detail})
+
+    for task, entry in tasks.items():
+        if entry["verdict"] not in DONE:
+            need(f"dev {task}: {entry['verdict']}", "dev", task=task, verdict=entry["verdict"])
     if not tasks:
-        pending.append("no dev task yet")
+        need("no dev task yet", "dev")
     if pending:
         return state, pending
     if last_review < last_dev:
-        pending.append("reviewer has not reviewed the latest changes")
+        need("reviewer has not reviewed the latest changes", "reviewer")
     elif reviews[-1]["verdict"] == "FAIL":
-        pending.append(f"reviewer FAIL ({reviews[-1]['open']} open): dev fixes every finding in one batch")
+        need(f"reviewer FAIL ({reviews[-1]['open']} open): dev fixes every finding in one batch", "fix",
+             agent="reviewer", open=reviews[-1]["open"])
     if not checks or last_qa < work:
-        pending.append("qa has not run on the cycle's tasks")
+        need("qa has not run on the cycle's tasks", "qa")
     elif checks[-1]["verdict"] == "FAIL" and last_qa > last_dev:
-        pending.append(f"qa FAIL ({checks[-1]['open']} open): dev fixes every finding in one batch")
+        need(f"qa FAIL ({checks[-1]['open']} open): dev fixes every finding in one batch", "fix",
+             agent="qa", open=checks[-1]["open"])
     elif last_qa < needs_qa:
-        pending.append("qa has not re-run the scenarios the fix touched")
+        need("qa has not re-run the scenarios the fix touched", "qa", rerun=True)
     rounds = FIX_ROUNDS[autonomous]
     for agent, done in (("reviewer", reviews), ("qa", checks)):
         failed = sum(1 for entry in done if entry["verdict"] == "FAIL")
         if done and done[-1]["verdict"] == "FAIL" and failed > rounds:
-            pending.append(f"{agent} still fails after {rounds} fix rounds: stop the delivery and record the open "
-                           "findings as note --validar" if autonomous else
-                           f"{agent} still fails after a fix round: ask the user")
+            if autonomous:
+                need(f"{agent} still fails after {rounds} fix rounds: stop the delivery and record the open "
+                     "findings as note --validar", "stop", agent=agent, rounds=rounds)
+            else:
+                need(f"{agent} still fails after a fix round: ask the user", "ask", agent=agent)
     return state, pending
 
 
@@ -261,7 +282,7 @@ def claim(args):
                  f"if that run was lost, release --task {args.task}")
     groups = cycles(entries)
     done = cycle_state(groups[-1])[0]["tasks"].get(args.task)
-    if done and done["verdict"] in ("DONE", "DONE_WITH_CONCERNS"):
+    if done and done["verdict"] in DONE:
         sys.exit(f"{args.task} is already done in cycle {len(groups)}: use a new task id (fix-N for a fix round)")
     write(args.ledger, {"type": "claim", "task": args.task})
     print(f"claimed {args.task}")
@@ -329,6 +350,35 @@ def plan(args):
         sys.exit("no delivery started: run start first")
     write(args.ledger, {"type": "plan", "plan": args.path})
     print(f"plan {args.path}")
+
+
+def scope(args):
+    if not read(args.ledger):
+        sys.exit("no delivery started: run start first")
+    tasks = [task.strip() for task in args.tasks.split(",") if task.strip()]
+    write(args.ledger, {"type": "scope", "cycle": args.cycle, "tasks": tasks})
+    print(f"cycle {args.cycle}: {len(tasks)} tasks" if tasks else f"cycle {args.cycle} removed from the scope")
+
+
+def progress(entries, closed, held):
+    plan = {}
+    for entry in entries:
+        if entry["type"] == "scope":
+            plan[entry["cycle"]] = entry["tasks"]
+    plan = {cycle: tasks for cycle, tasks in plan.items() if tasks}
+    if not plan:
+        return None
+    done = {entry["task"] for entry in runs(entries) if entry["agent"] == "dev" and entry["verdict"] in DONE}
+    latest = [entry["task"] for entry in runs(entries) if entry["agent"] == "dev" and not is_task(entry, FOLLOW_UP)]
+    names = list(plan)
+    current = names[0]
+    for task in latest + list(held):
+        current = next((cycle for cycle in names if task in plan[cycle]), current)
+    cycles = [{"cycle": cycle, "tasks": tasks, "left": [task for task in tasks if task not in done]}
+              for cycle, tasks in plan.items()]
+    return {"cycles": cycles, "current": current, "position": names.index(current) + 1, "total": len(names),
+            "tasks_left": sum(len(item["left"]) for item in cycles),
+            "cycles_left": sum(1 for item in cycles if item["left"] or (item["cycle"] == current and not closed))}
 
 
 def autonomous(entries):
@@ -437,12 +487,16 @@ def status(args):
     pending += [f"dev {task} dispatched at {at}, no report yet (add it when it reports, or release --task {task})"
                 for task, at in held.items()]
     pending += [f"deferred {item['id']} has no decision: {item['text']}" for item in items if not item["decision"]]
+    closed = not cycle_state(groups[-1], auto)[1]
+    steps = state["steps"] + [{"step": "decide", "id": item["id"], "text": item["text"]}
+                              for item in items if not item["decision"]]
     plans = [entry["plan"] for entry in entries if entry["type"] == "plan"]
     report = {"slug": entries[0].get("slug"), "base": entries[0].get("base"), "ledger": os.path.abspath(args.ledger),
               "plan": plans[-1] if plans else entries[0].get("plan"),
               "cycle": len(groups), "in_flight": list(held), "dispatched": held,
               "tasks": {task: entry["verdict"] for task, entry in state["tasks"].items()},
               "reviewer": state["reviewer"], "qa": state["qa"], "runs": groups[-1], "pending": pending,
+              "steps": steps, "scope": progress(entries, closed, held),
               "autonomous": auto, "deferred": items,
               "notes": [entry["text"] for entry in entries if entry["type"] == "note" and not entry.get("validar")],
               "validar": validar(entries),
@@ -523,6 +577,10 @@ def main():
     command = commands.add_parser("plan")
     command.add_argument("--path", required=True)
     command.set_defaults(run=plan)
+    command = commands.add_parser("scope")
+    command.add_argument("--cycle", required=True, help="the cycle's name in the plan (1, 2, R...)")
+    command.add_argument("--tasks", required=True, help="its task ids in plan order, comma-separated; empty removes it")
+    command.set_defaults(run=scope)
     command = commands.add_parser("mode")
     command.add_argument("mode", choices=("autonomous", "supervised"))
     command.set_defaults(run=mode)
