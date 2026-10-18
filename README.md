@@ -49,7 +49,7 @@ O marketplace também pode vir direto do GitHub (`claude plugin marketplace add 
 
 | Componente | Função |
 |---|---|
-| [`kickoff`](plugins/pipeline/skills/kickoff/SKILL.md) | Prepara um projeto novo ou existente: `CLAUDE.md`, `docs/`, `.gitignore`, hook de segredos, permissões dos agentes e grafo. |
+| [`kickoff`](plugins/pipeline/skills/kickoff/SKILL.md) | Prepara um projeto novo ou existente: `CLAUDE.md`, `CLAUDE.local.md`, `docs/`, `.gitignore`, hook de segredos, permissões dos agentes e grafo. |
 | [`manager`](plugins/pipeline/skills/manager/SKILL.md) | Conduz a entrega do tamanho ao merge, em ciclos, com duas aprovações suas. |
 | [`validar`](plugins/pipeline/skills/validar/SKILL.md) | Percorre com você, item a item, as decisões tomadas em seu nome (lista VALIDAR) e grava cada resposta. |
 | [`feedback-plugin`](plugins/pipeline/skills/feedback-plugin/SKILL.md) | No fim da entrega, escreve o pedido para a sessão do plugin, com métricas e lições candidatas a regra geral. |
