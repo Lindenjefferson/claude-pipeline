@@ -125,6 +125,7 @@ r = gate("--base", "main")
 check("a fix round after the closed cycle needs its review: NOT READY",
       r.returncode == 1 and "reviewer has not reviewed" in r.stdout, r.stdout)
 ledger("--agent", "reviewer", "--verdict", "PASS", "--minor", "2", "--origin", "execution=2")
+ledger("--agent", "reviewer", "--task", "plan", "--verdict", "PASS", "--minor", "1", "--origin", "plan=1")
 subprocess.run([sys.executable, LEDGER, "lesson", "--text", "lock before checking", "--check", "tests/race.sql"],
                cwd=repo, check=True, capture_output=True)
 r = gate("--base", "main")
@@ -138,6 +139,7 @@ check("--report writes and stages the quality report on READY",
 text = open(os.path.join(repo, "docs", "quality-reports", report[0]), encoding="utf-8").read() if report else ""
 check("the report carries the delivery metrics from the ledger",
       "## Metrics" in text and "- Cycle 1: 0 Critical, 0 Important, 2 Minor; 1 fix round" in text
+      and "- Plan review: 1 round, 0 Critical, 0 Important, 1 Minor" in text
       and "Lessons: 1 (1 automated)" in text and "- lock before checking (check: tests/race.sql)" in text, text)
 check("no audit command: the audit is skipped with a note",
       "Auditoria:  SKIP" in r.stdout and "not configured" in r.stdout, r.stdout)

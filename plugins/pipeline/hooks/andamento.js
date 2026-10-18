@@ -67,13 +67,15 @@ function left(scope) {
 
 // One step of ledger.py's steps, spelled out.
 function said(step) {
-  const agent = AGENT[step.agent] ?? step.agent
+  // a step with a task is a round of the spec or plan review loop, before the code
+  const agent = step.task ? `revisão ${step.task === 'spec' ? 'da spec' : 'do plano'}` : AGENT[step.agent] ?? step.agent
   switch (step.step) {
     case 'dev': return step.task ? `dev na ${step.task} (voltou ${step.verdict})` : 'primeira tarefa do dev'
     case 'reviewer': return 'revisão'
     case 'qa': return step.rerun ? 'qa de novo nos cenários da correção' : 'qa'
     case 'fix': return `correção (${plural(step.open, 'achado', 'achados')} ${step.agent === 'qa' ? 'do qa' : 'da revisão'})`
-    case 'ask': return `falar com você (${agent} ainda reprova depois da correção)`
+    case 'review': return `${agent}, rodada ${step.round} (${plural(step.open, 'achado aberto', 'achados abertos')})`
+    case 'ask': return `falar com você (${agent} ainda reprova depois ${step.task ? `de ${step.rounds} rodadas` : 'da correção'})`
     case 'stop': return `parar e registrar como VALIDAR (${agent} ainda reprova depois de ${step.rounds} rodadas)`
     case 'decide': return `decidir ${step.id}: ${step.text}`
     default: return step.step
