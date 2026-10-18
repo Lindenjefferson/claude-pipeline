@@ -7,7 +7,8 @@
   --pre-commit          scans the index git is about to commit (git sets GIT_INDEX_FILE for it) and
                         blocks on added or changed .env-style files (removing one passes) and
                         secret-looking added lines (cloud keys, tokens, private keys, JWTs other than
-                        the public anon key, password/secret assignments with a literal value), and
+                        a public client token with role anon, password/secret assignments with a
+                        literal value), and
                         blocks added lines that are not valid UTF-8 or hold invisible characters (see
                         below). Lines are read by the hunk headers of the diff, so an added line that
                         starts with ++ is content; NUL bytes are dropped first, so a UTF-16 file is
@@ -47,6 +48,8 @@ False positive: the user (never an agent: kickoff denies agents edits to the fil
 the fingerprint, and --fingerprint lists them (git diff --cached --text | python <this file> --fingerprint; for a
 whole file, --fingerprint --path <path> < <path>). A fingerprint is the sha256 of the file path and the line
 with whitespace collapsed: it frees only that exact line in that file, and editing either needs a new entry.
+An .env-style file that holds no secret (defaults a framework expects in the repo) is freed the same way, by the
+fingerprint of its path alone that the block message gives; its lines are still scanned.
 The list is read from the index, so only staged entries count; there is no in-code suppression, and a real
 secret is removed and rotated, never allowlisted. This stops accidental leaks, not a determined bypass (git
 commit --no-verify skips it); server-side push protection (e.g. GitHub secret scanning) is the last line."""
@@ -238,7 +241,7 @@ def line_findings(line):
         role = jwt_role(token.group(1))
         if role != "anon":
             labels.append("JWT" + (f" with role {role}" if role else "")
-                          + " (only the public anon key may be committed)")
+                          + " (only a public client token, with role anon, may be committed)")
             break
     return labels
 
@@ -292,9 +295,10 @@ def scan(diff, names, allowed=frozenset()):
     findings = []
     env_files = sorted({n for n in names
                         if re.search(r"(^|/)\.env(\..+)?$", n)
-                        and not n.endswith((".example", ".sample"))})
+                        and not n.endswith((".example", ".sample")) and fingerprint(n, "") not in allowed})
     if env_files:
-        findings.append(".env-style file(s): " + ", ".join(env_files))
+        findings.append(".env-style file(s): " + ", ".join(f"{n} (fingerprint {fingerprint(n, '')})"
+                                                           for n in env_files))
     seen = set()
     for path, _, raw in diff_lines(diff):
         line = text_of(raw)
@@ -315,7 +319,8 @@ ALLOW_HINT = ("\n\nFor a false positive, leave that line out and commit the rest
               + " at the repo root and stage it (git add " + ALLOWLIST_FILE + "). Only staged "
               "entries count; you may not edit "
               "or stage that file yourself. The fingerprint covers the file path and the line, "
-              "so any edit to either changes it. To list the fingerprints of flagged lines: git "
+              "so any edit to either changes it (an .env-style file with no secret is freed by the fingerprint "
+              "of its path, which the message gives). To list the fingerprints of flagged lines: git "
               "diff --cached --text | python \"" + os.path.abspath(__file__).replace("\\", "/")
               + "\" --fingerprint")
 

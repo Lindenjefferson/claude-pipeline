@@ -3,7 +3,7 @@
 A spec answers every section below. Write "not applicable" with the reason instead of leaving a section out. The reviewer, in spec mode, treats a missing answer as a finding. The plan answers sections 1 and 2 for every write operation even when there is no spec.
 
 ## 1. Pre-mortem per write operation
-For every operation that creates, changes or deletes data, answer each question; every answer becomes acceptance criteria, positive and negative, written as Given/When/Then:
+For every operation that creates, changes or deletes data that another actor or a later read uses (a record, a file, saved state), answer each question; a question about something the product does not have (accounts, a server, a second user) is answered "n/a" with the reason; every answer becomes acceptance criteria, positive and negative, written as Given/When/Then:
 - **Who can** do it, and who cannot (role, owner, tenant)? What happens when someone without permission, from another tenant, or calling the server directly tries?
 - **On which rows?** Does it touch every row it should (all the affected ones, not only those the actor can see), and does it check how many it changed?
 - **What it references** (a category, a person, an account): what if that item is hidden, inactive, removed or deleted? Editing must keep the record's current value even when it is no longer selectable.
@@ -38,7 +38,7 @@ Each rule has tests at both boundaries.
 ## 6. UI states (per screen)
 - Loading, empty, error (a specific message per failure the user can provoke, shown where it happens), success.
 - Destructive actions: confirmation, copy, focus after close.
-- The project's layout requirements (widths, touch targets, overflow), each to be asserted in the screen's e2e; keyboard order; what live regions announce.
+- The project's layout requirements (widths, touch targets, overflow), each to be asserted in the screen's automated interface test; keyboard order; what live regions announce.
 - What happens to typed values after a validation error (never the password).
 
 ## 7. Auth (when the spec touches accounts or sessions)
