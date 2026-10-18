@@ -16,6 +16,14 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 - **WSL2 para o modo multi-instância** (2.8): não resolve o gargalo medido (a suíte e2e longa, item 17 da [proposta 2.7.0](proposta-2.7.0.md)); plugins não carregam nas sessões WSL do app Desktop; custa outra instalação do Claude Code (memória, plugins e configurações à parte), integração mais difícil com o navegador do Windows e hooks e `pipeline.home` reinstalados. Volta se o próprio Windows virar o gargalo; migração só entre entregas. Esforço: P no plugin.
 - Recusado: revisão externa no gate (2.6.0). O `open-code-review` exige CLI Node e chave de um provedor de LLM e envia o diff para fora; o `reviewer` já cobre isso, e o gate é sem LLM de propósito.
 
+## 2.8.3 — recursos do computador: antecipar e não parar (PR #24)
+
+Origem: feedback da etapa 5 do controle-financeiro, com a regra do usuário ("no modo autônomo, tomar a melhor decisão e seguir, desde que não seja algo danoso"). O sistema matou a preparação de uma worktree por falta de memória, e o manager apagou o heartbeat e ficou esperando o usuário.
+
+- [x] **Pausa por recurso**, no `manager` (modo autônomo): quando falta memória, disco, porta ou cota, o manager para os processos que a entrega subiu, segura os despachos, mantém o heartbeat e registra a pausa em `note`; espera com um comando em segundo plano que confere o recurso a cada poucos segundos e termina quando ele volta (acorda o manager na hora, sem gastar tokens na espera; o heartbeat de 15 minutos fica de reserva) e retoma sozinho, com menos tarefas em paralelo se foi o paralelismo que esgotou. O critério do `CronDelete` deixa claro que essa pausa não apaga o heartbeat. Limites em números ficam no projeto.
+- [x] **Ondas do tamanho do computador** (pedido do usuário): antes de cada onda em paralelo, o manager confere a memória e o disco livres e despacha só as cópias que cabem, com folga, pelo pico por cópia que o `CLAUDE.local.md` informa (sem o número, mede a queda de memória ao preparar a primeira cópia); o resto entra conforme as primeiras terminam. As cópias são preparadas uma de cada vez, porque o pico vem de instalar, compilar e subir o banco da cópia, não de programar. Depois de uma pausa por recurso, o fechamento propõe atualizar o pico por cópia com o que as notas da pausa mostram.
+- [x] **O que é da máquina fora do `CLAUDE.md`** (pedido do usuário): o pico por cópia depende do computador, e o `CLAUDE.md` é commitado e segue o projeto para outra máquina. O `kickoff` cria o `CLAUDE.local.md`, que o Claude Code lê junto com o `CLAUDE.md`, e o coloca no `.gitignore`; o template do `CLAUDE.md` ganha a regra de que o que vale só para este computador vai lá.
+
 ## 2.8.2 — abrir uma sessão nova do jeito certo (PR #23)
 
 Origem: pedido do usuário, depois de duas falhas ao abrir a sessão do controle-financeiro a partir de outra sessão: a aba que não achou o arquivo (argumentos do terminal partidos) e a que herdou `CLAUDE_CODE_CHILD_SESSION`, sem transcrição e fora do `ListAgents`.
@@ -64,6 +72,7 @@ Origem: a revisão da 2.8 do backlog contra as etapas 4 e 5 do controle-financei
 
 Termine a entrega em andamento antes de atualizar o plugin. Ao pular versões, leia as notas de cada uma, da mais antiga para a mais nova.
 
+- **2.8.3**: lê os ledgers da 2.8.2. Rode o `kickoff` de novo para receber o `CLAUDE.local.md` (fora do git), com a linha do pico por cópia (memória e disco), e a linha nova do `.gitignore`; sem o número, o manager mede a primeira cópia.
 - **2.8.2**: nada muda para quem atualiza.
 - **2.8.1**: lê os ledgers da 2.8. Só prompts mudam: o relatório do `reviewer` ganha a linha de achado de segurança (Exploit e Status), e um achado `needs_validation` pede na rodada de correção o teste que o decide.
 - **2.8.0**: lê os ledgers da 2.7. O `status --json` muda a lista `validar`: cada item é `{id, text, decision}` (antes, só o texto), para quem lê o JSON por fora do plugin. A linha de andamento e o `/andamento` pedem o Claude Code v2.1.287 ou mais novo e aparecem sozinhos; o resto funciona sem eles. No modo autônomo, push da branch principal, merge nela e `gh pr merge` pela ferramenta Bash passam a ser negados pelo hook, não só pelo prompt. O `frontend-design@claude-plugins-official` passa a ser dependência; se a atualização não o trouxer, instale com `claude plugin install frontend-design@claude-plugins-official` (o `kickoff` avisa).
