@@ -15,7 +15,7 @@ The plugin takes delivery feedback only as general rules that hold in any stack.
 2. **Keep what the plugin can act on**: a step of the flow that stalled, was skipped or was done twice; a check of the gate, the ledger or a hook that missed a defect or blocked a correct change; an agent instruction that was ignored or misread; where the time or the tokens went, when a flow change would cut it. A lesson about the stack or about this project stays in the project: leave it out, with one line saying so. A lesson that repeats one learned in another project (seen there, or the user says so) is marked as a candidate principle for `checklists/general.md`.
 3. **Write `.superpowers/pedido-plugin.md`** in the user's language, with these sections:
    - **Context**: the delivery slug, the plugin version, the mode (supervised or autonomous).
-   - **Metrics**: one short table from the ledger.
+   - **Metrics**: one short table from the ledger, beside the same numbers of the previous delivery (its archived `ledger-<slug>.jsonl`), per task and per cycle, so the plugin's session sees whether its latest changes moved them.
    - **Items**, numbered: the problem, its evidence and the general rule proposed.
    - **Left out**: what was left out and why, one line each.
    The file leaves the project: evidence is ledger text, paths relative to the project and measured numbers, never product content, real data or credentials.

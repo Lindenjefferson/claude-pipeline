@@ -32,10 +32,8 @@ Com você ausente, o modo autônomo do [manager](plugins/pipeline/skills/manager
 Requisitos: Claude Code com plugins (a linha de andamento e o `/andamento` pedem a v2.1.287 ou mais nova, testados na v2.1.302), Python 3 e git no `PATH` (o Python com o nome `python` ou `python3`; testado no Windows e no Linux, ainda não no macOS), no Windows o Git Bash, onde rodam os hooks do plugin e o `gate.py` roda os comandos do projeto, e os plugins [`superpowers`](https://github.com/obra/superpowers) (`superpowers@claude-plugins-official`) e `frontend-design@claude-plugins-official` (rodada e revisão de design, só em produtos com tela), declarados como dependência; o `kickoff` avisa quando falta um e diz como instalar. Opcional: [graphify](https://github.com/Graphify-Labs/graphify) (`pip install graphifyy`) para o grafo de conhecimento.
 
 ```bash
-# uma vez por máquina
-git clone https://github.com/Lindenjefferson/claude-pipeline.git
-claude plugin marketplace add ./claude-pipeline
-git config --global pipeline.home "<caminho do clone>/plugins/pipeline"   # o hook de segredos acha o scanner por aqui
+# uma vez por máquina (repositório privado: o git da máquina precisa estar autenticado no GitHub)
+claude plugin marketplace add Lindenjefferson/claude-pipeline
 
 # em cada projeto: habilitado só nele, nunca globalmente (o escopo local não vai para o git)
 claude plugin install pipeline@linden-plugins --scope local
@@ -43,7 +41,7 @@ claude plugin install pipeline@linden-plugins --scope local
 
 Numa sessão na pasta do projeto, peça o **kickoff** para preparar a estrutura e depois uma entrega ("implementar o módulo de relatórios", "corrigir o bug do login"): o **manager** conduz do tamanho ao gate. Para desabilitar: `claude plugin uninstall pipeline@linden-plugins --scope local`.
 
-O marketplace também pode vir direto do GitHub (`claude plugin marketplace add Lindenjefferson/claude-pipeline`, repositório privado); um clone local é carregado do disco, então as edições valem na próxima sessão.
+Para atualizar: `claude plugin marketplace update linden-plugins` e, em cada projeto, `claude plugin update pipeline@linden-plugins --scope local`; uma sessão aberta segue na versão que carregou até reiniciar. Para desenvolver o plugin, use um clone local (`claude plugin marketplace add ./claude-pipeline`), que é carregado do disco: as edições valem na próxima sessão.
 
 ## Componentes
 

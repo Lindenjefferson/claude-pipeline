@@ -38,12 +38,13 @@ O `kickoff` prepara o projeto uma vez. A cada pedido, o `manager` dimensiona o t
 ## Regras para mudar o plugin
 
 - **Toda ideia passa pelo mesmo filtro antes de entrar**, venha de uma entrega, de uma revisão ou de outro modelo:
-  1. o problema é conferido no código, de preferência com um teste que falha, e não só na descrição de quem o relatou;
+  1. o problema é conferido no código ou no ledger (tarefa, rodada, horas, tokens), de preferência com um teste que falha, e não só na descrição de quem o relatou. Uma ocorrência só entra quando custou uma rodada, mais de uma hora ou quebrou um script, ou quando é uma regra do próprio plugin impossível de seguir; o resto vai para "Em espera" até o segundo caso;
   2. a mudança cabe nos três princípios: regra geral que garante um bom produto em qualquer stack (o que é de stack ou de projeto volta para o projeto), no arquivo do componente e sem cópia;
-  3. tirar ou juntar regras vem antes de acrescentar; uma sugestão que só acrescenta diz por que vale o custo;
-  4. o que muda o desenho do fluxo (tirar uma etapa, mudar quem faz o quê, mexer na segurança) vai para o usuário decidir.
+  3. a ideia tenta primeiro virar checagem (teste, ledger, gate, hook); texto de prompt fica para o que um script não confere, e regra de prompt ignorada duas vezes vira checagem. O prompt não cresce numa versão: linha que entra tira outra, ou o PR diz por que cresceu;
+  4. cada regra nova diz que número do ledger deve mudar (rodadas por ciclo, achados por origem por tarefa, horas por agente); o `feedback-plugin` da entrega seguinte traz esses números, e a regra que não mudou nada em duas entregas sai;
+  5. o que muda o desenho do fluxo (tirar uma etapa, mudar quem faz o quê, mexer na segurança) vai para o usuário decidir.
 
-  Antes de fechar cada versão, uma revisão do diff inteiro e dos arquivos que ele toca tira o que ficou repetido, específico de stack, impossível de conferir ou sem uso. Uma lição que se repete em dois projetos é candidata a princípio em `checklists/general.md`.
+  Toda ideia termina no roadmap: na versão, em "Em espera" com o sinal que a traz de volta, ou em "Recusado" com o motivo em uma linha; a que veio de um projeto recebe a resposta no arquivo de feedback dele. Antes de fechar cada versão, uma revisão por outro modelo, com base nos ledgers e relatórios das entregas, e uma revisão do diff inteiro e dos arquivos que ele toca tiram o que ficou repetido, específico de stack, impossível de conferir ou sem uso. Uma lição que se repete em dois projetos é candidata a princípio em `checklists/general.md`.
 - **Fonte única por componente.** Comportamento novo vai para o arquivo do componente; README e este `CLAUDE.md` ganham no máximo uma linha com link. Ao mudar um componente, conferir que README, `CLAUDE.md`, `docs/roadmap.md` e os outros componentes que o citam continuam consistentes (mesmos termos, nenhuma cópia). Única cópia permitida: os três princípios acima, idênticos palavra por palavra na seção "Propósito e princípios" do README; as duas cópias mudam juntas, no mesmo commit.
 - **Enxugar ao tocar.** Ao editar um arquivo, remover o que ficou obsoleto, duplicado ou sem uso, e listar o que saiu no PR.
 - **Teste primeiro** para `ledger.py`, `gate.py`, os hooks e o mod: o teste novo falha antes da mudança. Ledgers de versões anteriores continuam legíveis, ou a quebra vai para as notas de atualização.
@@ -66,4 +67,5 @@ Cada arquivo de teste Python roda sozinho com o Python 3 (sem pytest) e imprime 
 
 - Trabalho numa branch `feat/...` ou `fix/...` a partir da `master`, entregue por PR.
 - Cada release sobe a `version` de `plugin.json` (instalações do GitHub ficam fixas nela) e move os itens entregues em `docs/roadmap.md` para a seção da versão, com o número do PR e, se algo muda para quem atualiza, uma linha em "Notas de atualização".
+- As lições de uma entrega acumulam na versão seguinte e saem num ponto de parada da entrega (nenhum agente rodando); correção de script quebrado (hook, gate, ledger) pode sair sozinha.
 - Merge e instalação do plugin atualizado só com pedido explícito do dono.
