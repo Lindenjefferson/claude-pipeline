@@ -15,13 +15,14 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 - **WSL2 para o modo multi-instância** (2.8): não resolve o gargalo medido (a suíte e2e longa, item 17 da [proposta 2.7.0](proposta-2.7.0.md)); plugins não carregam nas sessões WSL do app Desktop; custa outra instalação do Claude Code (memória, plugins e configurações à parte), integração mais difícil com o navegador do Windows e hooks e `pipeline.home` reinstalados. Volta se o próprio Windows virar o gargalo; migração só entre entregas. Esforço: P no plugin.
 - Recusado: revisão externa no gate (2.6.0). O `open-code-review` exige CLI Node e chave de um provedor de LLM e envia o diff para fora; o `reviewer` já cobre isso, e o gate é sem LLM de propósito.
 
-## 2.8.6 — Linux e Windows (PR #27)
+## 2.8.6 — Linux e Windows, revisão de design contra o mock (PR #27)
 
-Origem: pedido do usuário ("preciso que ele funcione bem em Linux e Windows, vamos deixar o macOS fora por agora"), com a suíte de testes rodada num Ubuntu que só tem `python3`.
+Origem: pedido do usuário ("preciso que ele funcione bem em Linux e Windows, vamos deixar o macOS fora por agora"), com a suíte de testes rodada num Ubuntu que só tem `python3`, e a lição do ciclo R do controle-financeiro, que o usuário pediu no mesmo PR.
 
 - [x] **Python pelo nome `python` ou `python3`**: os hooks do `hooks.json` chamavam `python`, e no Linux, onde costuma haver só `python3`, o hook de retomada e o guarda do Bash não rodavam. Um lançador novo, `hooks/python.sh`, usa o primeiro dos dois que for Python 3 (um Python 2 ou o atalho da loja do Windows ficam de fora). Os hooks e os comandos das skills passam por ele; o mod `andamento.js` tenta os mesmos nomes na mesma ordem e, sem Python 3, diz isso na linha. O hook nativo de `pre-commit` já tentava os dois e fica com a cópia dele, porque pode encontrar uma raiz do plugin sem o lançador.
 - [x] **Comando de impressão digital do scanner**: a mensagem de bloqueio mostra o caminho do Python que rodou o scan, em vez de `python`.
 - [x] **graphify**: os agentes e o `kickoff` dizem a forma com `python3` onde `python` não é Python 3.
+- [x] **Revisão de design contra o mock** (lição do ciclo R do controle-financeiro: 16 telas redesenhadas passaram no `reviewer` e na suíte inteira, e uma revisão com o `frontend-design` sobre as capturas do qa achou 14 desvios importantes): numa tarefa de tela com mock, o `dev` captura a tela nos formatos do projeto, compara com o mock e diz no relatório o que ficou diferente; no ciclo, o manager compara as capturas do qa com o mock assim que o qa reporta, e os achados entram na rodada de correção única.
 - [x] **Teste do lançador no Linux**: `test_python_lookup.py` tirava o `/usr/bin` do PATH junto com o `python3`, e o `git` sumia; agora o teste mantém links para as ferramentas de que precisa.
 
 ## 2.8.5 — independente da stack do projeto (PR #26)

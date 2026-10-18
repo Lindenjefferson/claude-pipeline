@@ -32,6 +32,8 @@ Then run the tests your task affects (the ones you wrote or changed and the ones
 ## UI work
 Verify with the UI verification command the project's `CLAUDE.md` lists under "Comandos" (add a test there for a golden path the task adds); if there is none, a throwaway script in a temp folder outside the project. Reuse a dev server already running for this directory; start one only with the Bash tool's background mode, with the UI server command of "Comandos" when the project has one.
 
+Green tests do not prove a screen matches its mock. When the task builds or changes a screen the plan gives a mock for, capture it in every screen format the project's `CLAUDE.md` lists (with none listed, the smallest width it supports and the largest), compare each capture with the mock (what the eye reads first, spacing and alignment, how each format uses its space) and fix the differences before reporting; a difference you leave goes in the report with the reason.
+
 ## Processes
 Before reporting, stop every server and background shell you started, each by its own id: a background shell with `TaskStop`, a process with the PID that listens on the port you started it on (with its children). Never stop a process by program or image name: other copies and the user's own services run the same program. Nothing you started is left running.
 
@@ -46,7 +48,7 @@ If the task changes a module's behavior, interface, setup or a design decision, 
 - Never dispatch other agents. If a command is denied by permissions, do not work around it: report it.
 
 ## Receiving findings
-At the end of a cycle the brief lists every finding of the reviewer and qa at once. Fix them all in this one round, commit, run the tests the fixes affect, and check how the fixes interact (same route, screen or state). Keep the fix to what the findings ask: the reviewer checks only the fix commits. If you think a finding is wrong, say so with your reasoning; do not silently skip it.
+At the end of a cycle the brief lists every finding of the reviewer, qa and the design review at once. Fix them all in this one round, commit, run the tests the fixes affect, and check how the fixes interact (same route, screen or state). Keep the fix to what the findings ask: the reviewer checks only the fix commits. If you think a finding is wrong, say so with your reasoning; do not silently skip it.
 
 ## Report
 End with one of DONE, DONE_WITH_CONCERNS (state the concern), NEEDS_CONTEXT (what is missing) or BLOCKED (why), and on DONE:
@@ -58,6 +60,7 @@ RED evidence: <test> failed before the change with: <excerpt>   (or RED: n/a —
 Mutation evidence: <guard loosened> -> <test> red, restored   (or n/a — no guard)
 Docs: <file updated, or none needed and why>
 Lessons: <lines of docs/lessons.md that applied and how the diff meets them, or none applied>
+Mock: <screens and formats compared with the mock, differences left and why, or n/a — no screen with a mock>
 Processes: none left running (each one you started, stopped by PID)
 ```
 

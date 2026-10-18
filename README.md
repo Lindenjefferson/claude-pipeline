@@ -29,7 +29,7 @@ Com você ausente, o modo autônomo do [manager](plugins/pipeline/skills/manager
 
 ## Começo rápido
 
-Requisitos: Claude Code com plugins (a linha de andamento e o `/andamento` pedem a v2.1.287 ou mais nova, testados na v2.1.302), Python 3 e git no `PATH` (o Python com o nome `python` ou `python3`; testado no Windows e no Linux, ainda não no macOS), no Windows o Git Bash, onde rodam os hooks do plugin e o `gate.py` roda os comandos do projeto, e os plugins [`superpowers`](https://github.com/obra/superpowers) (`superpowers@claude-plugins-official`) e `frontend-design@claude-plugins-official` (rodada de design, só em produtos com tela), declarados como dependência; o `kickoff` avisa quando falta um e diz como instalar. Opcional: [graphify](https://github.com/Graphify-Labs/graphify) (`pip install graphifyy`) para o grafo de conhecimento.
+Requisitos: Claude Code com plugins (a linha de andamento e o `/andamento` pedem a v2.1.287 ou mais nova, testados na v2.1.302), Python 3 e git no `PATH` (o Python com o nome `python` ou `python3`; testado no Windows e no Linux, ainda não no macOS), no Windows o Git Bash, onde rodam os hooks do plugin e o `gate.py` roda os comandos do projeto, e os plugins [`superpowers`](https://github.com/obra/superpowers) (`superpowers@claude-plugins-official`) e `frontend-design@claude-plugins-official` (rodada e revisão de design, só em produtos com tela), declarados como dependência; o `kickoff` avisa quando falta um e diz como instalar. Opcional: [graphify](https://github.com/Graphify-Labs/graphify) (`pip install graphifyy`) para o grafo de conhecimento.
 
 ```bash
 # uma vez por máquina
