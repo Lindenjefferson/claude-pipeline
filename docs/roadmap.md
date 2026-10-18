@@ -16,6 +16,14 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 - **WSL2 para o modo multi-instância** (2.8): não resolve o gargalo medido (a suíte e2e longa, item 17 da [proposta 2.7.0](proposta-2.7.0.md)); plugins não carregam nas sessões WSL do app Desktop; custa outra instalação do Claude Code (memória, plugins e configurações à parte), integração mais difícil com o navegador do Windows e hooks e `pipeline.home` reinstalados. Volta se o próprio Windows virar o gargalo; migração só entre entregas. Esforço: P no plugin.
 - Recusado: revisão externa no gate (2.6.0). O `open-code-review` exige CLI Node e chave de um provedor de LLM e envia o diff para fora; o `reviewer` já cobre isso, e o gate é sem LLM de propósito.
 
+## 2.8.4 — andamento legível, em português, com o que falta
+
+Origem: pedido do usuário, olhando a linha da etapa 5 do controle-financeiro (`pipeline · etapa-5-celular-pwa-producao · cycle 3 · autonomous · ▶ TR.2 34m · reviewer — · qa — · VALIDAR 2 · next: reviewer has not reviewed the latest changes`).
+
+- [x] **Linha e painel em português**, por exemplo `etapa 5 celular pwa producao · ciclo R (3 de 5) · autônomo · dev na TR.2 há 34 min · depois: revisão e qa · faltam 13 tarefas em 3 ciclos · 2 decisões esperam você`. Um veredito só aparece quando nenhum passo seguinte já fala dele, e "depois" diz a ação, não a pendência do ledger. O painel lista o que falta por ciclo e explica cada passo por extenso.
+- [x] **Passos como dado**: o `status --json` ganha `steps` (cada pendência com o tipo e o detalhe), para o mod não interpretar frases; o texto em inglês de `pending` continua para o manager.
+- [x] **O que falta do plano**: comando `ledger.py scope --cycle <nome> --tasks <ids>`, que o manager roda para cada ciclo depois da aprovação do plano e de novo quando o plano muda; o `status --json` ganha `scope` (ciclos do plano, tarefas sem DONE, ciclo atual, tarefas e ciclos que faltam).
+
 ## 2.8.3 — recursos do computador: antecipar e não parar (PR #24)
 
 Origem: feedback da etapa 5 do controle-financeiro, com a regra do usuário ("no modo autônomo, tomar a melhor decisão e seguir, desde que não seja algo danoso"). O sistema matou a preparação de uma worktree por falta de memória, e o manager apagou o heartbeat e ficou esperando o usuário.
@@ -72,6 +80,7 @@ Origem: a revisão da 2.8 do backlog contra as etapas 4 e 5 do controle-financei
 
 Termine a entrega em andamento antes de atualizar o plugin. Ao pular versões, leia as notas de cada uma, da mais antiga para a mais nova.
 
+- **2.8.4**: lê os ledgers da 2.8.3. A linha de andamento e o `/andamento` passam a ser em português. Numa entrega em andamento, peça ao manager para rodar `ledger.py scope` para cada ciclo do plano, para a linha mostrar quantas tarefas e ciclos faltam; sem isso ela mostra o resto normalmente.
 - **2.8.3**: lê os ledgers da 2.8.2. Rode o `kickoff` de novo para receber o `CLAUDE.local.md` (fora do git), com a linha do pico por cópia (memória e disco), e a linha nova do `.gitignore`; sem o número, o manager mede a primeira cópia.
 - **2.8.2**: nada muda para quem atualiza.
 - **2.8.1**: lê os ledgers da 2.8. Só prompts mudam: o relatório do `reviewer` ganha a linha de achado de segurança (Exploit e Status), e um achado `needs_validation` pede na rodada de correção o teste que o decide.
