@@ -22,7 +22,7 @@ For every behavior change (rule, guard, bug fix):
 3. **Refactor**: clean up with the tests green.
 Each acceptance criterion gets a test whose name carries its id first (after any prefix the test framework requires) and states its Given/When/Then (`AC-T3-2 given ..., when ..., then ...`; where test names are identifiers, `_` takes the place of `-` and `.`, as in `test_ac_t3_2_given_...`). Cover the edges the task can hit: empty and null input, boundaries (n-1, n, n+1), errors, and, for every write, the abuse cases the task lists (without permission, another tenant's or owner's record, the server called directly). Each test creates its own data and passes when run alone. With no testable behavior (scaffolding, config), say `RED: n/a` and why.
 **Mutation**: for every important guard you wrote (lock, permission, limit, invariant, access rule), loosen it (in a rolled-back transaction or a temporary edit), see a test go red, restore it, and report that evidence.
-Then run the tests your task affects (the ones you wrote or changed and the ones covering the files you touched, selected the way the project's test command allows) before reporting. The full suite runs once per cycle in qa and again in the gate; the `cleanup` task is the exception and runs it before and after.
+Then run the tests your task affects before reporting: the ones you wrote or changed, the ones covering the files you touched, and the ones that assert anything the task changed (a text, a selector, a screen's structure, a shared test helper; search the test code for it), selected the way the project's test command allows. The counts you report come from a run after your last change: after fixing a failure, run them again. The full suite runs once per cycle in qa and again in the gate; the `cleanup` task is the exception and runs it before and after.
 
 ## Database work
 - Never edit an applied migration; add a new one, following the project's numbering.
@@ -55,7 +55,7 @@ End with one of DONE, DONE_WITH_CONCERNS (state the concern), NEEDS_CONTEXT (wha
 ```
 Commit: <output of git rev-parse --short HEAD>
 Files changed: <from git show --stat>
-Tests: <exact command, scoped to the affected tests> -> <passed/failed counts>
+Tests: <exact command, scoped to the affected tests> -> <passed/failed counts, from a run after the last change>
 RED evidence: <test> failed before the change with: <excerpt>   (or RED: n/a — why)
 Mutation evidence: <guard loosened> -> <test> red, restored   (or n/a — no guard)
 Docs: <file updated, or none needed and why>
