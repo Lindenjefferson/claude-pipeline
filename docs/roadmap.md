@@ -17,10 +17,24 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 
 ## 2.8.7 — aprendizados do ciclo R do controle-financeiro (em andamento)
 
-Origem: lições do ciclo R da etapa 5 do controle-financeiro, que o usuário pediu para ir acumulando numa versão nova até pedir o PR.
+Origem: lições do ciclo R da etapa 5 do controle-financeiro, que o usuário pediu para ir acumulando numa versão nova até pedir o PR, e uma revisão das versões 2.8.3 a 2.8.6 pedida pelo usuário (scripts, prompts e o fluxo de entrega em cenários difíceis), com cada achado conferido antes de entrar.
 
 - [x] **Testes afetados que o manager confere**: uma tarefa de tela rodou só os testes que tocou e entregou vermelho um teste antigo de outro arquivo, que conferia a frase da tela redesenhada; outra corrigiu duas falhas e não rodou de novo. O `dev` passa a contar entre os testes afetados os que afirmam algo que a tarefa mudou (texto, seletor, estrutura, helper de teste comum), e os números do relatório vêm de uma rodada depois da última mudança. Antes de integrar, o manager confere a linha `Tests:` e devolve a tarefa ao `dev` quando falta o número ou há falha.
 - [x] **Verificação em paralelo que não cabe na memória**: duas correções em paralelo, cada uma com build, servidor, cópia do banco e suíte de ~27 min, levaram mais de 1h40 com ~1 GB livre e a máquina usando o disco no lugar da memória. A verificação também é pico no dimensionamento da onda, e a que não cabe com folga ao lado da de outra cópia roda uma por vez; a codificação continua em paralelo.
+- [x] **O `dev`, o `qa` e o `reviewer` não carregam skills**: um brief pediu ao `dev` a `frontend-design`, e ele não tem a ferramenta Skill. O manager pede a esses agentes o resultado de uma skill, nunca que a carreguem, e a revisão de design delegada vai para um agente com a ferramenta Skill.
+- [x] **Achado comum numa rodada de correção dividida**: um achado mandado a duas correções paralelas virou dois helpers, conflito e uma rodada a mais. A rodada pode ser dividida em correções paralelas sem arquivo em comum, e um achado que pede helper ou componente comum tem uma dona só.
+- [x] **Revisão das versões 2.8.3 a 2.8.6**:
+  - `gate.py`: no Windows, o "Tempo máximo" não parava o comando (o gate esperava o processo filho que segurava a saída); agora a saída vai para um arquivo, e fora do Windows os processos que o comando abriu também param. Uma linha "Tempo máximo" sem número entre crases, com o rótulo sem acento ou com um valor acima de um dia vira aviso, e o valor enorme deixa de derrubar o gate; o texto de exemplo do template não avisa;
+  - `ledger.py`: uma tarefa que voltou ao `dev` e está em andamento de novo deixa de aparecer também como próximo passo;
+  - a revisão de design conta nos achados do qa (antes ficava só numa nota, fora das métricas, do `status` e do limite de rodadas), e mock sem captura vira `note --validar`;
+  - o manager roda o gate em segundo plano (a chamada em primeiro plano tem limite de tempo menor que o do gate), e o mesmo item NOT READY duas vezes vai ao usuário;
+  - a conferência do relatório nomeia o commit da rodada de testes; uma falha que já existia na origem não prende a tarefa; uma tarefa devolvida mantém o `claim`; o relatório com ressalva também traz o bloco;
+  - conflito na integração: o `dev` refaz a tarefa sobre a cabeça atual da entrega, em vez de repetir a mesma base;
+  - o brief de tarefa paralela leva os caminhos do plano e do mock na pasta principal, que a worktree não tem; uma correção ou trabalho pequeno sem `Touches:` usa os arquivos do brief;
+  - uma tarefa cujo agente sumiu numa compactação tem regra de retomada; na pausa por recurso, o manager para os agentes que testam, e o heartbeat só confere o recurso; a entrega anterior empilhada volta ao modo supervisionado;
+  - saíram repetições: a regra dos testes afetados no manager (fica no `dev`), o PID no brief (fica no `dev` e no `qa`), a regra das três rodadas no modo autônomo, o fallback dos formatos de tela copiado em quatro lugares (vira uma regra do manager: sem formatos listados, pergunta ao usuário), a regra das capturas repetida no checkpoint, a frase sobre uma "página das telas" que não existia e a afirmação falsa de que o ledger cobra a limpeza; o `reviewer` deixa de conferir o mock, que ele não vê;
+  - decisões do usuário sobre o desenho do fluxo: o `security-review` roda só quando a entrega toca um domínio sensível (o `reviewer` já faz a passada de segurança a cada ciclo); sai o "próximo ciclo em segundo plano", que complicava a contagem do ledger e pouco ganhava em ciclos de até 6 tarefas; no modo supervisionado, o `validar` roda antes do gate, que não precisa rodar de novo só para o relatório;
+  - o `CLAUDE.local.md` conta a verificação no pico por cópia, e o `CLAUDE.md` do repositório roda os testes pelo `hooks/python.sh`.
 
 ## 2.8.6 — Linux e Windows, revisão de design contra o mock (PR #27)
 
@@ -119,6 +133,7 @@ Origem: a revisão da 2.8 do backlog contra as etapas 4 e 5 do controle-financei
 
 Termine a entrega em andamento antes de atualizar o plugin. Ao pular versões, leia as notas de cada uma, da mais antiga para a mais nova.
 
+- **2.8.7**: lê os ledgers da 2.8.6. Rode o `kickoff` de novo para a linha do pico por cópia do `CLAUDE.local.md` contar a verificação (build e suíte). Um projeto com telas e sem a linha "Formatos de tela" preenchida recebe a pergunta do manager antes do primeiro ciclo.
 - **2.8.6**: lê os ledgers da 2.8.5. No Windows, os hooks do plugin passam a pedir o Git Bash, que a 2.8.5 já pedia para o gate; sem ele, o Claude Code roda os hooks no PowerShell, onde o lançador não roda. No Linux, o link `python-is-python3` deixa de ser necessário.
 - **2.8.5**: lê os ledgers da 2.8.4. No Windows, o gate passa a rodar os "Comandos" no Git Bash em vez do cmd.exe, como o `dev` e o `qa` já rodavam: um comando escrito só para o cmd.exe (`%VAR%`, `\` nos caminhos) precisa ser reescrito. Rode o `kickoff` de novo para receber as linhas novas do template ("Tempo máximo" em "Comandos", "Formatos de tela" em "Fluxo de entrega" e a regra da documentação de API).
 - **2.8.4**: lê os ledgers da 2.8.3. A linha de andamento e o `/andamento` passam a ser em português. Numa entrega em andamento, peça ao manager para rodar `ledger.py scope` para cada ciclo do plano, para a linha mostrar quantas tarefas e ciclos faltam; sem isso ela mostra o resto normalmente.

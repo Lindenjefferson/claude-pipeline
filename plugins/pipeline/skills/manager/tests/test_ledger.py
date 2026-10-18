@@ -524,4 +524,13 @@ scope = status(SCOPE)["scope"]
 check("the current cycle is the one of the task in flight or the latest task",
       scope["current"] == "R" and scope["position"] == 2, scope)
 
+REDO = ".superpowers/redo.jsonl"
+run("start", "--slug", "redo", ledger=REDO)
+add("dev", "BLOCKED", "T1", ledger=REDO)
+run("claim", "--task", "T1", ledger=REDO)
+redo = status(REDO)
+check("a task sent back to the dev and in flight again is no step and no pending verdict",
+      redo["in_flight"] == ["T1"] and not any(step.get("task") == "T1" for step in redo["steps"])
+      and not any(item.startswith("dev T1: BLOCKED") for item in redo["pending"]), redo)
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

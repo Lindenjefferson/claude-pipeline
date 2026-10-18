@@ -4,4 +4,4 @@ O Claude Code lê este arquivo junto com o `CLAUDE.md`, e ele fica fora do git: 
 
 ## Execução em paralelo
 
-- Quanto uma cópia ocupa no pico, com a preparação e o armazenamento de dados: _(memória e disco; ou "a medir")_
+- Quanto uma cópia ocupa no pico, com a preparação, o armazenamento de dados e a verificação (build e suíte): _(memória e disco; ou "a medir")_

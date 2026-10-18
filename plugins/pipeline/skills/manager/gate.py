@@ -17,7 +17,8 @@ Typecheck, Lint, Testes and the optional Auditoria are run, a second line of the
 label, such as "Testes (e2e)", a blank command counts as not configured, and --cmd adds or overrides one, or with no
 command removes it), each in a POSIX shell, as the Bash tool runs them (Git Bash on Windows, and cmd.exe with a
 warning only when there is none; bash, else sh, elsewhere) and within the minutes of the "Tempo máximo" line of that
-section (15 by default; a value that is no number of minutes is a warning); the commands changed no tracked file;
+section (15 by default; a value that is no number of minutes up to a day is a warning; past the limit the command
+and, outside Windows, the processes it started are stopped); the commands changed no tracked file;
 and no secret or .env file is added anywhere in <base>..HEAD, the whole history that a push would send. A check that
 does not apply is SKIP with the reason; only Testes is required. When the "Comandos" section differs from the one at
 <base>, the gate prints the difference as a warning (and the report shows it) and still runs the branch's commands.
@@ -38,8 +39,10 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCANNER = os.path.join(HERE, "..", "..", "hooks", "pre-commit-secret-scan.py")
@@ -47,9 +50,9 @@ COMMANDS = {"build": "Build", "typecheck": "Typecheck", "tipos": "Typecheck", "l
             "tests": "Testes", "test": "Testes", "auditoria": "Auditoria", "audit": "Auditoria"}
 ORDER = ["Build", "Typecheck", "Lint", "Testes", "Auditoria"]
 TEST_FILES = "arquivos de teste"
-TIME_LIMIT = "tempo máximo"
 CRITERION = re.compile(r"(?<![\w-])AC-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*")
 MINUTES = 15
+DAY = 24 * 60 * 60
 REPORTS = "docs/quality-reports"
 LESSONS = "docs/lessons.md"
 SECRETS_ALLOW = ".pipeline-secrets-allow"
@@ -120,14 +123,16 @@ def comandos_change(base):
 
 
 def time_limit():
-    value = next((value for label, value in comandos() if label_key(label).startswith(TIME_LIMIT)), None)
-    if value is None:
+    line = re.search(r"(?im)^\s*[-*]\s*tempo m[áa]ximo[^:\n]*:(.*)$", comandos_section(claude_md()))
+    value = line.group(1).strip() if line else ""
+    if not value or re.fullmatch(r"_\(.*\)_", value):
         return MINUTES * 60
+    number = re.match(r"`([^`]+)`", value)
     try:
-        seconds = round(float(value.replace(",", ".")) * 60)
-    except (ValueError, OverflowError):
+        seconds = round(float(number.group(1).strip().replace(",", ".")) * 60)
+    except (AttributeError, ValueError, OverflowError):
         seconds = 0
-    if seconds >= 1:
+    if 1 <= seconds <= DAY:
         return seconds
     print(f"warning: invalid Tempo máximo '{value}' in CLAUDE.md (Comandos); using {MINUTES} minutes", flush=True)
     return MINUTES * 60
@@ -147,13 +152,22 @@ def bash():
 
 
 def run_command(command, shell, seconds):
-    try:
-        result = subprocess.run([shell, "-c", command] if shell else command, shell=not shell, capture_output=True,
-                                text=True, encoding="utf-8", errors="replace", timeout=seconds)
-        output = (result.stdout + result.stderr).strip().splitlines()
-        return result.returncode == 0, "\n".join(output[-15:])
-    except subprocess.TimeoutExpired:
-        return False, f"timed out after {seconds}s"
+    # Output goes to a file, not a pipe: on Windows a pipe held by a child would keep the gate waiting past the limit.
+    with tempfile.TemporaryFile() as out:
+        process = subprocess.Popen([shell, "-c", command] if shell else command, shell=not shell, stdout=out,
+                                   stderr=subprocess.STDOUT, start_new_session=os.name != "nt")
+        try:
+            code = process.wait(timeout=seconds)
+        except subprocess.TimeoutExpired:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True)
+            else:
+                os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+            return False, f"timed out after {seconds}s"
+        out.seek(0)
+        output = out.read().decode("utf-8", errors="replace").strip().splitlines()
+        return code == 0, "\n".join(output[-15:])
 
 
 def secret_findings(base):
