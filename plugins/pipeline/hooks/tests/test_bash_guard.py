@@ -145,11 +145,13 @@ sh("git", "checkout", "-q", "-b", "feat/x")
 for command in main_pushes:
     check(f"autonomous, on a work branch: denied {command!r}", reaches_main(command))
 for command in ("git checkout main && git merge feat/x", "git switch main && git merge feat/x && git push",
-                "git switch -q main; git push", "gh -R o/r pr merge 3", "gh api -X PUT repos/o/r/pulls/3/merge"):
+                "git switch -q main; git push", "gh -R o/r pr merge 3", "gh api -X PUT repos/o/r/pulls/3/merge",
+                "glab mr merge 3", "glab mr accept 3", "glab -R o/r mr merge 3", "glab api -X PUT projects/1/merge_requests/3/merge"):
     check(f"autonomous, on a work branch: denied {command!r}", reaches_main(command))
 for command in ("git push", "git push -u origin feat/x", "git push origin HEAD", "git merge main",
                 "git merge --no-ff task-1", "gh pr view 20", "git switch main && git switch feat/x && git push",
-                "git switch -c main2 && git push", "gh api repos/o/r/pulls/3"):
+                "git switch -c main2 && git push", "gh api repos/o/r/pulls/3", "glab mr view 3",
+                "glab api projects/1/merge_requests/3"):
     check(f"autonomous, on a work branch: passes {command!r}", run(repo, command)[1] is None, str(run(repo, command)))
 sub = os.path.join(repo, "src")
 os.makedirs(sub)

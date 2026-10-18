@@ -5,19 +5,23 @@
 
 Checks, in order: nothing is pending in the ledger (the current cycle is closed and every deferred item has a final
 decision); the tree is clean; every acceptance-criterion id of the plan recorded in the ledger (tokens like AC-T3-2)
-appears in a tracked test file (the globs on the "Arquivos de teste" line of the CLAUDE.md "Comandos" section,
-space-separated globs where * and ? stay within one folder, **/ matches zero or more folders and {a,b} is either; an
-invalid glob, or one that matches no tracked file, prints a warning; without that line, every tracked file that is
-not Markdown); no commit after the head of the ledger's latest reviewer run changes anything but the plan,
-docs/lessons.md, docs/quality-reports/ or the user's .pipeline-secrets-allow (first-parent commits only, so a merged
-front is not counted, and tasks are integrated by fast-forward or cherry-pick);
-every command of that section passes (lines like "- Testes: `<command>`"; Build, Typecheck, Lint, Testes and the
-optional Auditoria are run, a second line of the same kind runs too under its own label, such as "Testes (e2e)", a
-blank command counts as not configured, and --cmd adds or overrides one, or with no command removes it); the
-commands changed no tracked file; and no secret or .env file is added anywhere in <base>..HEAD, the whole history
-that a push would send. A check that does not apply is SKIP with the reason; only Testes is required. When the
-"Comandos" section differs from the one at <base>, the gate prints the difference as a warning (and the report
-shows it) and still runs the branch's commands. Prints READY or NOT READY and exits 0 or 1.
+appears in a tracked test file, as written or, for a test named by an identifier, in any case with _ for - and .
+(ac_t3_2, test_AC_T3_2; a longer id such as AC-T3-21, AC-T3-2.1 or ac_t3_2_1 is another id) (the globs on the
+"Arquivos de teste" line of the CLAUDE.md "Comandos" section, space-separated globs where * and ? stay within one
+folder, **/ matches zero or more folders and {a,b} is either; an invalid glob, or one that matches no tracked file,
+prints a warning; without that line, every tracked file that is not Markdown); no commit after the head of the
+ledger's latest reviewer run changes anything but the plan, docs/lessons.md, docs/quality-reports/ or the user's
+.pipeline-secrets-allow (first-parent commits only, so a merged front is not counted, and tasks are integrated by
+fast-forward or cherry-pick); every command of that section passes (lines like "- Testes: `<command>`"; Build,
+Typecheck, Lint, Testes and the optional Auditoria are run, a second line of the same kind runs too under its own
+label, such as "Testes (e2e)", a blank command counts as not configured, and --cmd adds or overrides one, or with no
+command removes it), each in a POSIX shell, as the Bash tool runs them (Git Bash on Windows, and cmd.exe with a
+warning only when there is none; bash, else sh, elsewhere) and within the minutes of the "Tempo máximo" line of that
+section (15 by default; a value that is no number of minutes is a warning); the commands changed no tracked file;
+and no secret or .env file is added anywhere in <base>..HEAD, the whole history that a push would send. A check that
+does not apply is SKIP with the reason; only Testes is required. When the "Comandos" section differs from the one at
+<base>, the gate prints the difference as a warning (and the report shows it) and still runs the branch's commands.
+Prints READY or NOT READY and exits 0 or 1.
 
 <base> is --base (an error when it is not a commit), or else the base the ledger recorded at start, or else the
 merge base with the default branch. With --report, the gate writes and stages docs/quality-reports/<date>-<slug>.md
@@ -33,6 +37,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -42,8 +47,9 @@ COMMANDS = {"build": "Build", "typecheck": "Typecheck", "tipos": "Typecheck", "l
             "tests": "Testes", "test": "Testes", "auditoria": "Auditoria", "audit": "Auditoria"}
 ORDER = ["Build", "Typecheck", "Lint", "Testes", "Auditoria"]
 TEST_FILES = "arquivos de teste"
+TIME_LIMIT = "tempo máximo"
 CRITERION = re.compile(r"(?<![\w-])AC-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*")
-TIMEOUT = 900
+MINUTES = 15
 REPORTS = "docs/quality-reports"
 LESSONS = "docs/lessons.md"
 SECRETS_ALLOW = ".pipeline-secrets-allow"
@@ -113,14 +119,41 @@ def comandos_change(base):
     return list(difflib.unified_diff(before, after, f"{base[:7]}:CLAUDE.md", "CLAUDE.md", lineterm=""))
 
 
-def run_command(command):
+def time_limit():
+    value = next((value for label, value in comandos() if label_key(label).startswith(TIME_LIMIT)), None)
+    if value is None:
+        return MINUTES * 60
     try:
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, encoding="utf-8",
-                                errors="replace", timeout=TIMEOUT)
+        seconds = round(float(value.replace(",", ".")) * 60)
+    except (ValueError, OverflowError):
+        seconds = 0
+    if seconds >= 1:
+        return seconds
+    print(f"warning: invalid Tempo máximo '{value}' in CLAUDE.md (Comandos); using {MINUTES} minutes", flush=True)
+    return MINUTES * 60
+
+
+def bash():
+    if os.name != "nt":
+        return shutil.which("bash") or "/bin/sh"
+    # Git Bash, as the Bash tool runs it; the bash.exe on PATH may be WSL's.
+    candidates = [os.environ.get("CLAUDE_CODE_GIT_BASH_PATH")]
+    code, out = git("--exec-path")
+    folder = out.strip() if code == 0 else ""
+    for _ in range(4 if folder else 0):
+        folder = os.path.dirname(folder)
+        candidates += [os.path.join(folder, "bin", "bash.exe"), os.path.join(folder, "usr", "bin", "bash.exe")]
+    return next((path for path in candidates if path and os.path.isfile(path)), None)
+
+
+def run_command(command, shell, seconds):
+    try:
+        result = subprocess.run([shell, "-c", command] if shell else command, shell=not shell, capture_output=True,
+                                text=True, encoding="utf-8", errors="replace", timeout=seconds)
         output = (result.stdout + result.stderr).strip().splitlines()
         return result.returncode == 0, "\n".join(output[-15:])
     except subprocess.TimeoutExpired:
-        return False, f"timed out after {TIMEOUT}s"
+        return False, f"timed out after {seconds}s"
 
 
 def secret_findings(base):
@@ -171,6 +204,8 @@ def traceability(plan):
     if not os.path.exists(plan):
         return False, f"plan not found: {plan}"
     ids = sorted(set(CRITERION.findall(open(plan, encoding="utf-8").read())))
+    patterns = {item: re.compile(r"(?<![A-Za-z0-9-])" + "[-_.]".join(map(re.escape, re.split(r"[-.]", item)))
+                                 + r"(?![A-Za-z0-9]|[-.][A-Za-z0-9]|_\d)", re.IGNORECASE) for item in ids}
     if not ids:
         return False, f"{plan} lists no acceptance-criterion ids (AC-...)"
     globs = next((value.split() for label, value in comandos() if label_key(label) == TEST_FILES), None)
@@ -190,11 +225,11 @@ def traceability(plan):
             names += [name for name in matched if name not in names]
     else:
         names = [name for name in names if not name.lower().endswith(".md")]
-    found = set()
+    missing = list(ids)
     for name in names:
-        if os.path.getsize(name) < 2_000_000:
-            found.update(CRITERION.findall(open(name, encoding="utf-8", errors="ignore").read()))
-    missing = [item for item in ids if item not in found]
+        if missing and os.path.getsize(name) < 2_000_000:
+            text = open(name, encoding="utf-8", errors="ignore").read()
+            missing = [item for item in missing if not patterns[item].search(text)]
     return not missing, ("criteria with no test: " + ", ".join(missing)) if missing else ""
 
 
@@ -385,12 +420,15 @@ def main():
     try:
         before = tracked_changes()
         commands = project_commands(args.cmd)
+        shell, seconds = bash(), time_limit()
+        if not shell:
+            print("warning: no Git Bash found; the commands run in cmd.exe", flush=True)
         for name in ORDER + [name for name in commands if name not in ORDER]:
             if name not in commands:
                 checks.append((name, name != "Testes", "not configured in CLAUDE.md (Comandos)"))
                 continue
             print(f"running {name}: {commands[name]}", flush=True)
-            ok, tail = run_command(commands[name])
+            ok, tail = run_command(commands[name], shell, seconds)
             checks.append((name, ok, "" if ok else tail))
         moved = sorted(line for line in tracked_changes() ^ before if not line.endswith(draft or "\0"))
         checks.append(("Unchanged", not moved, "\n".join(moved)))
