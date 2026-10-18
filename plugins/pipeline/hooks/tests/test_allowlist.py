@@ -58,6 +58,8 @@ check("two flagged lines block the commit", decision == "DENY", reason)
 check("block message shows one fingerprint per finding", len(marks) == 2, reason)
 check("block message names each file", "in fixture.py" in reason and "in config.py" in reason, reason)
 check("block message explains the allowlist and the command", ".pipeline-secrets-allow" in reason and "--fingerprint" in reason, reason)
+check("the fingerprint command names the Python that ran the scan, not a bare `python`",
+      f'| "{sys.executable.replace(chr(92), "/")}" "' in reason, reason)
 listed = sh(repo, sys.executable, HOOK, "--fingerprint", stdin=sh(repo, "git", "diff", "--cached").stdout).stdout
 check("--fingerprint on the staged diff prints the same fingerprints", sorted(fingerprints(reason)) == sorted(re.findall(r"^([0-9a-f]{64})", listed, re.M)), listed)
 fixture_mark = next(mk for mk in marks if f"in fixture.py (fingerprint {mk})" in reason)

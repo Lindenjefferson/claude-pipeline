@@ -35,8 +35,9 @@ const PANE = {
            view: {} },
 } as const
 
-// found: the status ledger.py prints (null: no delivery; a string: its stderr on failure)
-function stubs(on, found, log = { runs: 0, mtime: 1 }) {
+// found: the status ledger.py prints (null: no delivery; a string: its stderr on failure); pythons: the interpreter
+// names that are Python 3 on PATH (another name answers like the Windows store alias)
+function stubs(on, found, log = { runs: 0, mtime: 1 }, pythons = ['python']) {
   const clock = mock.clock(on, { now: NOW })
   on('session.start', () => ({ cwd: '/work' }))
   on('session.cwd', () => ({ value: '/work' }))
@@ -44,7 +45,10 @@ function stubs(on, found, log = { runs: 0, mtime: 1 }) {
   on('fs.stat', () => ({ value: { kind: 'file', size: 10, mtimeMs: log.mtime, isLink: false } }))
   on('process.run', ($, e) => {
     if (e.argv[0] === 'git') return { value: { exitCode: 0, stdout: 'worktree /work\nworktree /other\n', stderr: '' } }
+    if (!pythons.includes(e.argv[0])) return { value: { exitCode: 49, stdout: '', stderr: 'Python was not found' } }
+    if (e.argv[1] === '-c') return { value: { exitCode: 0, stdout: '', stderr: '' } }
     log.runs += 1
+    log.python = e.argv[0]
     if (e.argv.includes('/other/.superpowers/ledger.jsonl')) {
       return { value: { exitCode: 0, stdout: JSON.stringify(OTHER), stderr: '' } }
     }
@@ -167,6 +171,25 @@ test('a ledger.py failure shows in the band and in /andamento, not as "no delive
   await ui.unmount()
   const answer = await $.command.run({ command: 'andamento', args: '' })
   expect(answer.text).toContain('ledger.py falhou: x.jsonl:3')
+})
+
+test('with only python3 on PATH, as on Linux, ledger.py runs with python3', async ($, on) => {
+  const log = { runs: 0, mtime: 1 }
+  const clock = stubs(on, STATUS, log, ['python3'])
+  await start($, clock)
+  expect(log.python).toBe('python3')
+  const ui = await $.ui.mount(BAND)
+  expect(await ui.find({ type: 'Text', text: /^etapa 5 · ciclo 2 de 3/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('with no Python 3 on PATH, the band says so instead of passing for "no delivery"', async ($, on) => {
+  const clock = stubs(on, STATUS, { runs: 0, mtime: 1 }, [])
+  await start($, clock)
+  const ui = await $.ui.mount(BAND)
+  expect(await ui.find({ type: 'Text', text: /^pipeline · ledger\.py falhou: no Python 3 on PATH \(tried python, python3\)/ }))
+    .toBeDefined()
+  await ui.unmount()
 })
 
 test('the poll runs ledger.py again only when the ledger file changes, or after a minute', async ($, on) => {

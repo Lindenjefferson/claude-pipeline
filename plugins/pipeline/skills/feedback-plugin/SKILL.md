@@ -8,7 +8,7 @@ description: Use at the end of a delivery, or when the user asks for feedback on
 The plugin takes delivery feedback only as general rules that hold in any stack. This skill turns one delivery into that request, so it is not rebuilt by hand from scattered notes.
 
 1. **Read**, without changing anything:
-   - `python "${CLAUDE_PLUGIN_ROOT}/skills/manager/ledger.py" status --json`: metrics (findings per cycle and origin, fix rounds, time and tokens per agent and task), notes, waivers, deferred items with their decisions, lessons.
+   - `sh "${CLAUDE_PLUGIN_ROOT}/hooks/python.sh" "${CLAUDE_PLUGIN_ROOT}/skills/manager/ledger.py" status --json`: metrics (findings per cycle and origin, fix rounds, time and tokens per agent and task), notes, waivers, deferred items with their decisions, lessons.
    - The delivery's quality report in `docs/quality-reports/`, and the lines its branch added to `docs/lessons.md` (`git diff <base>..HEAD -- docs/lessons.md`, with the base from `status`).
    - A file of frictions noted during the delivery, if the project keeps one (for example `.superpowers/plugin-feedback.md`).
    - The plugin version, from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`.

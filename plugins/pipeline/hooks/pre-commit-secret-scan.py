@@ -45,9 +45,10 @@ because the installed pre-commit shim runs only this script. It has no allowlist
 
 False positive: the user (never an agent: kickoff denies agents edits to the file) adds the line
 `<fingerprint>  # reason` to .pipeline-secrets-allow at the repo root and stages it; the block message gives
-the fingerprint, and --fingerprint lists them (git diff --cached --text | python <this file> --fingerprint; for a
-whole file, --fingerprint --path <path> < <path>). A fingerprint is the sha256 of the file path and the line
-with whitespace collapsed: it frees only that exact line in that file, and editing either needs a new entry.
+the fingerprint, and --fingerprint lists them (git diff --cached --text | <python 3> <this file> --fingerprint,
+the command the message gives; for a whole file, --fingerprint --path <path> < <path>). A fingerprint is the
+sha256 of the file path and the line with whitespace collapsed: it frees only that exact line in that file, and
+editing either needs a new entry.
 An .env-style file that holds no secret (defaults a framework expects in the repo) is freed the same way, by the
 fingerprint of its path alone that the block message gives; its lines are still scanned.
 The list is read from the index, so only staged entries count; there is no in-code suppression, and a real
@@ -321,8 +322,8 @@ ALLOW_HINT = ("\n\nFor a false positive, leave that line out and commit the rest
               "or stage that file yourself. The fingerprint covers the file path and the line, "
               "so any edit to either changes it (an .env-style file with no secret is freed by the fingerprint "
               "of its path, which the message gives). To list the fingerprints of flagged lines: git "
-              "diff --cached --text | python \"" + os.path.abspath(__file__).replace("\\", "/")
-              + "\" --fingerprint")
+              "diff --cached --text | \"" + sys.executable.replace("\\", "/") + "\" \""
+              + os.path.abspath(__file__).replace("\\", "/") + "\" --fingerprint")
 
 
 def print_fingerprints():

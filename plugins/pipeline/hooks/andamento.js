@@ -5,9 +5,10 @@
 // what is left per cycle, the current cycle's runs, the next steps, the earlier cycles and the other fronts (each
 // worktree with a ledger of its own), and answers in text where nothing draws. Every rule stays in ledger.py (its
 // steps and scope): this file only lays them out. It checks the ledger file every 5 s and runs ledger.py again only
-// when the file changed, or once a minute (every 5 minutes while there is no ledger file); a ledger.py failure (a
-// broken ledger, no python) shows in the band and the pane instead of passing for "no delivery". Other mods' band
-// content is kept below the line.
+// when the file changed, or once a minute (every 5 minutes while there is no ledger file). It runs ledger.py with the
+// first of python and python3 that is Python 3, as hooks/python.sh does. A ledger.py failure (a broken ledger, no
+// Python 3) shows in the band and the pane instead of passing for "no delivery". Other mods' band content is kept
+// below the line.
 
 const PANE = 'andamento'
 const POLL_MS = 5000
@@ -21,6 +22,7 @@ let watched = null
 let mtime = null
 let lastRead = -Infinity
 let fronts = []
+let python = null
 
 function clock(minutes) {
   return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}`
@@ -158,9 +160,23 @@ export function paneLines(r, fronts, now, failure = null) {
   return lines
 }
 
+// Kept once found; null while neither name is Python 3.
+async function interpreter($) {
+  for (const name of ['python', 'python3']) {
+    try {
+      const probe = await $.process.run([name, '-c', 'import sys; sys.exit(sys.version_info[0] < 3)'],
+                                        { timeoutMs: 15000 })
+      if (probe.exitCode === 0) return (python = name)
+    } catch {}
+  }
+  return null
+}
+
 // { report } for a delivery, {} for none, { error } when ledger.py could not answer (a broken ledger, no python).
 async function status($, ledger) {
-  const argv = ['python', `${$.plugin.root}/skills/manager/ledger.py`, ...(ledger ? ['--ledger', ledger] : []),
+  const name = python || await interpreter($)
+  if (!name) return { error: 'no Python 3 on PATH (tried python, python3)' }
+  const argv = [name, `${$.plugin.root}/skills/manager/ledger.py`, ...(ledger ? ['--ledger', ledger] : []),
                 'status', '--json']
   let out
   try {
