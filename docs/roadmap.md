@@ -15,6 +15,13 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 - **WSL2 para o modo multi-instância** (2.8): não resolve o gargalo medido (a suíte e2e longa, item 17 da [proposta 2.7.0](proposta-2.7.0.md)); plugins não carregam nas sessões WSL do app Desktop; custa outra instalação do Claude Code (memória, plugins e configurações à parte), integração mais difícil com o navegador do Windows e hooks e `pipeline.home` reinstalados. Volta se o próprio Windows virar o gargalo; migração só entre entregas. Esforço: P no plugin.
 - Recusado: revisão externa no gate (2.6.0). O `open-code-review` exige CLI Node e chave de um provedor de LLM e envia o diff para fora; o `reviewer` já cobre isso, e o gate é sem LLM de propósito.
 
+## 2.8.7 — aprendizados do ciclo R do controle-financeiro (em andamento)
+
+Origem: lições do ciclo R da etapa 5 do controle-financeiro, que o usuário pediu para ir acumulando numa versão nova até pedir o PR.
+
+- [x] **Testes afetados que o manager confere**: uma tarefa de tela rodou só os testes que tocou e entregou vermelho um teste antigo de outro arquivo, que conferia a frase da tela redesenhada; outra corrigiu duas falhas e não rodou de novo. O `dev` passa a contar entre os testes afetados os que afirmam algo que a tarefa mudou (texto, seletor, estrutura, helper de teste comum), e os números do relatório vêm de uma rodada depois da última mudança. Antes de integrar, o manager confere a linha `Tests:` e devolve a tarefa ao `dev` quando falta o número ou há falha.
+- [x] **Verificação em paralelo que não cabe na memória**: duas correções em paralelo, cada uma com build, servidor, cópia do banco e suíte de ~27 min, levaram mais de 1h40 com ~1 GB livre e a máquina usando o disco no lugar da memória. A verificação também é pico no dimensionamento da onda, e a que não cabe com folga ao lado da de outra cópia roda uma por vez; a codificação continua em paralelo.
+
 ## 2.8.6 — Linux e Windows, revisão de design contra o mock (PR #27)
 
 Origem: pedido do usuário ("preciso que ele funcione bem em Linux e Windows, vamos deixar o macOS fora por agora"), com a suíte de testes rodada num Ubuntu que só tem `python3`, e a lição do ciclo R do controle-financeiro, que o usuário pediu no mesmo PR.
