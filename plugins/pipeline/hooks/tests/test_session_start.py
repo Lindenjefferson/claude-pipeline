@@ -41,10 +41,43 @@ r = subprocess.run([sys.executable, SCRIPT], cwd=tempfile.gettempdir(), input="n
                    text=True)
 check("garbage on stdin never blocks the session", r.returncode == 0 and r.stdout == "", r.stdout + r.stderr)
 
+r = run(project, payload={"hook_event_name": "SessionStart", "source": "startup", "cwd": project})
+check("a new session does not print the ledger status", r.returncode == 0 and r.stdout == "", r.stdout + r.stderr)
+r = run(project, payload={"hook_event_name": "SessionStart", "source": "compact", "cwd": project})
+check("after a compaction it prints the ledger status", status in r.stdout, r.stdout + r.stderr)
+
+# The native pre-commit hook finds the scanner through pipeline.home: each session points it at the running plugin.
+ROOT = os.path.abspath(os.path.join(HOOKS, "..")).replace("\\", "/")
+SCANNER = os.path.join(HOOKS, "pre-commit-secret-scan.py")
+
+
+def home(repo):
+    return subprocess.run(["git", "config", "--local", "--get", "pipeline.home"], cwd=repo, capture_output=True,
+                          text=True).stdout.strip()
+
+
+subprocess.run([sys.executable, SCANNER, "--install-pre-commit"], cwd=project, check=True, capture_output=True)
+subprocess.run(["git", "config", "--local", "pipeline.home", "/no/such/older/version"], cwd=project, check=True)
+r = run(project, payload={"hook_event_name": "SessionStart", "source": "startup", "cwd": project})
+check("with the secret-scan hook, a session points pipeline.home at the running plugin", home(project) == ROOT
+      and r.returncode == 0 and r.stdout == "", home(project) + r.stdout + r.stderr)
+sub = os.path.join(project, "src")
+os.makedirs(sub)
+subprocess.run(["git", "config", "--local", "pipeline.home", "/no/such/older/version"], cwd=project, check=True)
+run(sub, payload={"hook_event_name": "SessionStart", "source": "resume", "cwd": sub})
+check("from a subfolder too", home(project) == ROOT, home(project))
+plain = tempfile.mkdtemp(prefix="sessionstart_plain_")
+subprocess.run(["git", "init", "-q"], cwd=plain, check=True)
+run(plain, payload={"hook_event_name": "SessionStart", "source": "startup", "cwd": plain})
+check("without the secret-scan hook, pipeline.home is left alone", home(plain) == "", home(plain))
+outside = tempfile.mkdtemp(prefix="sessionstart_nogit_")
+r = run(outside, payload={"hook_event_name": "SessionStart", "source": "startup", "cwd": outside})
+check("outside a git repo: nothing and exit 0", r.returncode == 0 and r.stdout == "", r.stdout + r.stderr)
+
 config = json.load(open(os.path.join(HOOKS, "hooks.json"), encoding="utf-8"))
 groups = config["hooks"]["SessionStart"]
-check("hooks.json registers session-start.py for compact|resume only", len(groups) == 1
-      and groups[0]["matcher"] == "compact|resume"
+check("hooks.json registers session-start.py for every session start", len(groups) == 1
+      and set(groups[0]["matcher"].split("|")) == {"startup", "resume", "clear", "compact"}
       and "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.py" in groups[0]["hooks"][0]["command"]
       and groups[0]["hooks"][0]["type"] == "command", json.dumps(config))
 

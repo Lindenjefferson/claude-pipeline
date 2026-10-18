@@ -46,6 +46,10 @@ check("install removes a pre-push hook left by an older version",
 check("foreign pre-commit kept as pre-commit.pipeline-chained",
       "chained-ran" in open(os.path.join(hooks_dir, "pre-commit.pipeline-chained")).read())
 check("pre-commit shim carries the marker", "secretscan-managed" in open(os.path.join(hooks_dir, "pre-commit")).read())
+plugin_root = os.environ["CLAUDE_PIPELINE_HOME"].replace("\\", "/")
+local_home = sh(repo, "git", "config", "--local", "--get", "pipeline.home", check=False).stdout.strip()
+check("install points the repository's pipeline.home at this plugin, with no step by hand",
+      local_home == plugin_root and "git config --global" not in r.stdout, local_home + " | " + r.stdout)
 r = sh(repo, sys.executable, HOOK, "--install-pre-commit", check=False)
 check("reinstall is idempotent and keeps the chained hook", r.returncode == 0
       and os.path.exists(os.path.join(hooks_dir, "pre-commit.pipeline-chained")), r.stderr)

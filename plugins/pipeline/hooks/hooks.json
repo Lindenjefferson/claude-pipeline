@@ -1,5 +1,5 @@
 {
-  "description": "Gives the manager the delivery ledger back after a compaction or a resumed session; denies skipping the secret-scan pre-commit hook, reaching the main branch in autonomous mode and the project's dev server outside background mode; andamento.js draws the delivery's progress.",
+  "description": "Gives the manager the delivery ledger back after a compaction or a resumed session and keeps the secret-scan hook pointed at the running plugin; denies skipping the secret-scan pre-commit hook, reaching the main branch in autonomous mode and the project's dev server outside background mode; andamento.js draws the delivery's progress.",
   "modules": [
     "./andamento.js"
   ],
@@ -18,7 +18,7 @@
     ],
     "SessionStart": [
       {
-        "matcher": "compact|resume",
+        "matcher": "startup|resume|clear|compact",
         "hooks": [
           {
             "type": "command",
