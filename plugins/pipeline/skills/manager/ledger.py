@@ -75,6 +75,18 @@ it), each with the tasks that have no DONE run yet; the current cycle (the one h
 open cycle has closed, else the latest task); and how many tasks and cycles are left (a cycle whose tasks are done
 counts until it closes). With no scope recorded, scope is null.
 
+status also reads usage.json from the ledger's folder (the subscription windows the mod writes: five_hour and
+seven_day, each {percent, resets_at}; a window past its resets_at, a missing or broken file and unknown fields are
+ignored; a null resets_at counts as valid, and a broken file is named once in the text) and the optional thresholds
+in CLAUDE.local.md at the root of the ledger's worktree (Economia a partir de quanto uso, em %, default 60; Pausa a
+partir de quanto uso da janela de 5 horas, em %, default 85; Pausa a partir de quanto uso da semana, em %, default
+95; Sempre econômico, default não). A value counts only when it starts with a backtick and holds a number from 1 to
+100 (sim or yes for Sempre econômico); a placeholder such as _(...)_ keeps the default. status --json gives usage:
+{windows, economy, wait} or null: economy is the reason (a window at or above the economy threshold, or Sempre
+econômico) or null; wait is the window at or above its pause threshold (the one that resets later when both are) or
+null. It is advice for the manager, never pending: pending, steps and ready_for_gate do not change. Every add records
+the valid windows' percent as usage.
+
 Without --ledger, the ledger is .superpowers/ledger.jsonl at the root of the current worktree, or of the main
 worktree when the current one has none (a task worktree), except for start, which always uses the current one. A
 line that is not JSON stops every command with its line number, so a truncated write is never skipped silently."""
@@ -85,6 +97,7 @@ import os
 import re
 import subprocess
 import sys
+import unicodedata
 
 VERDICTS = {
     "discovery": {"DONE", "NEEDS_CONTEXT", "BLOCKED"},
@@ -102,6 +115,7 @@ FIX_TASK = re.compile(r"fix-\d+", re.IGNORECASE)
 FOLLOW_UP = re.compile(r"fix-\d+|cleanup", re.IGNORECASE)
 DURATION = re.compile(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?|(\d+)")
 LEDGER = os.path.join(".superpowers", "ledger.jsonl")
+EARLIEST = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
 
 
 def git_head(rev="HEAD", ledger=None, tree=None):
@@ -332,6 +346,80 @@ def origins(text, total):
     return counts
 
 
+def usage_files(ledger):
+    folder = os.path.dirname(os.path.abspath(ledger))
+    return os.path.join(folder, "usage.json"), os.path.join(os.path.dirname(folder), "CLAUDE.local.md")
+
+
+def usage_settings(path):
+    """CLAUDE.local.md thresholds: a value counts only when it starts with a backtick (a placeholder starts with _()."""
+    found = {"economy": 60, "five_hour": 85, "seven_day": 95, "always": False}
+    labels = {"economia a partir de quanto uso, em %": "economy",
+              "pausa a partir de quanto uso da janela de 5 horas, em %": "five_hour",
+              "pausa a partir de quanto uso da semana, em %": "seven_day", "sempre economico": "always"}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            rows = handle.read().splitlines()
+    except (OSError, ValueError):
+        return found
+    for row in rows:
+        plain = "".join(c for c in unicodedata.normalize("NFD", row.lower()) if not unicodedata.combining(c))
+        for label, key in labels.items():
+            head, colon, rest = plain.partition(":")
+            if colon and head.strip(" -*") == label and rest.strip().startswith("`"):
+                value = rest.strip()[1:].partition("`")[0].strip()
+                if key == "always":
+                    found[key] = value in ("sim", "yes")
+                elif re.fullmatch(r"\d+(\.\d+)?", value) and 1 <= float(value) <= 100:
+                    found[key] = float(value)
+    return found
+
+
+def usage_windows(ledger):
+    """The windows of usage.json still valid, and whether the file was unreadable. Never raises."""
+    path = usage_files(ledger)[0]
+    if not os.path.exists(path):
+        return {}, False
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        now, valid = datetime.datetime.now(datetime.timezone.utc), {}
+        for name in ("five_hour", "seven_day"):
+            item = data["windows"].get(name)
+            if (not isinstance(item, dict) or isinstance(item.get("percent"), bool)
+                    or not isinstance(item.get("percent"), (int, float))):
+                continue
+            reset = reset_at(item)
+            if reset is None or reset > now:
+                valid[name] = {"percent": item["percent"], "resets_at": item.get("resets_at")}
+        return valid, False
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return {}, True
+
+
+def reset_at(item):
+    """When the window resets, or None when unknown (null, missing or unreadable): the window then counts as valid.
+    Z and any fraction are normalized first, as fromisoformat before Python 3.11 rejects both."""
+    text = re.sub(r"\.(\d+)", lambda m: "." + m.group(1)[:6].ljust(6, "0"), str(item.get("resets_at") or ""))
+    try:
+        reset = datetime.datetime.fromisoformat(re.sub(r"[zZ]$", "+00:00", text.strip()))
+    except ValueError:
+        return None
+    return reset if reset.tzinfo else reset.replace(tzinfo=datetime.timezone.utc)
+
+
+def usage_advice(windows, settings):
+    economy = next((f"{name} at {int(item['percent'])}%" for name, item in windows.items()
+                    if item["percent"] >= settings["economy"]), None)
+    economy = economy or ("always (CLAUDE.local.md)" if settings["always"] else None)
+    over = [(name, item) for name, item in windows.items() if item["percent"] >= settings[name]]
+    name, item = max(over, key=lambda pair: reset_at(pair[1]) or EARLIEST) if over else (None, None)
+    wait = {"window": name, "percent": item["percent"], "resets_at": item["resets_at"]} if name else None
+    if not windows and not economy:
+        return None
+    return {"windows": windows, "economy": economy, "wait": wait}
+
+
 def add(args):
     entries = read(args.ledger)
     if not entries:
@@ -368,6 +456,9 @@ def add(args):
         if args.tokens == 0:
             sys.exit("--tokens 0 is no measurement: leave it out when the run went unmeasured")
         entry["tokens"] = args.tokens
+    windows = usage_windows(args.ledger)[0]
+    if windows:
+        entry["usage"] = {name: item["percent"] for name, item in windows.items()}
     write(args.ledger, entry)
     label = f"{args.agent}{' ' + args.task if args.task else ''}: {args.verdict}"
     print(f"{label} (round {len(reviews(read(args.ledger), args.task))})" if is_review(entry)
@@ -744,6 +835,8 @@ def status(args):
         pending.insert(0, f"delivery paused since {pause_state['at']}: {pause_state['text']} "
                           "(resume when work restarts)")
         steps.insert(0, {"step": "resume", **pause_state})
+    windows, unreadable = usage_windows(args.ledger)
+    usage = usage_advice(windows, usage_settings(usage_files(args.ledger)[1]))
     plans = [entry["plan"] for entry in entries if entry["type"] == "plan"]
     full = [entry for entry in runs(entries) if entry["agent"] == "qa" and entry.get("full")]
     report = {"slug": entries[0].get("slug"), "base": entries[0].get("base"), "ledger": os.path.abspath(args.ledger),
@@ -760,7 +853,7 @@ def status(args):
               "notes": [entry["text"] if entry["type"] == "note" else f"paused: {entry['text']}" for entry in entries
                         if entry["type"] == "pause" or (entry["type"] == "note" and not entry.get("validar"))],
               "validar": validar(entries),
-              "metrics": metrics(entries), "ready_for_gate": not pending}
+              "metrics": metrics(entries), "usage": usage, "ready_for_gate": not pending}
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:
@@ -773,6 +866,20 @@ def status(args):
         for agent in ("reviewer", "qa"):
             if report[agent]:
                 print(f"- {agent}: {report[agent][0]['verdict']}")
+        if unreadable:
+            print("usage: usage.json unreadable")
+        if usage and usage["windows"]:
+            five, week = usage["windows"].get("five_hour"), usage["windows"].get("seven_day")
+            print("usage: " + ", ".join(
+                ([f"5h {int(five['percent'])}%"
+                  + (f" (resets {reset_at(five).astimezone(datetime.timezone.utc):%H:%M}Z)" if reset_at(five) else "")]
+                 if five else []) + ([f"week {int(week['percent'])}%"] if week else [])))
+        if usage and usage["economy"]:
+            print(f"usage: economy ({usage['economy']}): reviewer on sonnet, one copy at a time")
+        if usage and usage["wait"]:
+            wait = usage["wait"]
+            print(f"usage: wait ({wait['window']} at {int(wait['percent'])}%): dispatch nothing new; "
+                  f"pause at the next safe point until {wait['resets_at'] or 'the window resets'}")
         for item in pending:
             print(f"pending: {item}")
         for text in report["notes"]:
