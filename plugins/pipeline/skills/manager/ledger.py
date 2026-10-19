@@ -92,6 +92,14 @@ none), the room the next run may use. seconds_left, from now, is null when reset
 "until <resets_at> (in 2h13m)". It is advice for the manager, never pending: pending, steps and ready_for_gate do not change. Every add records
 the valid windows' percent as usage.
 
+add --agent dev also stores diff {files, added, removed}, the size of the task's own commits (git diff --numstat; a
+binary file counts as one file and no line): from the claim's origin to its worktree's tip when the worktree still
+exists, else from the head the previous run of any agent stored (the delivery base for the first) to the current head;
+on any git failure nothing is stored and the add goes on. status --json gives metrics.lines: tasks {task: added+removed
+over its dev runs}, total, follow_up (fix-N and cleanup), share (follow_up/total, 2 decimals, null at 0) and
+unmeasured (dev runs with no diff, as every run of an older ledger). It is advice, never pending: pending, steps and
+ready_for_gate do not change.
+
 capacity answers, before a dispatch that prepares or verifies, how many parallel copies fit: the free memory (Windows
 GlobalMemoryStatusEx, Linux MemAvailable; PIPELINE_CAPACITY_MEMORY_GB and PIPELINE_CAPACITY_DISK_GB override the
 measure, and an empty or invalid value counts as unknown) and the free disk of the worktree root, against the Execução
@@ -466,6 +474,32 @@ def usage_advice(windows, settings, margins=None):
     return {"windows": windows, "economy": economy, "wait": wait}
 
 
+def diff_size(old, new, cwd):
+    if not old or not new:
+        return None
+    result = subprocess.run(["git", "diff", "--numstat", old, new], capture_output=True, text=True, cwd=cwd)
+    if result.returncode != 0:
+        return None
+    size = {"files": 0, "added": 0, "removed": 0}
+    for line in result.stdout.splitlines():
+        added, removed = line.split(chr(9))[:2]
+        size["files"] += 1
+        size["added"] += int(added) if added.isdigit() else 0
+        size["removed"] += int(removed) if removed.isdigit() else 0
+    return size
+
+
+def task_diff(entries, task, head, ledger):
+    held = claims(entries).get(task)
+    if held and held.get("worktree") and os.path.isdir(held["worktree"]):
+        return diff_size(held.get("origin"), tip(held), held["worktree"])
+    previous = [entry["head"] for entry in entries if entry["type"] == "run" and entry.get("head")]
+    base = [entry.get("base") for entry in entries if entry["type"] == "start"]
+    where = os.path.dirname(os.path.abspath(ledger))
+    return diff_size(previous[-1] if previous else (base[-1] if base else None), head,
+                     where if os.path.isdir(where) else None)
+
+
 def add(args):
     entries = read(args.ledger)
     if not entries:
@@ -502,6 +536,13 @@ def add(args):
         if args.tokens == 0:
             sys.exit("--tokens 0 is no measurement: leave it out when the run went unmeasured")
         entry["tokens"] = args.tokens
+    if args.agent == "dev":
+        try:
+            size = task_diff(entries, args.task, entry["head"], args.ledger)
+        except (OSError, ValueError):
+            size = None
+        if size:
+            entry["diff"] = size
     windows = usage_windows(args.ledger)[0]
     if windows:
         entry["usage"] = {name: item["percent"] for name, item in windows.items()}
@@ -836,7 +877,23 @@ def metrics(entries):
     lessons = [{"text": entry["text"], "check": entry.get("check", "")} for entry in entries
                if entry["type"] == "lesson"]
     return {"cycles": per_cycle, "reviews": loops, "origins": found, "time": totals(measured, "seconds"),
-            "tokens": totals(measured, "tokens"), "lessons": lessons}
+            "tokens": totals(measured, "tokens"), "lines": line_totals(entries), "lessons": lessons}
+
+
+def line_totals(entries):
+    tasks, unmeasured = {}, 0
+    for entry in runs(entries):
+        if entry["agent"] != "dev":
+            continue
+        size = entry.get("diff")
+        if not size:
+            unmeasured += 1
+            continue
+        tasks[entry["task"]] = tasks.get(entry["task"], 0) + size.get("added", 0) + size.get("removed", 0)
+    total = sum(tasks.values())
+    follow_up = sum(count for task, count in tasks.items() if FOLLOW_UP.fullmatch(task))
+    return {"tasks": tasks, "total": total, "follow_up": follow_up,
+            "share": round(follow_up / total, 2) if total else None, "unmeasured": unmeasured}
 
 
 def totals(entries, key):

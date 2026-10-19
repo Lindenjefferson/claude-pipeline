@@ -32,8 +32,9 @@ exits 0 or 1.
 merge base with the default branch. With --report, the gate writes and stages docs/quality-reports/<date>-<slug>.md
 (checks, commits, ledger mode and notes, the VALIDAR list with the user's decision or pending, deferred decisions, a
 changed "Comandos" section and the delivery metrics: findings per cycle and origin, fix rounds, time per cycle, task
-and agent, tokens per agent and task, lessons added and automated) before running the commands, so the project's
-own tests check it too (the metrics also give each spec or plan review loop its rounds and findings); READY rewrites
+and agent, tokens per agent and task, lines changed per dev task with the share of fix and cleanup, lessons added
+and automated) before running the commands, so the project's own tests check it too (the metrics also give each spec
+or plan review loop its rounds and findings); READY rewrites
 its check lines, NOT READY removes it, and a draft of the same report left staged by a run that was killed is removed
 first."""
 import argparse
@@ -349,6 +350,17 @@ def token_lines(metrics):
             f"- Task tokens: {tasks or '-'}", ""]
 
 
+def lines_line(metrics):
+    lines = metrics.get("lines")
+    if not lines or not lines["tasks"]:
+        return []
+    tasks = ", ".join(f"{task} {count}" for task, count in lines["tasks"].items())
+    unmeasured = lines["unmeasured"]
+    detail = f"fix and cleanup {round((lines['share'] or 0) * 100)}%"
+    detail += f"; {unmeasured} dev run{'' if unmeasured == 1 else 's'} unmeasured" if unmeasured else ""
+    return [f"- Lines changed: {tasks} ({detail})", ""]
+
+
 def metrics_lines(metrics):
     if not metrics:
         return []
@@ -371,7 +383,7 @@ def metrics_lines(metrics):
     lines += ["", f"Lessons: {len(metrics['lessons'])} ({automated} automated)"]
     lines += [f"- {lesson['text']}" + (f" (check: {lesson['check']})" if lesson["check"] else "")
               for lesson in metrics["lessons"]]
-    return lines + [""] + time_lines(metrics) + token_lines(metrics)
+    return lines + [""] + time_lines(metrics) + token_lines(metrics) + lines_line(metrics)
 
 
 def verdict(ok, detail):
