@@ -96,7 +96,10 @@ capacity answers, before a dispatch that prepares or verifies, how many parallel
 GlobalMemoryStatusEx, Linux MemAvailable; PIPELINE_CAPACITY_MEMORY_GB and PIPELINE_CAPACITY_DISK_GB override the
 measure, and an empty or invalid value counts as unknown) and the free disk of the worktree root, against the Execução
 em paralelo lines of CLAUDE.local.md (peak of a copy, memory and disk; free-memory floor; heavy copies with the user
-on the machine, which caps copies in supervised mode only). copies is the largest n with free - n*peak >= max(peak,
+on the machine, which caps copies in supervised mode only; 0 is unknown). The template label wins; else the section's
+free text: "mais de ~N GB livres" is the floor and "<N> cópia(s) pesada(s)" the heavy limit; the disk peak stops at the
+first sentence end and "medir" is unknown. With the floor unknown, dispatch is null (exit 0) and the reason says which
+line to fill. The reason names an env override that replaced a measure. copies is the largest n with free - n*peak >= max(peak,
 floor), so one more copy and the floor stay free (null when the peak or the memory is unknown); dispatch is false below
 the floor. It needs no delivery, exits 1 when dispatch is false, and --json gives memory_free_gb, disk_free_gb, peak_gb,
 disk_peak_gb, floor_gb, heavy_limit, autonomous, dispatch, copies and reason.
@@ -967,6 +970,8 @@ def first_number(text, unit=False):
 def capacity_settings(path):
     """CLAUDE.local.md, Execução em paralelo: the memory and disk peak of a copy, the free-memory floor, the heavy limit."""
     found = {"peak": None, "disk_peak": None, "floor": None, "heavy": None}
+    section = []
+    inside = False
     labels = {"quanto uma copia ocupa no pico": "peak", "memoria livre minima para despachar": "floor",
               "com o usuario usando a maquina": "heavy"}
     try:
@@ -976,6 +981,10 @@ def capacity_settings(path):
         return found
     for row in rows:
         plain = plain_text(row).lstrip(" -*")
+        if row.startswith("#"):
+            inside = plain.lstrip("# ").startswith("execucao em paralelo")
+        elif inside:
+            section.append(plain)
         for label, key in labels.items():
             if not plain.startswith(label) or ":" not in plain:
                 continue
@@ -984,15 +993,41 @@ def capacity_settings(path):
                 continue
             if key == "peak":
                 memory, _, disk = rest.partition("disco")
+                disk = re.split(r"\.(?:\s|$)|;", disk)[0]
                 found["peak"] = first_number(memory, unit=True)
-                found["disk_peak"] = first_number(disk, unit=True) if disk else None
+                found["disk_peak"] = (None if re.match(r"[\s:`-]*(?:a\s+)?medir", disk)
+                                      else first_number(disk, unit=True)) if disk else None
             elif key == "floor":
                 found["floor"] = first_number(rest)
             else:
-                ticked = re.search(r"`\s*(\d+)\s*`", rest) or re.search(r"\d+", rest)
-                word = next((HEAVY_WORDS[w] for w in re.findall(r"[a-z]+", rest) if w in HEAVY_WORDS), None)
-                found["heavy"] = int(ticked.group(ticked.lastindex or 0)) if ticked else word
+                found["heavy"] = heavy_count(rest)
+    text = " ".join(section)
+    if found["floor"] is None:
+        more = re.search(r"mais de\s*~?\s*(" + NUMBER + r")\s*g(?:b)?\s+livres?\b", text)
+        found["floor"] = gigabytes(more.group(1)) if more else None
+    if found["heavy"] is None:
+        found["heavy"] = heavy_count(text, copies_only=True)
+    if not found["heavy"]:
+        found["heavy"] = None
     return found
+
+
+def heavy_count(text, copies_only=False):
+    """The heavy-copy count: a number in backticks, else the first number or word (one to four) before copia(s) pesada(s)
+    (copies_only) or copia(s), else the first digit or word."""
+    ticked = re.search(r"`\s*(\d+)\s*`", text)
+    if ticked and not copies_only:
+        return int(ticked.group(1))
+    words = "|".join(HEAVY_WORDS)
+    before = re.search(r"\b(\d+|" + words + r")\s+copias?" + (r"\s+pesadas?" if copies_only else ""), text)
+    if before:
+        return int(before.group(1)) if before.group(1).isdigit() else HEAVY_WORDS[before.group(1)]
+    if copies_only:
+        return None
+    digit = re.search(r"\d+", text)
+    if digit:
+        return int(digit.group(0))
+    return next((HEAVY_WORDS[w] for w in re.findall(r"[a-z]+", text) if w in HEAVY_WORDS), None)
 
 
 def measure(variable, probe):
@@ -1045,13 +1080,16 @@ def capacity(args):
     setting = capacity_settings(os.path.join(root, "CLAUDE.local.md"))
     peak, disk_peak, floor, heavy = setting["peak"], setting["disk_peak"], setting["floor"], setting["heavy"]
     free_mode = autonomous(entries)
-    dispatch = None if memory is None else memory >= (floor or 0)
+    dispatch = None if memory is None or floor is None else memory >= floor
     copies, notes = None, []
+    if memory is not None and "PIPELINE_CAPACITY_MEMORY_GB" in os.environ:
+        notes.append("memory from PIPELINE_CAPACITY_MEMORY_GB")
     if memory is not None and peak:
         copies = fit(memory, peak, max(peak, floor or 0))
         if disk_peak and disk is not None:
             copies = min(copies, fit(disk, disk_peak, disk_peak))
-            notes.append(f"disk {disk:g} GB free, peak {disk_peak:g}")
+            notes.append(f"disk {disk:g} GB free, peak {disk_peak:g}"
+                         + (", from PIPELINE_CAPACITY_DISK_GB" if "PIPELINE_CAPACITY_DISK_GB" in os.environ else ""))
         if not free_mode and heavy is not None and heavy < copies:
             copies = heavy
             notes.append(f"supervised limit {heavy}")
@@ -1059,13 +1097,15 @@ def capacity(args):
         reason = "free memory unknown: set PIPELINE_CAPACITY_MEMORY_GB"
     elif dispatch is False:
         reason = f"{memory:.1f} GB free, below the floor {floor:g}: do not dispatch"
+    elif floor is None:
+        reason = 'floor unknown: fill the "Memória livre mínima para despachar" line of CLAUDE.local.md'
     elif not peak:
         reason = "peak unknown: measure the first copy's drop in free memory"
     else:
         shown = "no parallel copy; one dispatch fits" if not copies else f"{copies} parallel cop{'y' if copies == 1 else 'ies'} fit"
-        reason = f"{memory:.1f} GB free, floor {floor or 0:g}, peak {peak:g}: {shown}"
-        if notes:
-            reason += f" ({'; '.join(notes)})"
+        reason = f"{memory:.1f} GB free, floor {floor:g}, peak {peak:g}: {shown}"
+    if notes:
+        reason += f" ({'; '.join(notes)})"
     report = {"memory_free_gb": memory, "disk_free_gb": disk, "peak_gb": peak, "disk_peak_gb": disk_peak,
               "floor_gb": floor, "heavy_limit": heavy, "autonomous": free_mode, "dispatch": dispatch,
               "copies": copies, "reason": reason}

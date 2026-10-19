@@ -24,7 +24,7 @@ Cada componente tem **uma** fonte de verdade, o próprio arquivo. Os outros docu
 | Regras exatas do ledger (ciclos, pendências, métricas) | docstring de [`ledger.py`](plugins/pipeline/skills/manager/ledger.py) |
 | Checagens do gate e relatório de qualidade | docstring de [`gate.py`](plugins/pipeline/skills/manager/gate.py) |
 | Scan de segredos, UTF-8, caracteres invisíveis, allowlist e falso positivo | docstring de [`hooks/pre-commit-secret-scan.py`](plugins/pipeline/hooks/pre-commit-secret-scan.py) |
-| Hooks de sessão e de ferramenta (retomada após compactação, `pipeline.home` na versão em uso, pular o `pre-commit`, branch principal no modo autônomo, servidor de dev solto) | docstrings de [`hooks/session-start.py`](plugins/pipeline/hooks/session-start.py) e [`hooks/bash-guard.py`](plugins/pipeline/hooks/bash-guard.py), registrados em [`hooks/hooks.json`](plugins/pipeline/hooks/hooks.json); a escolha entre `python` e `python3`, no topo de [`hooks/python.sh`](plugins/pipeline/hooks/python.sh) |
+| Hooks de sessão e de ferramenta (retomada após compactação, `pipeline.home` na versão em uso, atualização pela metade, pular o `pre-commit`, branch principal no modo autônomo, servidor de dev solto) | docstrings de [`hooks/session-start.py`](plugins/pipeline/hooks/session-start.py) e [`hooks/bash-guard.py`](plugins/pipeline/hooks/bash-guard.py), registrados em [`hooks/hooks.json`](plugins/pipeline/hooks/hooks.json); a escolha entre `python` e `python3`, no topo de [`hooks/python.sh`](plugins/pipeline/hooks/python.sh) |
 | Linha de andamento, painel `/andamento` e o uso da conta em `usage.json` (mod) | comentário do topo de [`hooks/andamento.js`](plugins/pipeline/hooks/andamento.js), listado em `modules` no `hooks.json` |
 | Testes dos scripts | `plugins/pipeline/skills/manager/tests/`, `plugins/pipeline/hooks/tests/` (o do mod é `andamento.test.ts`) |
 | Versões entregues, backlog | [`docs/roadmap.md`](docs/roadmap.md) |
@@ -67,6 +67,6 @@ Cada arquivo de teste Python roda sozinho com o Python 3 (sem pytest) e imprime 
 ## Versão e release
 
 - Trabalho numa branch `feat/...` ou `fix/...` a partir da `master`, entregue por PR.
-- Cada release sobe a `version` de `plugin.json` (instalações do GitHub ficam fixas nela) e move os itens entregues em `docs/roadmap.md` para a seção da versão, com o número do PR e, uma linha da versão em `plugins/pipeline/UPGRADING.md` ("nada muda" quando nada muda, para a skill `atualizar` saber).
+- Cada release sobe a `version` de `plugin.json` (instalações do GitHub ficam fixas nela) e move os itens entregues em `docs/roadmap.md` para a seção da versão, com o número do PR, e uma linha da versão em `plugins/pipeline/UPGRADING.md` ("nada muda" quando nada muda, para a skill `atualizar` saber).
 - As lições de uma entrega acumulam na versão seguinte e saem num ponto de parada da entrega (nenhum agente rodando); correção de script quebrado (hook, gate, ledger) pode sair sozinha.
 - Merge e instalação do plugin atualizado só com pedido explícito do dono.
