@@ -468,7 +468,9 @@ close_cycle("fix-2")
 r = gate("--base", "main")
 check("Full suite FAILs and the gate is NOT READY when no qa ran the full suite",
       r.returncode == 1 and re.search(r"Full suite:\s+FAIL", r.stdout)
-      and "no qa ran the full suite at the final head" in r.stdout, r.stdout)
+      and "no qa ran the full suite at the final head" in r.stdout
+      and "dispatch qa on the full suite (every test line of Comandos and the entire interface suite)" in r.stdout,
+      r.stdout)
 ledger_cmd("add", "--agent", "qa", "--verdict", "PASS", "--full")
 r = gate("--base", "main")
 check("Full suite PASSes after a qa --full at the head", re.search(r"Full suite:\s+PASS", r.stdout)
@@ -485,5 +487,27 @@ r = gate("--base", "main")
 check("Full suite FAILs when a code file changed after the full qa, naming it",
       r.returncode == 1 and re.search(r"Full suite:\s+FAIL", r.stdout) and "changed after the full qa at" in r.stdout
       and "late.txt" in r.stdout, r.stdout)
+
+ledger_cmd("add", "--agent", "qa", "--verdict", "PASS", "--full")
+full_head = sh("git", "rev-parse", "HEAD").strip()
+sh("git", "switch", "-q", "-c", "front")
+commit("front.txt", "f\n", "feat: front")
+sh("git", "switch", "-q", "feat/full")
+sh("git", "merge", "-q", "--no-ff", "-m", "merge front", "front")
+r = gate("--base", "main")
+check("Full suite FAILs after a --no-ff merged front changed a code file since the full qa, naming it",
+      r.returncode == 1 and re.search(r"Full suite:\s+FAIL", r.stdout) and "changed after the full qa at" in r.stdout
+      and "front.txt" in r.stdout, r.stdout)
+check("Reviewed still ignores the merged front (first-parent log)", re.search(r"Reviewed:\s+PASS", r.stdout), r.stdout)
+r = gate("--base", "main", "--cmd", f"Testes (x)={PY} -c \"print('ok')\"")
+check("Full suite is SKIP when --cmd adds a Testes (x) line",
+      re.search(r"Full suite:\s+SKIP", r.stdout) and "the gate runs the interface suite (Testes (x))" in r.stdout,
+      r.stdout)
+sh("git", "switch", "-q", "-c", "alt", full_head + "~1")
+commit("alt.txt", "x\n", "feat: sibling of the full qa head")
+r = gate("--base", "main")
+check("Full suite FAILs when the full qa head is not in this history",
+      r.returncode == 1 and re.search(r"Full suite:\s+FAIL", r.stdout)
+      and f"the full qa head {full_head[:7]} is not in this history" in r.stdout, r.stdout)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

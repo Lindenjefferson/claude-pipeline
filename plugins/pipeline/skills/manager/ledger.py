@@ -9,7 +9,7 @@
   add     --agent qa ... --full                               the qa ran the project's full test command
   claim   --task <id> [--worktree <path>] [--origin <rev>]    a dev run dispatched; refused if the task is in flight or done
   release --task <id>                                         frees a claim whose run was lost
-  pause   --text <text>                                       the delivery stops for now; the text says what comes on return
+  pause   --text <text>                                       the delivery stops; the text says what comes on return
   resume                                                      the work restarts; lists the claims still in flight
   note    --text <text> [--validar]                           a decision taken on the user's behalf
   validate --id <id> --decision <text>                        the user's decision on a VALIDAR item (V1, V2...)
@@ -27,10 +27,14 @@ A claim is written when the dev is dispatched and freed by the dev's add (or rel
 flight and the gate waits for them, so a manager resuming after a compaction sees which runs it still owes a report.
 claim refuses a task that is in flight or already DONE in the current cycle, so one task never runs twice by mistake.
 --worktree (an existing directory) and --origin (a commit, resolved to its hash there) are kept with the claim; status
-shows them and, when the delivery head is no longer the origin, says to integrate the commits made since. pause is
-refused when it is already paused or a claimed worktree has uncommitted work (commit it there as "wip: <task> ..."), and
-until resume status asks for it, so the gate waits; the claims stay held, as each task continues from its wip commit.
-add --full on a qa run marks the run of the project's full test command; status --json gives the latest as full_qa.
+shows them and, when the delivery head is no longer the origin, names the head (a fact: it moves with every
+integration). A claim's tip is its worktree's current HEAD (null with no worktree or folder): resume prints
+"- <task> in <worktree> at <tip>", the commit the dev's brief names, since a wip commit moves the work past the origin.
+pause is refused when it is already paused or a claimed worktree has uncommitted work (commit it there as
+"wip: <task> ..."), and until resume status asks for it, so the gate waits; the claims stay held, as each task
+continues from its wip commit. Every pause also shows in notes as "paused: <text>", in ledger order, after resume too.
+add --full on a qa run marks a run of the full suite (every test line of Comandos and the entire interface suite);
+status --json gives the latest as full_qa.
 
 A cycle is a few dev tasks followed by one reviewer pass over their diff and one qa pass; the two run in parallel.
 It closes when the latest reviewer PASS came after the latest dev run, qa PASSed after the cycle's latest regular
@@ -60,7 +64,7 @@ only the corrections of the open findings (its PASS goes with those findings as 
 delivery. waive --task closes the loop when the user accepts the open findings.
 
 status --json also gives the pending items as data and where the delivery is in its plan. claims: one {task, at,
-worktree, origin, head_moved} per task in flight; paused: {text, at} or null; full_qa: the latest qa run added with
+worktree, origin, tip, head_moved} per task in flight; paused: {text, at} or null; full_qa: the latest qa run added with
 --full, or null. from: the commit the current cycle's diff starts at, for the reviewer's and qa's range: the base for
 cycle 1, else the head the run that closed the previous cycle recorded (a commit made after it and before this cycle's
 first task, such as an errata, falls in the range too). steps: one {"step": resume|dev|reviewer|qa|fix|review|ask|
@@ -390,6 +394,11 @@ def place(entry, separator):
     return tree + (f"{separator if tree else ' '}from {origin}" if origin else "")
 
 
+def tip(entry):
+    tree = entry.get("worktree")
+    return git_head(tree=tree) if tree and os.path.isdir(tree) else None
+
+
 def moved(entry, head):
     return bool(entry.get("origin") and head and entry["origin"] != head)
 
@@ -468,7 +477,9 @@ def resume(args):
     write(args.ledger, {"type": "resume"})
     print("resumed")
     for task, entry in claims(entries).items():
-        print(f"- {task}{place(entry, ' ')}")
+        at = tip(entry)
+        print(f"- {task}" + (f" in {entry['worktree']}" if entry.get("worktree") else "")
+              + (f" at {at[:12]}" if at else ""))
 
 
 def note(args):
@@ -720,7 +731,7 @@ def status(args):
     pending = loops + [text for text, _ in kept]
     for task, claim in claims(entries).items():
         at, later = claim["at"], None if closed else later_cycle(entries, groups[-1], task)
-        since = f"; the delivery head moved to {head[:12]} since: integrate its commits onto it" if moved(claim, head) else ""
+        since = f"; the delivery head is now {head[:12]}" if moved(claim, head) else ""
         pending.append(f"dev {task} dispatched at {at}{place(claim, ', ')}, for plan cycle {later}: integrate and add it "
                        f"once this cycle closes, or release --task {task}{since}" if later else
                        f"dev {task} dispatched at {at}{place(claim, ', ')}, no report yet (add it when it reports, or "
@@ -730,7 +741,8 @@ def status(args):
                                            for item in items if not item["decision"]]
     pause_state = paused(entries)
     if pause_state:
-        pending.insert(0, f"delivery paused since {pause_state['at']}: {pause_state['text']} (resume when work restarts)")
+        pending.insert(0, f"delivery paused since {pause_state['at']}: {pause_state['text']} "
+                          "(resume when work restarts)")
         steps.insert(0, {"step": "resume", **pause_state})
     plans = [entry["plan"] for entry in entries if entry["type"] == "plan"]
     full = [entry for entry in runs(entries) if entry["agent"] == "qa" and entry.get("full")]
@@ -738,14 +750,15 @@ def status(args):
               "plan": plans[-1] if plans else entries[0].get("plan"),
               "cycle": len(groups), "from": cycle_from(entries, groups), "in_flight": list(held), "dispatched": held,
               "claims": [{"task": task, "at": claim["at"], "worktree": claim.get("worktree"),
-                          "origin": claim.get("origin"), "head_moved": moved(claim, head)}
+                          "origin": claim.get("origin"), "tip": tip(claim), "head_moved": moved(claim, head)}
                          for task, claim in claims(entries).items()],
               "paused": pause_state, "full_qa": full[-1] if full else None,
               "tasks": {task: entry["verdict"] for task, entry in state["tasks"].items()},
               "reviewer": state["reviewer"], "qa": state["qa"], "runs": groups[-1], "pending": pending,
               "steps": steps, "scope": progress(entries, closed, held),
               "autonomous": auto, "deferred": items,
-              "notes": [entry["text"] for entry in entries if entry["type"] == "note" and not entry.get("validar")],
+              "notes": [entry["text"] if entry["type"] == "note" else f"paused: {entry['text']}" for entry in entries
+                        if entry["type"] == "pause" or (entry["type"] == "note" and not entry.get("validar"))],
               "validar": validar(entries),
               "metrics": metrics(entries), "ready_for_gate": not pending}
     if args.json:

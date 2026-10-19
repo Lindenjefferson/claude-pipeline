@@ -13,20 +13,20 @@ prints a warning; without that line, every tracked file that is not Markdown); n
 ledger's latest reviewer run changes anything but the plan, docs/lessons.md, docs/quality-reports/ or the user's
 .pipeline-secrets-allow (first-parent commits only, so a merged front is not counted, and tasks are integrated by
 fast-forward or cherry-pick); when "Comandos" has a "Verificação de interface" line and the gate runs no
-"Testes (<name>)" or "Testes 2" line, a qa run added with --full whose head is followed by no commit but those same
-exempt files (Full suite); every command of that section passes (lines like "- Testes: `<command>`"; Build,
-Typecheck, Lint, Testes and the optional Auditoria are run, a second line of the same kind runs too under its own
-label, such as "Testes (e2e)", a blank command counts as not configured, and --cmd adds or overrides one, or with no
-command removes it), each in a POSIX shell, as the Bash tool runs them (Git Bash on Windows, and cmd.exe with a
-warning only when there is none; bash, else sh, elsewhere) and within the minutes of the "Tempo máximo" line of that
-section (15 by default; a value that is no number of minutes up to a day is a warning; past the limit the command
-and, outside Windows, the processes it started are stopped); the commands changed no tracked file;
-and no secret or .env file is added anywhere in <base>..HEAD, the whole history that a push would send. A check that
-does not apply is SKIP with the reason; only Testes is required. When the "Comandos" section differs from the one at
-<base>, the gate prints the difference as a warning (and the report shows it) and still runs the branch's commands.
-A "Comandos" line labeled Testes, Tests or Test plus other words (not "Testes afetados") is no gate command: it is a
-warning (and the report lists it) to name it "Testes (<name>)".
-Prints READY or NOT READY and exits 0 or 1.
+"Testes (<name>)" or "Testes 2" line, a qa run added with --full whose head differs from HEAD in no file but those
+same exempt files (Full suite, by tree, so a merged front counts); every command of that section passes (lines like
+"- Testes: `<command>`"; Build, Typecheck, Lint, Testes and the optional Auditoria are run, a second line of the same
+kind runs too under its own label, such as "Testes (e2e)", a blank command counts as not configured, and --cmd adds
+or overrides one, or with no command removes it), each in a POSIX shell, as the Bash tool runs them (Git Bash on
+Windows, and cmd.exe with a warning only when there is none; bash, else sh, elsewhere) and within the minutes of the
+"Tempo máximo" line of that section (15 by default; a value that is no number of minutes up to a day is a warning;
+past the limit the command and, outside Windows, the processes it started are stopped); the commands changed no
+tracked file; and no secret or .env file is added anywhere in <base>..HEAD, the whole history that a push would send.
+A check that does not apply is SKIP with the reason; only Testes is required. When the "Comandos" section differs
+from the one at <base>, the gate prints the difference as a warning (and the report shows it) and still runs the
+branch's commands. A "Comandos" line labeled Testes, Tests or Test plus other words (not "Testes afetados") is no
+gate command: it is a warning (and the report lists it) to name it "Testes (<name>)". Prints READY or NOT READY and
+exits 0 or 1.
 
 <base> is --base (an error when it is not a commit), or else the base the ledger recorded at start, or else the
 merge base with the default branch. With --report, the gate writes and stages docs/quality-reports/<date>-<slug>.md
@@ -259,15 +259,17 @@ def traceability(plan):
     return not missing, ("criteria with no test: " + ", ".join(missing)) if missing else ""
 
 
-def changed_after(ledger, head):
-    """The files changed after <head> that no review or full qa is owed for, or the reason <head> is no ancestor."""
+def changed_after(ledger, head, tree=False):
+    """The files changed after <head> that no review or full qa is owed for (by first-parent log, or by tree diff
+    when tree), or None when <head> is no ancestor."""
     if git("merge-base", "--is-ancestor", head, "HEAD")[0] != 0:
         return None, []
     plan = ledger.get("plan") or ""
     if os.path.isabs(plan):
         plan = os.path.relpath(plan, git("rev-parse", "--show-toplevel")[1].strip())
     plan = plan.replace("\\", "/").removeprefix("./")
-    out = git("log", "--first-parent", "--no-merges", "-z", "--name-only", "--format=", f"{head}..HEAD")[1]
+    out = (git("diff", "-z", "--name-only", head, "HEAD") if tree else
+           git("log", "--first-parent", "--no-merges", "-z", "--name-only", "--format=", f"{head}..HEAD"))[1]
     changed = sorted({name.strip("\n") for name in out.split("\0")} - {"", plan, LESSONS, SECRETS_ALLOW})
     return True, [name for name in changed if not name.startswith(REPORTS + "/")]
 
@@ -294,11 +296,12 @@ def full_suite(ledger, commands):
     head = full and full.get("head")
     if not head:
         return False, ("the interface suite runs in no gate line and no qa ran the full suite at the final head: "
-                       'dispatch qa on the full test command and add it with --full, or put the suite on a '
-                       '"Testes (<name>)" line')
-    found, changed = changed_after(ledger, head)
+                       'dispatch qa on the full suite (every test line of Comandos and the entire interface suite) '
+                       'and add it with --full, or put the interface suite on a "Testes (<name>)" line')
+    found, changed = changed_after(ledger, head, tree=True)
     if not found:
-        return False, f"the full qa head {head[:7]} is not in this history: run qa on the full suite at the current head"
+        return False, (f"the full qa head {head[:7]} is not in this history: "
+                       "run qa on the full suite at the current head")
     return not changed, (f"changed after the full qa at {head[:7]}: " + ", ".join(changed) if changed else "")
 
 
