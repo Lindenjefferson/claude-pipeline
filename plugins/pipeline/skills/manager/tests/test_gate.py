@@ -141,6 +141,8 @@ check("the report carries the delivery metrics from the ledger",
       "## Metrics" in text and "- Cycle 1: 0 Critical, 0 Important, 2 Minor; 1 fix round" in text
       and "- Plan review: 1 round, 0 Critical, 0 Important, 1 Minor" in text
       and "Lessons: 1 (1 automated)" in text and "- lock before checking (check: tests/race.sql)" in text, text)
+check("the report shows the lines changed per dev task, with the share of fix and cleanup",
+      re.search(r"- Lines changed: .*fix-1 \d+ \(fix and cleanup \d+%", text) is not None, text)
 check("no audit command: the audit is skipped with a note",
       "Auditoria:  SKIP" in r.stdout and "not configured" in r.stdout, r.stdout)
 check("no plan in the ledger: traceability is skipped", "Criteria:   SKIP" in r.stdout, r.stdout)
@@ -213,6 +215,36 @@ check("the report shows the tokens per agent and task, and how many runs have no
       and "- Task tokens: T1 90000" in text, text)
 
 sh("git", "commit", "-q", "--no-verify", "-m", "docs: quality report y")
+
+import importlib.util
+spec = importlib.util.spec_from_file_location("gate_module", GATE)
+gate_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gate_module)
+base_metrics = {"cycles": [], "lessons": [], "origins": {}}
+lines_text = chr(10).join(gate_module.metrics_lines({**base_metrics, "lines": {
+    "tasks": {"T1": 120, "T2": 40, "fix-1": 30, "cleanup": 12}, "total": 202, "follow_up": 42, "share": 0.21,
+    "unmeasured": 1}}))
+check("the lines line names each task, the follow-up share and the unmeasured runs",
+      "- Lines changed: T1 120, T2 40, fix-1 30, cleanup 12 (fix and cleanup 21%; 1 dev run unmeasured)" in lines_text,
+      lines_text)
+lines_text = chr(10).join(gate_module.metrics_lines({**base_metrics, "lines": {
+    "tasks": {}, "total": 0, "follow_up": 0, "share": None, "unmeasured": 2}}))
+check("no line when no dev run was measured", "Lines changed" not in lines_text, lines_text)
+lines_text = chr(10).join(gate_module.metrics_lines(base_metrics))
+check("no line for a metrics dict without lines", "Lines changed" not in lines_text, lines_text)
+lines_text = chr(10).join(gate_module.metrics_lines({**base_metrics, "lines": {
+    "tasks": {"T1": 8}, "total": 8, "follow_up": 0, "share": 0.0, "unmeasured": 0}}))
+check("a share of 0 prints as 0% and no unmeasured text",
+      "- Lines changed: T1 8 (fix and cleanup 0%)" in lines_text, lines_text)
+
+lines_text = chr(10).join(gate_module.metrics_lines({**base_metrics, "verdicts": {
+    "needs_context": 2, "simpler": 1, "blocked": 0}}))
+check("the dev questions line counts needs-context, simpler proposals and blocked",
+      "- Dev questions: 2 needs-context, 1 simpler proposals, 0 blocked" in lines_text, lines_text)
+for verdicts in ({"needs_context": 0, "simpler": 0, "blocked": 0}, None):
+    lines_text = chr(10).join(gate_module.metrics_lines({**base_metrics, **({"verdicts": verdicts} if verdicts else {})}))
+    check(f"no dev questions line with {verdicts or 'no verdicts'}", "Dev questions" not in lines_text, lines_text)
+
 os.makedirs(os.path.join(repo, "e2e", "flows"), exist_ok=True)
 commit("plan.md", "# plan\n- AC-T1-1 a\n- AC-T1-2 b\n- AC-T1.3 c\n- AC-T2-1 d\n- AC-T2-2 e\n## Errata\n", "docs: plan T2")
 commit("e2e/home.spec.txt", "test('AC-T2-1 given d')\n", "test: e2e at the folder root")

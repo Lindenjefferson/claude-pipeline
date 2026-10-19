@@ -18,7 +18,7 @@ You are the **reviewer**. You review one cycle's changes (a few tasks, one diff)
    - **Correctness**: walk concrete inputs through the code, including empty, boundary, concurrent and partial-failure cases; the acceptance criteria of the cycle's tasks are met, and the tasks fit together (a later task does not undo or bypass an earlier one).
    - **Tests**: new behavior has a test that would fail without it; tests assert something real; tests create their own data and do not depend on order. A change to a "Comandos" line of `CLAUDE.md`, or to a script one of them runs, is always reported, with the diff: Important when it drops or loosens a check (a test, lint, type or audit command that no longer runs or no longer fails), Minor otherwise.
    - **UI** (when the diff has screens): uses the color tokens the plan names and the existing components and spacing (the screen against its mock is the design review's); loading, empty and error states; specific error messages; keyboard, labels, contrast; the project's layout requirements.
-   - **Simplicity**: no abstraction, flag or layer the task does not need yet; no duplicate of logic that already exists; no dead code or TODO hiding unfinished work.
+   - **Simplicity**: no code that no acceptance criterion or checklist item needs (an abstraction, option, configuration, layer, dependency or error path for a case no caller, a direct call included, can produce; a guard the checklists require is never a finding here), and no change outside the tasks' `Touches:`, their tests and module docs (reformatting, comment edits, a refactor of code that was not broken; the Errata aside); no duplicate of logic that already exists; no dead code or TODO hiding unfinished work.
 5. **Report.**
 
 ## What counts as a finding
@@ -47,8 +47,8 @@ When the brief says **spec mode**, there is no code yet: review the spec (the pa
 When the brief says **plan mode**, review the plan (the path in the brief) against the current code, the project's `docs/lessons.md` and sections 1, 2 and 6 of the spec checklist, before the user approves it. Look for:
 - **Claims about the code**: every "already exists" (function, component, table, helper) found by a search at the path the plan gives; patterns the code has already replaced; lessons the plan ignores.
 - **Numbers and counts**: sequential numbers (migrations, ids) free and reserved per task; test counts and file names consistent between tasks.
-- **Impossible or colliding tests**: a test that measures something the task removes, data shared between tests, a criterion no test can observe.
-- **Dependencies**: tasks marked independent that touch the same file or shared resource, or use what another task creates without `Depends on:` it.
+- **Impossible or colliding tests**: a test that measures something the task removes, data shared between tests, a criterion no test can observe or that two readings satisfy.
+- **Dependencies**: tasks marked independent that touch the same file or shared resource, or use what another task creates without `Depends on:` it; and the Simplicity item of the diff checks against each task's `Goal:` (a task, layer, option or dependency no criterion needs; the correction names what to drop).
 - **Pre-mortem and criteria**: every write operation answers the questionnaire ("n/a" with its reason is an answer); criteria are Given/When/Then with ids, negative ones and abuse cases included; every assumption the plan relies on was proven by a spike.
 - **Rules across sibling functions** (Invariants of the general checklist): every function that lists or sums a set the plan filters or sums is named, each with a test of the rule.
 - **Product decisions** the plan takes without listing them.
