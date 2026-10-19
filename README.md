@@ -50,6 +50,7 @@ Para atualizar: `claude plugin marketplace update linden-plugins` e, em cada pro
 | [`kickoff`](plugins/pipeline/skills/kickoff/SKILL.md) | Prepara um projeto novo ou existente: `CLAUDE.md`, `CLAUDE.local.md`, `docs/`, `.gitignore`, hook de segredos, permissões dos agentes e grafo. |
 | [`manager`](plugins/pipeline/skills/manager/SKILL.md) | Conduz a entrega do tamanho ao merge, em ciclos, com duas aprovações suas; o que vale só numa situação (modo autônomo, pausa, telas, paralelo, várias sessões) está em [`references/`](plugins/pipeline/skills/manager/references/), lido quando ela ocorre. |
 | [`validar`](plugins/pipeline/skills/validar/SKILL.md) | Percorre com você, item a item, as decisões tomadas em seu nome (lista VALIDAR) e grava cada resposta. |
+| [`atualizar`](plugins/pipeline/skills/atualizar/SKILL.md) | Atualiza o plugin num projeto num ponto de parada da entrega e, na sessão nova, acrescenta as linhas novas dos templates e aplica as notas de cada versão pulada. |
 | [`feedback-plugin`](plugins/pipeline/skills/feedback-plugin/SKILL.md) | No fim da entrega, escreve o pedido para a sessão do plugin, com métricas e lições candidatas a regra geral. |
 | [`discovery`](plugins/pipeline/agents/discovery.md) | Extrai fatos das fontes brutas (planilhas, apps de referência, documentos) antes do design e prepara o debate da spec (o pré-respondido, opções e sugestão para o resto; stacks num projeto novo). |
 | [`dev`](plugins/pipeline/agents/dev.md) | Implementa uma tarefa com o teste primeiro e atualiza a doc do módulo. |
@@ -68,7 +69,7 @@ Para atualizar: `claude plugin marketplace update linden-plugins` e, em cada pro
 ## Atualização
 
 - Instalações a partir do GitHub ficam fixas na `version` do `plugin.json` (como atualizar: "Começo rápido").
-- Termine a entrega em andamento antes de atualizar. O que muda de uma versão para outra (formato do ledger, arquivos que saíram) está em [`docs/roadmap.md`](docs/roadmap.md#notas-de-atualização).
+- Para atualizar, peça "atualizar o plugin" na sessão do projeto: a skill [`atualizar`](plugins/pipeline/skills/atualizar/SKILL.md) espera um ponto de parada da entrega, atualiza, abre a sessão nova e aplica as [notas de atualização](plugins/pipeline/UPGRADING.md) de cada versão pulada.
 - Ative também a proteção de push contra segredos do seu provedor (no GitHub, secret scanning push protection): o hook local é contra acidentes, não contra quem o pula.
 
 ## Licença
