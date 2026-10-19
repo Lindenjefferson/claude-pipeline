@@ -34,7 +34,7 @@ State the tier in one line so the user can override it. Anything touching auth, 
 |---|---|---|
 | small | 1–3 files, obvious change, no new contract | 1 → 4 (one task, no written plan) → 6 → 7 |
 | standard | a few files, one real design choice | 1 → 3 → 4 → 5 → 6 → 7 |
-| large | new module, open questions, a spec to write | 1 → 2 → 3 → 4 → 5 → 6 → 7 |
+| large | new module, open questions, a spec to write, the first delivery of a new project | 1 → 2 → 3 → 4 → 5 → 6 → 7 |
 
 For a bug fix, the first task is a test that reproduces the bug and fails; use `superpowers:systematic-debugging` to find the cause.
 
@@ -42,7 +42,7 @@ When a task or a fix creates, redesigns or changes a screen, read `${CLAUDE_PLUG
 
 ## Steps
 1. **Branch.** From a clean tree on the default branch: `git switch -c <feat|fix>/<slug>`, then ledger `start` (and `mode autonomous` if the user turned it on). The spec, the plan and everything after them are committed on this branch, never on the default one.
-2. **Spec** (large only). Raw sources to mine (spreadsheets, reference apps, documents): dispatch `discovery` first. Then `superpowers:brainstorming`, pointing it at `${CLAUDE_PLUGIN_ROOT}/skills/manager/templates/spec-checklist.md`. If the spec touches a sensitive domain (step 0), tell brainstorming to skip its builder check, then dispatch `reviewer` in **spec mode**, which covers it, and run the review loop of step 3; product decisions go to the user. Commit the spec.
+2. **Spec** (large only). Raw sources to mine (spreadsheets, reference apps, documents) or a new project with no stack yet: dispatch `discovery` first, telling it which. Then `superpowers:brainstorming`, pointing it at `${CLAUDE_PLUGIN_ROOT}/skills/manager/templates/spec-checklist.md`: show the findings' pre-answered questions in one list for the user to confirm or reopen, then debate their open questions one at a time, each with its options and suggestion; the user decides, the stack included. If the spec touches a sensitive domain (step 0), tell brainstorming to skip its builder check, then dispatch `reviewer` in **spec mode**, which covers it, and run the review loop of step 3; product decisions go to the user. Commit the spec.
 3. **Plan** (standard and large). Read the project's `docs/lessons.md` first, then `superpowers:writing-plans`, or a subagent with the same brief (spec path, lessons, the rules of this step) to draft a long plan without spending your context; you apply the product decisions. Thin vertical slices grouped in **cycles of at most about 6 tasks**.
    - **Design round** (a screen created or redesigned): `references/screens.md`, before drafting the plan.
    - **Each task** has an id, `Goal:` (one line: the spec item it serves and what the user gets from it), `Depends on:` (task ids, or none), `Touches:` (the files and shared resources it changes: schema, a migration number, a config file, a seed), and its acceptance criteria; a task with a screen also lists the data states qa captures (spec checklist section 6).
