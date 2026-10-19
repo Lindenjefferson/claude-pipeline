@@ -427,4 +427,87 @@ r = gate()
 check("a secret added in a merge commit is found even with log.diffMerges=cc in the git config",
       re.search(r"Secrets:\s+FAIL", r.stdout) and "merged.txt" in r.stdout, r.stdout)
 
+repo = os.path.join(base_dir, "repo3")
+os.makedirs(repo)
+sh("git", "init", "-q", "-b", "main")
+sh("git", "config", "user.email", "t@t.com")
+sh("git", "config", "user.name", "t")
+write(".gitignore", ".superpowers/\n")
+sh("git", "add", ".gitignore")
+OK = f"`{PY} -c \"print('ok')\"`"
+FULL = f"# p\n\n## Comandos\n\n- Testes: {OK}\n- Testes do banco: {OK}\n- Testes afetados: {OK}\n"
+commit("CLAUDE.md", FULL, "base")
+sh("git", "switch", "-q", "-c", "feat/full")
+ledger_cmd("start", "--slug", "full", "--base", "main")
+commit("src.txt", "a\n", "feat: a")
+close_cycle()
+r = gate("--base", "main")
+check("a test line the gate does not run prints a warning that names it",
+      'warning: the Comandos line "Testes do banco" is not run by the gate: name it "Testes (<name>)" to run it'
+      in r.stdout and "running Testes do banco" not in r.stdout, r.stdout)
+check("Testes afetados is no gate command and prints no warning", "Testes afetados" not in r.stdout, r.stdout)
+check("Full suite is SKIP without a Verificação de interface line",
+      re.search(r"Full suite:\s+SKIP", r.stdout) and "no Verificação de interface line" in r.stdout, r.stdout)
+r = gate("--base", "main", "--report", "full")
+reports = os.path.join(repo, "docs", "quality-reports")
+text = open(os.path.join(reports, os.listdir(reports)[0]), encoding="utf-8").read() if os.path.isdir(reports) else ""
+check("the warning appears in the staged report",
+      r.returncode == 0 and "## Test lines not run" in text and "Testes do banco" in text, r.stdout + text)
+sh("git", "commit", "-q", "--no-verify", "-m", "docs: quality report")
+
+UI = f"- Verificação de interface: {OK}\n"
+commit("CLAUDE.md", FULL + "- Testes (e2e): " + OK + "\n" + UI, "docs: e2e line")
+close_cycle("fix-1")
+r = gate("--base", "main")
+check("Full suite is SKIP when the gate runs a Testes (e2e) line",
+      re.search(r"Full suite:\s+SKIP", r.stdout) and "the gate runs the interface suite (Testes (e2e))" in r.stdout,
+      r.stdout)
+
+commit("CLAUDE.md", FULL + UI, "docs: interface line only")
+close_cycle("fix-2")
+r = gate("--base", "main")
+check("Full suite FAILs and the gate is NOT READY when no qa ran the full suite",
+      r.returncode == 1 and re.search(r"Full suite:\s+FAIL", r.stdout)
+      and "no qa ran the full suite at the final head" in r.stdout
+      and "dispatch qa on the full suite (every test line of Comandos and the entire interface suite)" in r.stdout,
+      r.stdout)
+ledger_cmd("add", "--agent", "qa", "--verdict", "PASS", "--full")
+r = gate("--base", "main")
+check("Full suite PASSes after a qa --full at the head", re.search(r"Full suite:\s+PASS", r.stdout)
+      and r.returncode == 0, r.stdout)
+commit("docs/lessons.md", "- a lesson\n", "docs: lesson")
+r = gate("--base", "main")
+check("Full suite still PASSes when only docs/lessons.md changed after it",
+      re.search(r"Full suite:\s+PASS", r.stdout), r.stdout)
+commit("late.txt", "late\n", "feat: late")
+ledger_cmd("add", "--agent", "dev", "--task", "fix-3", "--verdict", "DONE")
+ledger_cmd("add", "--agent", "reviewer", "--verdict", "PASS")
+ledger_cmd("add", "--agent", "qa", "--verdict", "PASS")
+r = gate("--base", "main")
+check("Full suite FAILs when a code file changed after the full qa, naming it",
+      r.returncode == 1 and re.search(r"Full suite:\s+FAIL", r.stdout) and "changed after the full qa at" in r.stdout
+      and "late.txt" in r.stdout, r.stdout)
+
+ledger_cmd("add", "--agent", "qa", "--verdict", "PASS", "--full")
+full_head = sh("git", "rev-parse", "HEAD").strip()
+sh("git", "switch", "-q", "-c", "front")
+commit("front.txt", "f\n", "feat: front")
+sh("git", "switch", "-q", "feat/full")
+sh("git", "merge", "-q", "--no-ff", "-m", "merge front", "front")
+r = gate("--base", "main")
+check("Full suite FAILs after a --no-ff merged front changed a code file since the full qa, naming it",
+      r.returncode == 1 and re.search(r"Full suite:\s+FAIL", r.stdout) and "changed after the full qa at" in r.stdout
+      and "front.txt" in r.stdout, r.stdout)
+check("Reviewed still ignores the merged front (first-parent log)", re.search(r"Reviewed:\s+PASS", r.stdout), r.stdout)
+r = gate("--base", "main", "--cmd", f"Testes (x)={PY} -c \"print('ok')\"")
+check("Full suite is SKIP when --cmd adds a Testes (x) line",
+      re.search(r"Full suite:\s+SKIP", r.stdout) and "the gate runs the interface suite (Testes (x))" in r.stdout,
+      r.stdout)
+sh("git", "switch", "-q", "-c", "alt", full_head + "~1")
+commit("alt.txt", "x\n", "feat: sibling of the full qa head")
+r = gate("--base", "main")
+check("Full suite FAILs when the full qa head is not in this history",
+      r.returncode == 1 and re.search(r"Full suite:\s+FAIL", r.stdout)
+      and f"the full qa head {full_head[:7]} is not in this history" in r.stdout, r.stdout)
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

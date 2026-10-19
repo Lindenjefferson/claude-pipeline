@@ -1,27 +1,63 @@
 # Roadmap do plugin `pipeline`
 
-O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões da linha atual (hoje a 2.8) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
+O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.8.9) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
 ## Backlog
 
 - **Guarda do Bash também na ferramenta PowerShell** (2.7.2): no Windows a sessão principal tem a ferramenta PowerShell, que o `bash-guard.py` não vê (os agentes não a têm). Entra com um leitor das aspas do PowerShell, testado. Esforço: P.
 - **VALIDAR das entregas empilhadas na faixa** (revisão da 2.8): a faixa e o `/andamento` contam só o ledger atual; os itens de uma entrega anterior empilhada (`ledger-<slug>.jsonl`) não aparecem, e um arquivo desses não diz se é entrega empilhada à espera ou já encerrada. Entra se o `start --archive` passar a registrar isso. Esforço: P.
-- **Custo da entrega com o `ccusage`** (pedido do usuário, a partir de uma sessão de design do controle-financeiro): declarar a CLI `ccusage` como dependência conferida (aviso e instrução de instalação quando falta). Nada no plugin chama o `ccusage` hoje (os tokens vêm do aviso de término do agente), e uma dependência sem uso contraria o princípio "enxuto"; entra junto com o uso, por exemplo o custo da entrega no relatório do gate. Cuidado conhecido: com `--offline` ele não tem o preço de todos os modelos, então a checagem não depende do modo offline. Esforço: P.
 
 ### Em espera (voltam com um sinal)
 
-- **Teto de orçamento por entrega** (2.5.0, 2.6.0): volta se os tokens medidos desde a 2.8 mostrarem entregas estourando.
-- **Verificador que tenta refutar cada achado de segurança e registro de cobertura acumulado no gate** (2.8.1): um agente a mais por achado, e uma mudança grande no gate. Voltam se uma entrega mostrar achado falso ou caminho não examinado.
-- **WSL2 para o modo multi-instância** (2.8): não resolve o gargalo medido (a suíte e2e longa, item 17 da [proposta 2.7.0](proposta-2.7.0.md)); plugins não carregam nas sessões WSL do app Desktop; custa outra instalação do Claude Code (memória, plugins e configurações à parte), integração mais difícil com o navegador do Windows e hooks e `pipeline.home` reinstalados. Volta se o próprio Windows virar o gargalo; migração só entre entregas. Esforço: P no plugin.
-- **Nome do ciclo do plano no `status`** (lição do CF depois da 2.8.7): depois do `scope --cycle "Ciclo R"`, o `status` continua dizendo "cycle 3"; a linha de andamento já mostra o nome. Volta se o número no lugar do nome causar um erro de range ou uma rodada a mais.
-- **Revisão de design sobre as capturas do `dev`, antes de integrar** (análise de tempo do CF depois da 2.8.7, decisão do usuário): o defeito visual voltaria ao `dev` na mesma tarefa, mas custa uma revisão (~190k tokens) por tarefa com tela, e a revisão só do que a rodada mudou e a matriz de capturas da 2.8.8 atacam a mesma causa. Volta se, com elas, uma revisão de design ainda abrir uma rodada por defeito que a tarefa criou.
+- **Custo e teto de orçamento por entrega** (2.5.0, 2.6.0; o `ccusage` a pedido do usuário; também no Omnigent): os tokens já vêm do aviso de término; volta se os medidos desde a 2.8 mostrarem entregas estourando, e o `ccusage` entra junto, como o custo no relatório do gate (com `--offline` ele não tem o preço de todos os modelos).
+- **Verificador que tenta refutar cada achado de segurança, e cobertura acumulada no gate** (2.8.1): um agente a mais por achado e uma mudança grande no gate; volta se uma entrega mostrar achado falso ou caminho não examinado.
+- **Nome do ciclo do plano no `status`** (CF, depois da 2.8.7): o `status` diz "cycle 3" onde o `scope` gravou "Ciclo R" (a linha de andamento já mostra o nome); volta se o número causar um erro de range ou uma rodada a mais.
+- **Revisão de design sobre as capturas do `dev`, antes de integrar** (CF, depois da 2.8.7, decisão do usuário): custa ~190k tokens por tarefa com tela, e a 2.8.8 atacou a mesma causa; volta se uma revisão de design ainda abrir uma rodada por defeito que a própria tarefa criou.
+- **Relatório do `dev` conferido num hook `SubagentStop`** (os hooks `TeammateIdle` e `TaskCompleted` do [Agent Teams](https://code.claude.com/docs/en/agent-teams)): o "Check the report" do passo 4.1 viraria checagem; volta se um relatório incompleto for devolvido duas vezes ou integrado sem a evidência. Esforço: P.
+- **Devolver a tarefa ao mesmo `dev` com `SendMessage`** (pesquisa de ferramentas parecidas): ele retoma com o contexto, mas não depois de um `TaskStop` (a pausa da 2.8.9 redespacha um `dev` novo); volta se a segunda execução do `dev` numa tarefa custar perto da primeira.
+- **Segundo revisor de outro fornecedor, opcional por projeto** (Maestri, Conductor): fora do gate, mas ainda manda o diff a outro provedor; volta se um achado de origem `execution` que o `reviewer` deixou passar custar uma rodada.
+- **Item da spec sem tarefa barrado pelo gate** (o `/analyze` do [Spec Kit](https://github.com/github/spec-kit)): como os `AC-` nos testes, para os itens da spec nos `Goal:`; volta se um item da spec sem tarefa for achado depois do ✋ 1.
 
 ### Recusado
 
-- **Revisão externa no gate** (2.6.0): o `open-code-review` exige CLI Node e chave de um provedor de LLM e envia o diff para fora; o `reviewer` já cobre isso, e o gate é sem LLM de propósito.
-- **Saídas da lista original da 2.8**: a statusline, o `/frentes` abrindo abas, o semáforo do recurso compartilhado, a linha do tempo em gráfico, a página de telas, o `/aprovar` e o aviso de decisão pendente separado, com o motivo na [proposta](proposta-2.8.md).
-- **Trocar uma lição de "suíte inteira" por uma checagem** (lição do CF depois da 2.8.7): já está coberto pelo passo 4.5 do manager ("can this be a check?") e pela 2.8.7. O CF trouxe a confirmação: uma checagem de seletor por texto exato achou 91 seletores sem `exact` em 21 specs, a suíte inteira (875 testes) rodou uma vez, em 21,9 min, e a tarefa de tela passou a rodar só os specs afetados.
-- **qa de rodada de correção só com os testes afetados** (análise de tempo do CF depois da 2.8.7): já é a regra do `qa.md` ("the full suite is not repeated"). O CF rodou a suíte inteira porque 63 de 72 specs importam o helper que as rodadas mudaram; seguir os imports no comando de afetados é do projeto (D27 do CF).
+- **Revisão externa no gate** (2.6.0): manda o diff para fora e exige outra CLI e uma chave de LLM; o `reviewer` já cobre, e o gate é sem LLM de propósito.
+- **WSL2 para o modo multi-instância** (2.8): é escolha de ambiente, não do plugin, que roda no Linux desde a 2.8.6; não resolve o gargalo medido (a suíte longa e, no CF, a memória, que o WSL disputa).
+- **Tirar do scan de segredos os lock files de outros ecossistemas** (2.8.5): nenhum falso positivo achado, e a exclusão seria um desvio que um agente controla.
+- **Liberar `publish` local no `never_allow` do kickoff** (2.8.5): o custo é uma pergunta ao usuário, que decide.
+- **Saídas da lista original da 2.8** (statusline, `/frentes` abrindo abas, semáforo do recurso, linha do tempo em gráfico, página de telas, `/aprovar`, aviso de decisão separado): motivos na [proposta](proposta-2.8.md).
+- **Trocar uma lição de "suíte inteira" por uma checagem** (CF, depois da 2.8.7): já é o "can this be a check?" do passo 4.5 do manager.
+- **qa de rodada de correção só com os testes afetados** (CF, depois da 2.8.7): já é a regra do `qa.md`; fazer o seletor de afetados seguir os imports é do projeto.
+- **Agent Teams no lugar dos subagentes** (pesquisa de ferramentas parecidas): experimental, sem `/resume` dos colegas, e a lista de tarefas e a conversa entre eles ficariam fora do ledger.
+- **App de canvas para os agentes** (Maestri, Conductor, Orca e parecidos): é interface, não orquestração; o plugin roda sem mudança no terminal de qualquer um deles.
+- **Chat em grupo com moderador** (Maestro): a conversa não passa pelo ledger.
+- **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
+- **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
+
+## 2.8.9 — suíte inteira no fim, pausa e retomada no ledger (PR #31)
+
+Origem: a retomada da etapa 5 do controle-financeiro depois da 2.8.8. Uma análise do Fable sobre a ordem e a orquestração, conferida no código do plugin, deu seis melhorias, e o usuário mandou implementar todas na pausa da entrega (decisão do usuário).
+
+- [x] **Suíte inteira no fim da entrega** (lição do CF: a ordem combinada deixava o e2e "no gate", mas o gate só roda as linhas Build, Typecheck, Lint, Testes e Auditoria, ou "Testes (<nome>)"; no CF, o e2e (~23 min) e o pgTAP ficavam de fora, e "Testes do banco" e mais três linhas eram puladas sem aviso):
+  - o gate avisa, e o relatório lista, toda linha "Testes ..." que ele não roda;
+  - a checagem nova "Full suite": quando "Comandos" tem "Verificação de interface" e nenhuma linha "Testes (<nome>)", o gate pede um `qa` da suíte inteira (toda linha de teste de "Comandos" e a suíte de interface inteira) registrado com `add --full`, cuja árvore só difere da final nos arquivos que o "Reviewed" isenta. A checagem fica no gate, e não no `status` como a análise propunha, porque o ledger não lê o `CLAUDE.md`;
+  - o `qa.md` deixa de prometer que o gate roda a suíte;
+  - a `cleanup` deixa de rodar a suíte inteira antes e depois (`dev.md`): ela roda uma vez, no fim;
+  - o template diz que outra suíte que precisa passar antes do merge vai numa linha "Testes (<nome>)".
+- [x] **Minor nos arquivos da rodada aberta** (o M13 do CF mexia em dois arquivos que a fix-17 já mudava, e a 2.8.8 o mandava desfazer e refazer num acabamento): o brief da rodada leva os Minors dos arquivos que ela já muda; o acabamento, só o resto.
+- [x] **Saída de função compartilhada nos testes afetados** (a fix-17 mudou o `formatarComSinal`, que também serve a Lançamentos, ao gráfico e à Projeção, e cinco specs afirmavam o texto antigo fora do seletor de afetados): os testes afetados do `dev` incluem os que afirmam a saída de uma função compartilhada (formatador, rótulo), achados nos chamadores dela.
+- [x] **Checagem de como os testes rodam vem antes** (o D17 do CF, feito primeiro como fix-11, economizou de 1h30 a 2h por ciclo; o D30.1, o seletor de afetados que segue os imports, tinha ido para a limpeza): uma checagem que muda como os testes são escolhidos ou rodados é uma `fix-N` própria, integrada antes da rodada que a usaria, nunca na limpeza.
+- [x] **Pausa e retomada no ledger** (as pausas do CF viraram notas "Na volta: ..." escritas à mão; a fix-17 ficou sem commit numa worktree de origem cd24f87 com o head em d46a938, a nota dizia que o `dev` parou no item 5 e o diff tinha mais, e foi preciso um arquivo de análise para retomar):
+  - `claim` guarda `--worktree` e `--origin`, e o `status` mostra os dois, a ponta atual da worktree e o head da entrega quando ele andou desde o despacho;
+  - `pause --text` é recusado enquanto uma worktree com claim tem trabalho sem commit (o manager commita `wip: <tarefa>` antes, nunca um patch). Enquanto pausada, o `status` pede o `resume`, e o gate espera;
+  - `resume` lista os claims para despachar de novo, cada um na sua worktree a partir da ponta (o `wip:`), que o brief nomeia como origem; uma worktree com `wip:` na ponta volta ao `dev`, nunca é integrada;
+  - o texto da pausa entra nas notas do `status` e do relatório de qualidade;
+  - a linha de andamento mostra "pausada";
+  - a pausa por recurso do modo autônomo usa os mesmos comandos, no lugar das notas de pausa e de retomada, e não solta mais os claims.
+- [x] **Memória antes de todo despacho que verifica** (no CF, um `qa` do ciclo 3 rodou com 0,7 GB livres; o passo 4.1 só dimensionava as ondas, e o limite de 2,5 GB livres foi uma regra improvisada): o dimensionamento vale para onda, rodada de correção e `qa`. O template do `CLAUDE.local.md` ganha a memória livre mínima para despachar, o limite de cópias pesadas com o usuário na máquina e o pico da suíte inteira do `qa`.
+
+O prompt cresceu: o manager ganhou 240 palavras (de 4523 para 4763), o `dev` 34 e o `qa` 24. A maior parte é a pausa e a retomada, que substituem as notas escritas à mão da pausa por recurso e dão ao manager os comandos novos do ledger, e a definição da suíte inteira, que o `qa` e o gate passam a cobrar; o resto é uma frase por item acima. A suíte inteira e a pausa viraram checagens (gate e ledger), não só texto. A revisão de fechamento (Fable) achou seis Important e nove Minor, todos corrigidos antes do PR: a frente mergeada que passava no "Full suite" sem a suíte, a "suíte inteira" sem definição, a ponta `wip:` que o `resume` não mostrava e que a regra do claim sem agente mandava integrar, a pausa que sumia das notas, e o conselho da nota de atualização que quebrava o gate.
+
+Números que esta versão deve mudar (do ledger e do relatório do gate, salvo os marcados "nas notas", que vêm das notas do manager e dos relatórios dos agentes): linhas "Testes ..." puladas sem aviso pelo gate (quatro no CF) passam a zero; entregas com tela que chegam ao READY sem `qa --full` nem linha "Testes (<nome>)" passam a zero; Minors desfeitos numa rodada para voltar no acabamento (um no CF, o M13, nas notas) passam a zero; rodadas de correção abertas por um teste que afirmava a saída de uma função compartilhada (nos relatórios) caem; pausas com trabalho sem commit numa worktree (a fix-17) passam a zero, porque o `pause` as recusa; despachos com menos memória livre que o mínimo do `CLAUDE.local.md` (um `qa` com 0,7 GB no CF, nas notas da pausa) passam a zero.
 
 ## 2.8.8 — instruções em dia e rodadas mais curtas (PR #29)
 
@@ -78,83 +114,15 @@ Origem: lições do ciclo R da etapa 5 do controle-financeiro, que o usuário pe
 
 Números que esta versão deve mudar, que o `feedback-plugin` da próxima entrega traz: rodadas de correção por ciclo e achados de origem `execution` e `environment` por ciclo (testes afetados conferidos, revisão de design, helper com uma dona só); horas por ciclo (verificação que não cabe na memória, gate que para no limite); notas de correção de tempo e execuções sem medida (relatórios em arquivo, zero recusado).
 
-## 2.8.6 — Linux e Windows, revisão de design contra o mock (PR #27)
-
-Origem: pedido do usuário ("preciso que ele funcione bem em Linux e Windows, vamos deixar o macOS fora por agora"), com a suíte de testes rodada num Ubuntu que só tem `python3`, e a lição do ciclo R do controle-financeiro, que o usuário pediu no mesmo PR.
-
-- [x] **Python pelo nome `python` ou `python3`**: os hooks do `hooks.json` chamavam `python`, e no Linux, onde costuma haver só `python3`, o hook de retomada e o guarda do Bash não rodavam. Um lançador novo, `hooks/python.sh`, usa o primeiro dos dois que for Python 3 (um Python 2 ou o atalho da loja do Windows ficam de fora). Os hooks e os comandos das skills passam por ele; o mod `andamento.js` tenta os mesmos nomes na mesma ordem e, sem Python 3, diz isso na linha. O hook nativo de `pre-commit` já tentava os dois e fica com a cópia dele, porque pode encontrar uma raiz do plugin sem o lançador.
-- [x] **Comando de impressão digital do scanner**: a mensagem de bloqueio mostra o caminho do Python que rodou o scan, em vez de `python`.
-- [x] **graphify**: os agentes e o `kickoff` dizem a forma com `python3` onde `python` não é Python 3.
-- [x] **Revisão de design contra o mock** (lição do ciclo R do controle-financeiro: 16 telas redesenhadas passaram no `reviewer` e na suíte inteira, e uma revisão com o `frontend-design` sobre as capturas do qa achou 14 desvios importantes): numa tarefa de tela com mock, o `dev` captura a tela nos formatos do projeto, compara com o mock e diz no relatório o que ficou diferente; no ciclo, o manager compara as capturas do qa com o mock assim que o qa reporta, e os achados entram na rodada de correção única.
-- [x] **Teste do lançador no Linux**: `test_python_lookup.py` tirava o `/usr/bin` do PATH junto com o `python3`, e o `git` sumia; agora o teste mantém links para as ferramentas de que precisa.
-
-## 2.8.5 — independente da stack do projeto (PR #26)
-
-Origem: pedido do usuário ("garantir que o projeto pipeline não vai depender da tecnologia no qual o projeto que ele está criando roda"), com uma revisão do plugin inteiro contra produtos de outras stacks e de outros tipos (biblioteca, CLI, app de celular, jogo, firmware).
-
-- [x] **Id do critério em teste com nome de identificador**: em Rust, Go, Python, Java ou C#, o nome do teste não aceita hífen, e o gate dava NOT READY com o teste escrito. O gate passa a reconhecer o id com `_` no lugar de `-` e `.`, em maiúsculas ou minúsculas (`ac_t3_2`, `test_AC_T3_2`); um id mais longo (`AC-T3-21`, `ac_t3_2_1`) continua sendo outro id. O `dev`, o `qa`, o checklist geral e o manager dizem a forma.
-- [x] **Comandos do gate no shell da ferramenta Bash**: no Windows, o gate rodava os "Comandos" no cmd.exe, onde `./gradlew test` e `RUST_LOG=1 cargo test` falham, enquanto os agentes rodam no Git Bash. Agora roda no Git Bash (nunca no `bash.exe` do WSL), ou no bash ou sh nos outros sistemas, e o template diz que os comandos são escritos para esse shell.
-- [x] **Tempo máximo por comando do gate**: linha nova em "Comandos" (padrão de 15 minutos), para builds e suítes mais longas; um valor que não é número de minutos vira aviso e fica o padrão.
-- [x] **Template e prompts sem forma de web**:
-  - a documentação de API pública deixa de contar como comentário proibido;
-  - o pré-mortem por escrita vale para o dado que outro ator ou uma leitura posterior usa, e aceita "n/a" com o motivo;
-  - as capturas e a rodada de design usam os formatos de tela que o projeto lista (linha nova em "Fluxo de entrega"), em vez de "menor largura e desktop";
-  - um princípio geral vale quando o produto tem aquela superfície, e "teste automatizado de interface" substitui "e2e";
-  - o `qa` não depende de navegador e sabe o que fazer quando o produto não roda na máquina (firmware, loja, serviço pago);
-  - as linhas do template e as recomendações do kickoff ganham a condição ("se houver", "quando guarda dados com regras de acesso").
-- [x] **`frontend-design` só para produtos com tela**: continua declarado como dependência, mas o kickoff só para por ele quando o produto tem telas.
-- [x] **Kickoff portátil**: as correções do graphify (passo 8.5) deixam o `sed -i -E`, que no macOS cria arquivos `-E` soltos e não troca nada, e passam a ser feitas com a ferramenta Edit.
-- [x] **Merge do GitLab no modo autônomo**: o guarda do Bash também nega `glab mr merge` (e o apelido `accept`) e a API de merge request.
-- [x] **Arquivo `.env` sem segredo**: um arquivo `.env` que o framework espera no repositório (valores padrão de teste) passa quando o usuário põe no `.pipeline-secrets-allow` a impressão digital do caminho, que a mensagem de bloqueio informa; as linhas dele continuam escaneadas. A mensagem do JWT perde o nome de fornecedor.
-- Ficaram como estão, com o motivo:
-  - os lock files de outros ecossistemas continuam escaneados: a revisão não achou falso positivo neles, e excluí-los pelo `.gitattributes` abriria um desvio que um agente controla;
-  - o `never_allow` do kickoff continua barrando `publish` e `rm -rf` também em passos locais (`dotnet publish`): o custo é uma pergunta ao usuário, que decide;
-  - o guarda na ferramenta PowerShell e o `python3` dos hooks seguem no backlog.
-
-## 2.8.4 — andamento legível, em português, com o que falta (PR #25)
-
-Origem: pedido do usuário, olhando a linha da etapa 5 do controle-financeiro (`pipeline · etapa-5-celular-pwa-producao · cycle 3 · autonomous · ▶ TR.2 34m · reviewer — · qa — · VALIDAR 2 · next: reviewer has not reviewed the latest changes`).
-
-- [x] **Linha e painel em português**, por exemplo `etapa 5 celular pwa producao · ciclo R (3 de 5) · autônomo · dev na TR.2 há 34 min · depois: revisão e qa · faltam 13 tarefas em 3 ciclos · 2 decisões esperam você`. Um veredito só aparece quando nenhum passo seguinte já fala dele, e "depois" diz a ação, não a pendência do ledger. O painel lista o que falta por ciclo e explica cada passo por extenso.
-- [x] **Passos como dado**: o `status --json` ganha `steps` (cada pendência com o tipo e o detalhe), para o mod não interpretar frases; o texto em inglês de `pending` continua para o manager.
-- [x] **O que falta do plano**: comando `ledger.py scope --cycle <nome> --tasks <ids>`, que o manager roda para cada ciclo depois da aprovação do plano e de novo quando o plano muda; o `status --json` ganha `scope` (ciclos do plano, tarefas sem DONE, ciclo atual, tarefas e ciclos que faltam).
-
-## 2.8.3 — recursos do computador: antecipar e não parar (PR #24)
-
-Origem: feedback da etapa 5 do controle-financeiro, com a regra do usuário ("no modo autônomo, tomar a melhor decisão e seguir, desde que não seja algo danoso"). O sistema matou a preparação de uma worktree por falta de memória, e o manager apagou o heartbeat e ficou esperando o usuário.
-
-- [x] **Pausa por recurso**, no `manager` (modo autônomo): quando falta memória, disco, porta ou cota, o manager para os processos que a entrega subiu, segura os despachos, mantém o heartbeat e registra a pausa em `note`; espera com um comando em segundo plano que confere o recurso a cada poucos segundos e termina quando ele volta (acorda o manager na hora, sem gastar tokens na espera; o heartbeat de 15 minutos fica de reserva) e retoma sozinho, com menos tarefas em paralelo se foi o paralelismo que esgotou. O critério do `CronDelete` deixa claro que essa pausa não apaga o heartbeat. Limites em números ficam no projeto.
-- [x] **Ondas do tamanho do computador** (pedido do usuário): antes de cada onda em paralelo, o manager confere a memória e o disco livres e despacha só as cópias que cabem, com folga, pelo pico por cópia que o `CLAUDE.local.md` informa (sem o número, mede a queda de memória ao preparar a primeira cópia); o resto entra conforme as primeiras terminam. As cópias são preparadas uma de cada vez, porque o pico vem de instalar, compilar e subir o banco da cópia, não de programar. Depois de uma pausa por recurso, o fechamento propõe atualizar o pico por cópia com o que as notas da pausa mostram.
-- [x] **O que é da máquina fora do `CLAUDE.md`** (pedido do usuário): o pico por cópia depende do computador, e o `CLAUDE.md` é commitado e segue o projeto para outra máquina. O `kickoff` cria o `CLAUDE.local.md`, que o Claude Code lê junto com o `CLAUDE.md`, e o coloca no `.gitignore`; o template do `CLAUDE.md` ganha a regra de que o que vale só para este computador vai lá.
-
-## 2.8.2 — abrir uma sessão nova do jeito certo (PR #23)
-
-Origem: pedido do usuário, depois de duas falhas ao abrir a sessão do controle-financeiro a partir de outra sessão: a aba que não achou o arquivo (argumentos do terminal partidos) e a que herdou `CLAUDE_CODE_CHILD_SESSION`, sem transcrição e fora do `ListAgents`.
-
-- [x] **Sessão nova limpa**, no `manager` (frentes em várias sessões): ao abrir ele mesmo um terminal com `claude`, tirar do ambiente as variáveis `CLAUDE*` herdadas, passar a linha de comando inteira, mandar o briefing só depois que o `ListAgents` lista a sessão, e, se ela não subir, avisar o usuário e esperar ele fechar a aba antes de abrir outra.
-- [x] **Roadmap enxuto**: backlog no topo, itens condicionais juntos em "Em espera", versões anteriores à 2.8 numa linha cada.
-
-## 2.8.1 — segurança: achados com prova (PR #22)
-
-Origem: decisão do usuário de separar a segurança da 2.8; ideias da skill `cloudflare/security-audit-skill` (MIT, commit `c1c8a8c`, lida inteira sem instalar nem executar). A skill não é instalada: no Windows os validadores recusam toda entrada, sem sandbox do sistema nada chega a confirmado, o perfil padrão custa de 25 a 50 subagentes e 1,5 a 4 M tokens, e o README instala sem versão fixa (veto a extensões de terceiros). Proposta na [seção C da 2.8](proposta-2.8.md).
-
-- [x] **Achado de segurança com prova**, no `reviewer`: nomeia quem explora, a entrada, a fronteira de confiança cruzada e o resultado, rastreado da entrada ao efeito; status `confirmed`, `needs_validation` (o elo que o código não prova e o teste que decide; Important no máximo, e a rodada de correção escreve esse teste; sem teste possível no projeto, vira Minor e o manager adia ou registra como VALIDAR) ou `rejected` (vai para "Checked with no findings"). A escala critical a low da skill virou as severidades que o ledger já conta: nunca acima do impacto rastreado, Critical quando o achado derrota o controle por inteiro, Important quando só o enfraquece; boa prática sem exploração vira Minor `hardening`. Ledger e gate não mudam.
-- [x] **Caminho mais fraco**: para cada achado de segurança, o `reviewer` confere as outras entradas que chegam ao mesmo efeito.
-- [x] **Checklist**: default de coluna nova certo para as linhas antigas; export e backup no escopo de quem pede; registro excluído logicamente fora de toda leitura; remoção de membro corta todo acesso; mutação confere a origem do pedido.
-
-## 2.8 — andamento visível e travas do modo autônomo (PR #21)
-
-Origem: a revisão da 2.8 do backlog contra as etapas 4 e 5 do controle-financeiro e a documentação atual do Claude Code, e o pedido do usuário de uma tabela de progresso viva por ciclo. Os itens, o porquê e as escolhas do usuário estão na [proposta](proposta-2.8.md).
-
-- [x] **Tempo e tokens reais**: `ledger.py add --tokens`; duração e tokens vêm do aviso de término do agente, nunca de estimativa; `status --json` traz a hora de despacho, o caminho do ledger e as execuções do ciclo; o relatório do gate mostra tokens por agente e tarefa.
-- [x] **Andamento visível**: mod `andamento.js` (linha acima do prompt com entrega aberta, `/andamento` com o painel do ciclo, ciclos anteriores e outras frentes, texto onde nada desenha); só desenha o que o `ledger.py` devolve. Conferido com `claude -p /andamento` sobre a cópia de um ledger real.
-- [x] **Trava do ✋ 2**: no modo autônomo, o `bash-guard.py` nega push da branch principal, merge nela e `gh pr merge`; a branch de trabalho passa.
-- [x] **Decisões e avisos**: VALIDAR numerados com `validate` e a skill `validar`; `PushNotification` quando o manager para esperando o usuário, no READY e quando o modo autônomo para; skill `feedback-plugin` no fim da entrega.
-- [x] **Rodada de design de tela** (pedido do usuário, a partir de uma sessão de design do controle-financeiro): tela nova ou redesenhada passa por uma página de comparação (menor largura e desktop, todos os temas, dados de exemplo) com a skill `frontend-design`, aprovada junto com o plano; tokens de cor e mock viram insumo do plano, o `reviewer` confere a tela contra eles, e o checklist ganha cores por token com contraste e separação medidos e cores de significado reservadas. O plugin `frontend-design` passa a ser dependência declarada, conferida pelo `kickoff`, que diz como instalar quando falta.
-- [x] **Enxuto**: saíram a duração medida pelo manager e a "promoção de lição" do passo 7 (virou parte do `feedback-plugin`).
-
 ## Versões anteriores
 
+- **2.8.6** (PR #27): Linux e Windows, com os hooks pelo `hooks/python.sh` (`python` ou `python3`, o que for Python 3); revisão de design das capturas contra o mock.
+- **2.8.5** (PR #26): independente da stack. Id do critério com `_` no nome do teste; "Comandos" do gate no Git Bash, com "Tempo máximo"; template e prompts sem forma de web; `frontend-design` só para produto com tela; merge do GitLab negado no modo autônomo; `.env` sem segredo liberado pela allowlist.
+- **2.8.4** (PR #25): linha e painel de andamento em português; `ledger.py scope` e o `status --json` com `steps` e `scope`.
+- **2.8.3** (PR #24): pausa por recurso no modo autônomo, ondas do tamanho do computador e o `CLAUDE.local.md` para o que é da máquina.
+- **2.8.2** (PR #23): sessão nova aberta limpa (sem as variáveis `CLAUDE*`, linha de comando inteira, briefing só depois do `ListAgents`).
+- **2.8.1** (PR #22): achado de segurança com prova (`confirmed`, `needs_validation`, `rejected`), caminho mais fraco e itens novos no checklist, ideias da `cloudflare/security-audit-skill` sem instalá-la.
+- **2.8** (PR #21, [proposta](proposta-2.8.md)): tempo e tokens reais no ledger; mod `andamento.js`; trava do ✋ 2 no modo autônomo; VALIDAR com a skill `validar`; `PushNotification`; `feedback-plugin`; rodada de design de tela.
 - **2.7.2** (PR #20): pular o `pre-commit` passa a ser negado pelo `bash-guard.py`, que lê o comando como o shell (a flag citada na mensagem do commit não conta); saem os deny do kickoff com curinga antes da flag.
 - **2.7.1** (PR #19, [proposta](proposta-2.7.1.md)): lições da etapa 4 e revisão do plugin inteiro. Modo autônomo que não para sozinho (heartbeat, no máximo 3 rodadas de correção por ciclo); `waive`, `plan --path` e ledger achado de dentro de uma worktree; cinco READY falsos do gate fechados; scan de segredos guiado pelos hunks; branch e `start` antes da spec; `ask` para todo `git push`.
 - **2.7.0** (PR #14, [proposta](proposta-2.7.0.md)): lições da etapa 3. Glob de verdade em "Arquivos de teste"; worktrees preparadas pelo manager e contrato "Execução em paralelo"; plano rascunhado por subagente; modo autônomo com lista VALIDAR; capturas persistentes do `qa`; revisão de segurança nativa antes do gate e veto a extensões de terceiros.
@@ -175,6 +143,7 @@ Origem: a revisão da 2.8 do backlog contra as etapas 4 e 5 do controle-financei
 
 Termine a entrega em andamento antes de atualizar o plugin. Ao pular versões, leia as notas de cada uma, da mais antiga para a mais nova.
 
+- **2.8.9**: lê os ledgers da 2.8.8 (um `claim` sem worktree nem origem continua valendo). `ledger.py` ganha `pause --text`, `resume`, `claim --worktree --origin` e `add --agent qa --full`, e o `status --json` ganha `claims`, `paused` e `full_qa`. O gate ganha a checagem "Full suite": num projeto com "Verificação de interface" e nenhuma linha "Testes (<nome>)", a entrega precisa de um `qa` com a suíte inteira no head final, registrado com `--full`, ou de uma linha "Testes (<nome>)" com essa suíte; um projeto cuja linha "Testes" já roda a suíte de interface junto com os outros testes a divide em duas, "Testes" sem ela e "Testes (interface)" com ela, para não rodá-la duas vezes. Uma linha "Testes do <x>" passa a dar aviso: para o gate rodá-la, escreva "Testes (<x>)". O `CLAUDE.local.md` de quem já tem ganha à mão as duas linhas novas do template (memória livre mínima para despachar e cópias pesadas com o usuário na máquina), porque o kickoff não reescreve o arquivo; sem elas, o manager usa só o pico por cópia, como antes.
 - **2.8.8**: lê os ledgers da 2.8.7. `ledger.py` ganha `extend --reason`, para a decisão do usuário de seguir com as correções depois do limite de rodadas. Com o `scope` gravado, o `add` de uma tarefa de um ciclo posterior do plano é recusado até o ciclo aberto fechar. Projetos que já têm a seção "Execução em paralelo" editam à mão as duas linhas dela que mudaram (conferir a cópia e derrubar o armazenamento), porque o kickoff só acrescenta seções que faltam; sem elas, o manager prepara e remove a cópia como antes.
 - **2.8.7**: lê os ledgers da 2.8.6 (uma entrada antiga com `summary` continua lida). `add --summary` saiu; `add` ganha `--report <path>` (reviewer e qa) e `--task spec|plan` (reviewer), `waive` ganha `--task`, e o `status --json` ganha `from`, `metrics.reviews` e o passo `review`. Rode o `kickoff` de novo para a linha do pico por cópia do `CLAUDE.local.md` contar a verificação (build e suíte). Um projeto com telas e sem a linha "Formatos de tela" preenchida recebe a pergunta do manager antes do primeiro ciclo. O `git config --global pipeline.home` deixa de ser necessário: a primeira sessão depois da atualização grava o `pipeline.home` do repositório na pasta da versão em uso. O `security-review` passa a rodar só quando a entrega toca um domínio sensível; no modo supervisionado, o `validar` vem antes do gate; o gate interrompe o comando que passa do "Tempo máximo" (o valor vai entre crases); saiu o ciclo seguinte em segundo plano.
 - **2.8.6**: lê os ledgers da 2.8.5. No Windows, os hooks do plugin passam a pedir o Git Bash, que a 2.8.5 já pedia para o gate; sem ele, o Claude Code roda os hooks no PowerShell, onde o lançador não roda. No Linux, o link `python-is-python3` deixa de ser necessário.

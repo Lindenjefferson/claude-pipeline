@@ -6,8 +6,11 @@
   add     --agent reviewer|qa --verdict PASS|FAIL [--critical N --important N --minor N --origin <origin>=N,...]
           [--report <path>] [--seconds <duration>] [--tokens N]
   add     --agent reviewer --task spec|plan --verdict PASS|FAIL ...       one round of the spec or plan review loop
-  claim   --task <id>                                         a dev run dispatched; refused if the task is in flight or done
+  add     --agent qa ... --full                               the qa ran the project's full test command
+  claim   --task <id> [--worktree <path>] [--origin <rev>]    a dev run dispatched; refused if the task is in flight or done
   release --task <id>                                         frees a claim whose run was lost
+  pause   --text <text>                                       the delivery stops; the text says what comes on return
+  resume                                                      the work restarts; lists the claims still in flight
   note    --text <text> [--validar]                           a decision taken on the user's behalf
   validate --id <id> --decision <text>                        the user's decision on a VALIDAR item (V1, V2...)
   waive   --agent reviewer|qa [--task spec|plan] --reason <text>   accepts the open findings of that agent's latest FAIL
@@ -23,6 +26,15 @@
 A claim is written when the dev is dispatched and freed by the dev's add (or release); status lists the tasks in
 flight and the gate waits for them, so a manager resuming after a compaction sees which runs it still owes a report.
 claim refuses a task that is in flight or already DONE in the current cycle, so one task never runs twice by mistake.
+--worktree (an existing directory) and --origin (a commit, resolved to its hash there) are kept with the claim; status
+shows them and, when the delivery head is no longer the origin, names the head (a fact: it moves with every
+integration). A claim's tip is its worktree's current HEAD (null with no worktree or folder): resume prints
+"- <task> in <worktree> at <tip>", the commit the dev's brief names, since a wip commit moves the work past the origin.
+pause is refused when it is already paused or a claimed worktree has uncommitted work (commit it there as
+"wip: <task> ..."), and until resume status asks for it, so the gate waits; the claims stay held, as each task
+continues from its wip commit. Every pause also shows in notes as "paused: <text>", in ledger order, after resume too.
+add --full on a qa run marks a run of the full suite (every test line of Comandos and the entire interface suite);
+status --json gives the latest as full_qa.
 
 A cycle is a few dev tasks followed by one reviewer pass over their diff and one qa pass; the two run in parallel.
 It closes when the latest reviewer PASS came after the latest dev run, qa PASSed after the cycle's latest regular
@@ -51,13 +63,14 @@ asks for the next round; after the 3rd FAIL it asks the user, or in autonomous m
 only the corrections of the open findings (its PASS goes with those findings as note --validar) and then stops the
 delivery. waive --task closes the loop when the user accepts the open findings.
 
-status --json also gives the pending items as data and where the delivery is in its plan. from: the commit the
-current cycle's diff starts at, for the reviewer's and qa's range: the base for cycle 1, else the head the run that
-closed the previous cycle recorded (a commit made after it and before this cycle's first task, such as an errata,
-falls in the range too). steps: one {"step": dev|reviewer|qa|fix|review|ask|stop|decide, ...} per pending item,
-with its detail (task and verdict, agent, open findings and the report path, a qa re-run, a review round and its
-report, a deferred id and text); a task in flight is no step. scope: the plan cycles recorded
-with scope, in the order first recorded (a later scope for a cycle replaces its tasks in place, an empty one removes
+status --json also gives the pending items as data and where the delivery is in its plan. claims: one {task, at,
+worktree, origin, tip, head_moved} per task in flight; paused: {text, at} or null; full_qa: the latest qa run added with
+--full, or null. from: the commit the current cycle's diff starts at, for the reviewer's and qa's range: the base for
+cycle 1, else the head the run that closed the previous cycle recorded (a commit made after it and before this cycle's
+first task, such as an errata, falls in the range too). steps: one {"step": resume|dev|reviewer|qa|fix|review|ask|
+stop|decide, ...} per pending item, with its detail (task and verdict, agent, open findings and the report path, a qa
+re-run, a review round and its report, a deferred id and text, the pause text); a task in flight is no step. scope:
+the plan cycles recorded with scope, in the order first recorded (a later scope for a cycle replaces its tasks in place, an empty one removes
 it), each with the tasks that have no DONE run yet; the current cycle (the one holding the task in flight once the
 open cycle has closed, else the latest task); and how many tasks and cycles are left (a cycle whose tasks are done
 counts until it closes). With no scope recorded, scope is null.
@@ -91,9 +104,9 @@ DURATION = re.compile(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?|(\d+)")
 LEDGER = os.path.join(".superpowers", "ledger.jsonl")
 
 
-def git_head(rev="HEAD", ledger=None):
+def git_head(rev="HEAD", ledger=None, tree=None):
     where = os.path.dirname(os.path.abspath(ledger)) if ledger else None
-    for cwd in ([where] if where and os.path.isdir(where) else []) + [None]:
+    for cwd in [tree] if tree else ([where] if where and os.path.isdir(where) else []) + [None]:
         result = subprocess.run(["git", "rev-parse", "--verify", "--quiet", rev + "^{commit}"], capture_output=True,
                                 text=True, cwd=cwd)
         if result.returncode == 0:
@@ -331,6 +344,8 @@ def add(args):
         sys.exit("--task on a reviewer run is spec or plan (one round of that review loop); qa runs take none")
     if args.agent == "dev" and args.report:
         sys.exit("--report keeps the file of a reviewer or qa report; the dev's report is checked before integrating")
+    if args.full and args.agent != "qa":
+        sys.exit("--full marks a qa run of the project's full test command")
     blocking = args.critical + args.important
     if args.agent in ("reviewer", "qa") and (args.verdict == "FAIL") != (blocking > 0):
         sys.exit("FAIL needs open Critical/Important findings (--critical or --important > 0) and PASS none")
@@ -345,6 +360,8 @@ def add(args):
              "origin": origins(args.origin, blocking + args.minor), "head": git_head(ledger=args.ledger) or ""}
     if args.report:
         entry["report"] = args.report
+    if args.full:
+        entry["full"] = True
     if args.seconds is not None:
         entry["seconds"] = seconds(args.seconds)
     if args.tokens is not None:
@@ -357,14 +374,33 @@ def add(args):
           else f"{label} (cycle {len(cycles(read(args.ledger)))})")
 
 
-def in_flight(entries):
+def claims(entries):
     held = {}
     for entry in entries:
         if entry["type"] == "claim":
-            held[entry["task"]] = entry["at"]
+            held[entry["task"]] = entry
         elif entry["type"] == "release" or (entry["type"] == "run" and entry["agent"] == "dev"):
             held.pop(entry.get("task"), None)
     return held
+
+
+def in_flight(entries):
+    return {task: entry["at"] for task, entry in claims(entries).items()}
+
+
+def place(entry, separator):
+    origin = (entry.get("origin") or "")[:12]
+    tree = f" in {entry['worktree']}" if entry.get("worktree") else ""
+    return tree + (f"{separator if tree else ' '}from {origin}" if origin else "")
+
+
+def tip(entry):
+    tree = entry.get("worktree")
+    return git_head(tree=tree) if tree and os.path.isdir(tree) else None
+
+
+def moved(entry, head):
+    return bool(entry.get("origin") and head and entry["origin"] != head)
 
 
 def claim(args):
@@ -379,7 +415,16 @@ def claim(args):
     done = cycle_state(groups[-1])[0]["tasks"].get(args.task)
     if done and done["verdict"] in DONE:
         sys.exit(f"{args.task} is already done in cycle {len(groups)}: use a new task id (fix-N for a fix round)")
-    write(args.ledger, {"type": "claim", "task": args.task})
+    where = {}
+    if args.worktree:
+        if not os.path.isdir(args.worktree):
+            sys.exit(f"--worktree {args.worktree} is no directory")
+        where["worktree"] = os.path.abspath(args.worktree)
+    if args.origin:
+        where["origin"] = git_head(args.origin, args.ledger, where.get("worktree"))
+        if where["origin"] is None:
+            sys.exit(f"--origin is not a commit: {args.origin}")
+    write(args.ledger, {"type": "claim", "task": args.task, **where})
     print(f"claimed {args.task}")
 
 
@@ -388,6 +433,53 @@ def release(args):
         sys.exit(f"{args.task} has no claim in flight")
     write(args.ledger, {"type": "release", "task": args.task})
     print(f"released {args.task}")
+
+
+def paused(entries):
+    state = None
+    for entry in entries:
+        if entry["type"] == "pause":
+            state = {"text": entry["text"], "at": entry["at"]}
+        elif entry["type"] == "resume":
+            state = None
+    return state
+
+
+def uncommitted(held):
+    found = []
+    for task, entry in held.items():
+        tree = entry.get("worktree")
+        if not tree or not os.path.isdir(tree):
+            continue
+        result = subprocess.run(["git", "-C", tree, "status", "--porcelain"], capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            found.append(f'{task}: uncommitted work in {tree}: commit it there as "wip: {task} <what is done>" first')
+    return found
+
+
+def pause(args):
+    entries = read(args.ledger)
+    if not entries:
+        sys.exit("no delivery started: run start first")
+    if paused(entries):
+        sys.exit(f"the delivery is already paused ({paused(entries)['text']}): resume first")
+    dirty = uncommitted(claims(entries))
+    if dirty:
+        sys.exit("\n".join(dirty))
+    write(args.ledger, {"type": "pause", "text": args.text})
+    print(f"paused: {args.text}")
+
+
+def resume(args):
+    entries = read(args.ledger)
+    if not paused(entries):
+        sys.exit("the delivery is not paused")
+    write(args.ledger, {"type": "resume"})
+    print("resumed")
+    for task, entry in claims(entries).items():
+        at = tip(entry)
+        print(f"- {task}" + (f" in {entry['worktree']}" if entry.get("worktree") else "")
+              + (f" at {at[:12]}" if at else ""))
 
 
 def note(args):
@@ -632,27 +724,41 @@ def status(args):
     closed = not pending
     items = deferred(entries)
     held = in_flight(entries)
+    head = git_head(ledger=args.ledger)
     loops, steps = review_state(entries, auto)
     # a task in flight again after a verdict that was not done is no step: its run is pending below
     kept = [(text, step) for text, step in zip(pending, state["steps"]) if step.get("task") not in held]
     pending = loops + [text for text, _ in kept]
-    for task, at in held.items():
-        later = None if closed else later_cycle(entries, groups[-1], task)
-        pending.append(f"dev {task} dispatched at {at}, for plan cycle {later}: integrate and add it once this cycle "
-                       f"closes, or release --task {task}" if later else
-                       f"dev {task} dispatched at {at}, no report yet (add it when it reports, or release --task {task})")
+    for task, claim in claims(entries).items():
+        at, later = claim["at"], None if closed else later_cycle(entries, groups[-1], task)
+        since = f"; the delivery head is now {head[:12]}" if moved(claim, head) else ""
+        pending.append(f"dev {task} dispatched at {at}{place(claim, ', ')}, for plan cycle {later}: integrate and add it "
+                       f"once this cycle closes, or release --task {task}{since}" if later else
+                       f"dev {task} dispatched at {at}{place(claim, ', ')}, no report yet (add it when it reports, or "
+                       f"release --task {task}){since}")
     pending += [f"deferred {item['id']} has no decision: {item['text']}" for item in items if not item["decision"]]
     steps += [step for _, step in kept] + [{"step": "decide", "id": item["id"], "text": item["text"]}
                                            for item in items if not item["decision"]]
+    pause_state = paused(entries)
+    if pause_state:
+        pending.insert(0, f"delivery paused since {pause_state['at']}: {pause_state['text']} "
+                          "(resume when work restarts)")
+        steps.insert(0, {"step": "resume", **pause_state})
     plans = [entry["plan"] for entry in entries if entry["type"] == "plan"]
+    full = [entry for entry in runs(entries) if entry["agent"] == "qa" and entry.get("full")]
     report = {"slug": entries[0].get("slug"), "base": entries[0].get("base"), "ledger": os.path.abspath(args.ledger),
               "plan": plans[-1] if plans else entries[0].get("plan"),
               "cycle": len(groups), "from": cycle_from(entries, groups), "in_flight": list(held), "dispatched": held,
+              "claims": [{"task": task, "at": claim["at"], "worktree": claim.get("worktree"),
+                          "origin": claim.get("origin"), "tip": tip(claim), "head_moved": moved(claim, head)}
+                         for task, claim in claims(entries).items()],
+              "paused": pause_state, "full_qa": full[-1] if full else None,
               "tasks": {task: entry["verdict"] for task, entry in state["tasks"].items()},
               "reviewer": state["reviewer"], "qa": state["qa"], "runs": groups[-1], "pending": pending,
               "steps": steps, "scope": progress(entries, closed, held),
               "autonomous": auto, "deferred": items,
-              "notes": [entry["text"] for entry in entries if entry["type"] == "note" and not entry.get("validar")],
+              "notes": [entry["text"] if entry["type"] == "note" else f"paused: {entry['text']}" for entry in entries
+                        if entry["type"] == "pause" or (entry["type"] == "note" and not entry.get("validar"))],
               "validar": validar(entries),
               "metrics": metrics(entries), "ready_for_gate": not pending}
     if args.json:
@@ -712,11 +818,20 @@ def main():
     command.add_argument("--report", help="the file the manager saved a reviewer or qa report in")
     command.add_argument("--seconds", help="how long the run took, from its completion notification: 90, 12m, 1h5m or 12m30s")
     command.add_argument("--tokens", type=count, help="the tokens the run used, from its completion notification")
+    command.add_argument("--full", action="store_true", help="the qa ran the project's full test command")
     command.set_defaults(run=add)
     for name, run in (("claim", claim), ("release", release)):
         command = commands.add_parser(name)
         command.add_argument("--task", required=True)
+        if name == "claim":
+            command.add_argument("--worktree", help="where the dev works: an existing directory")
+            command.add_argument("--origin", help="the commit the dev's work starts from")
         command.set_defaults(run=run)
+    command = commands.add_parser("pause")
+    command.add_argument("--text", required=True)
+    command.set_defaults(run=pause)
+    command = commands.add_parser("resume")
+    command.set_defaults(run=resume)
     command = commands.add_parser("note")
     command.add_argument("--text", required=True)
     command.add_argument("--validar", action="store_true", help="the user validates this decision on return")

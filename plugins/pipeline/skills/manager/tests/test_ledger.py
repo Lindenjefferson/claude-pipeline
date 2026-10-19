@@ -705,4 +705,164 @@ check("text status names the cycle's from", f"from {closing_head[:12]}" in run("
 check("an old ledger without heads has no from for a later cycle",
       status(".superpowers/legacy.jsonl").get("from") == "abc")
 
+
+def git(cwd, *args):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def ledger_lines(ledger):
+    with open(os.path.join(repo, ledger), encoding="utf-8") as handle:
+        return len(handle.readlines())
+
+
+PAUSE = ".superpowers/pause.jsonl"
+run("start", "--slug", "pause", ledger=PAUSE)
+pause_tree = os.path.join(worktrees, "pause")
+git(repo, "worktree", "add", "-q", "--detach", pause_tree)
+r = run("claim", "--task", "P1", "--worktree", os.path.join(worktrees, "missing"), ledger=PAUSE)
+check("claim refuses a worktree that is no directory", r.returncode != 0 and "worktree" in r.stderr, r.stderr)
+r = run("claim", "--task", "P1", "--origin", "no-such-rev", ledger=PAUSE)
+check("claim refuses an origin that is no commit", r.returncode != 0 and "no-such-rev" in r.stderr, r.stderr)
+check("a refused claim writes nothing", status(PAUSE)["in_flight"] == [] and ledger_lines(PAUSE) == 1)
+origin = git(pause_tree, "rev-parse", "HEAD")
+r = run("claim", "--task", "P1", "--worktree", pause_tree, "--origin", "HEAD", ledger=PAUSE)
+state = status(PAUSE)
+check("claim stores the worktree (absolute) and the origin as a full hash, resolved in the worktree",
+      r.returncode == 0 and len(state["claims"]) == 1 and state["claims"][0]["task"] == "P1"
+      and state["claims"][0]["worktree"] == os.path.abspath(pause_tree) and state["claims"][0]["origin"] == origin
+      and state["claims"][0]["at"] and state["claims"][0]["head_moved"] is False, (r.stderr, state.get("claims")))
+check("in_flight and dispatched keep their shape", state["in_flight"] == ["P1"]
+      and list(state["dispatched"]) == ["P1"] and isinstance(state["dispatched"]["P1"], str), state)
+text = run("status", ledger=PAUSE).stdout
+check("status text shows the claim's worktree and origin",
+      f"in {os.path.abspath(pause_tree)}, from {origin[:12]}" in text and "head moved" not in text, text)
+r = run("claim", "--task", "P2", ledger=PAUSE)
+claim2 = status(PAUSE)["claims"][1]
+check("a claim with neither option is stored without them",
+      r.returncode == 0 and claim2 == {"task": "P2", "at": claim2["at"], "worktree": None, "origin": None,
+                                       "tip": None, "head_moved": False}, status(PAUSE)["claims"])
+run("release", "--task", "P2", ledger=PAUSE)
+subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "delivery moved"], cwd=repo, check=True,
+               capture_output=True)
+new_head = git(repo, "rev-parse", "HEAD")
+state = status(PAUSE)
+text = run("status", ledger=PAUSE).stdout
+check("a new commit on the delivery branch makes the claim's head_moved true",
+      state["claims"][0]["head_moved"] is True, state["claims"])
+check("status text names the delivery head as a fact, not an instruction",
+      f"; the delivery head is now {new_head[:12]}" in text and "integrate its commits" not in text
+      and "head moved" not in text, text)
+
+with open(os.path.join(pause_tree, "wip.txt"), "w", encoding="utf-8") as handle:
+    handle.write("half done\n")
+lines = ledger_lines(PAUSE)
+r = run("pause", "--text", "waiting for the user", ledger=PAUSE)
+check("pause is refused while a claimed worktree has an untracked file, and names it",
+      r.returncode != 0 and f'P1: uncommitted work in {os.path.abspath(pause_tree)}: commit it there as "wip: P1 '
+      in r.stderr, r.stderr)
+check("a refused pause writes nothing", ledger_lines(PAUSE) == lines and status(PAUSE)["paused"] is None)
+git(pause_tree, "add", "-A")
+git(pause_tree, "-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-q", "-m", "wip: P1 half done")
+r = run("pause", "--text", "waiting for the user", ledger=PAUSE)
+check("pause passes once the work is committed", r.returncode == 0 and "paused: waiting for the user" in r.stdout,
+      r.stderr)
+r = run("pause", "--text", "again", ledger=PAUSE)
+check("pause twice is refused", r.returncode != 0 and "paused" in r.stderr, r.stderr)
+state = status(PAUSE)
+check("while paused, the pending line comes first and the resume step too",
+      state["pending"][0] == f"delivery paused since {state['paused']['at']}: waiting for the user "
+                             "(resume when work restarts)"
+      and state["steps"][0] == {"step": "resume", "text": "waiting for the user", "at": state["paused"]["at"]}
+      and state["ready_for_gate"] is False, (state["pending"], state["steps"]))
+check("while paused, paused is {text, at} in the JSON",
+      sorted(state["paused"]) == ["at", "text"] and state["paused"]["text"] == "waiting for the user", state["paused"])
+check("while paused, status --check exits 1", run("status", "--check", ledger=PAUSE).returncode == 1)
+check("the claim stays held through the pause", state["in_flight"] == ["P1"], state["in_flight"])
+r = run("resume", ledger=PAUSE)
+tip = git(pause_tree, "rev-parse", "HEAD")
+check("resume prints resumed and one line per claim in flight, with its worktree and the tip to continue from",
+      r.returncode == 0 and r.stdout.splitlines()[0] == "resumed" and tip != origin
+      and f"- P1 in {os.path.abspath(pause_tree)} at {tip[:12]}" in r.stdout.splitlines(), (r.stdout, r.stderr))
+state = status(PAUSE)
+check("status --json gives each claim's tip (the worktree HEAD after the wip commit) and keeps the origin",
+      state["claims"][0]["tip"] == tip and state["claims"][0]["origin"] == origin, state["claims"])
+check("the pause text stays in the notes after resume, in ledger order, as paused: <text>",
+      state["notes"] == ["paused: waiting for the user"]
+      and "note: paused: waiting for the user" in run("status", ledger=PAUSE).stdout, state["notes"])
+check("after resume, paused is null and the claim is still in flight",
+      state["paused"] is None and state["in_flight"] == ["P1"]
+      and not any("paused" in item for item in state["pending"]), state)
+r = run("resume", ledger=PAUSE)
+check("resume when not paused is refused", r.returncode != 0 and "not paused" in r.stderr, r.stderr)
+with open(os.path.join(pause_tree, "wip.txt"), "a", encoding="utf-8") as handle:
+    handle.write("more\n")
+check("pause is refused with a modified tracked file too",
+      run("pause", "--text", "x", ledger=PAUSE).returncode != 0)
+check("pause before start is refused",
+      run("pause", "--text", "x", ledger=".superpowers/none.jsonl").returncode != 0)
+
+OLD = ".superpowers/oldclaim.jsonl"
+with open(os.path.join(repo, OLD), "w", encoding="utf-8", newline="\n") as handle:
+    for entry in ({"type": "start", "slug": "old", "base": "abc", "at": "2026-10-01T10:00:00+00:00"},
+                  {"type": "claim", "task": "L1", "at": "2026-10-01T10:01:00+00:00"}):
+        handle.write(json.dumps(entry) + "\n")
+state = status(OLD)
+check("a claim written in the old shape still works: no worktree, no origin, head not moved",
+      state["in_flight"] == ["L1"] and state["claims"] == [{"task": "L1", "at": "2026-10-01T10:01:00+00:00",
+                                                           "worktree": None, "origin": None, "tip": None,
+                                                           "head_moved": False}]
+      and state["paused"] is None and state["full_qa"] is None, state)
+check("the old claim's text line has no place suffix",
+      "dev L1 dispatched at 2026-10-01T10:01:00+00:00, no report yet" in run("status", ledger=OLD).stdout)
+run("pause", "--text", "stop here", ledger=OLD)
+r = run("resume", ledger=OLD)
+check("pause and resume work on a claim with no worktree: the line is just the task",
+      r.returncode == 0 and "- L1" in r.stdout.splitlines(), r.stdout + r.stderr)
+
+GONE = ".superpowers/gone.jsonl"
+run("start", "--slug", "gone", ledger=GONE)
+gone_tree = os.path.join(worktrees, "gone")
+git(repo, "worktree", "add", "-q", "-b", "gone-branch", gone_tree)
+git(gone_tree, "-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "only here")
+only_here = git(gone_tree, "rev-parse", "HEAD")
+r = run("claim", "--task", "G1", "--worktree", gone_tree, "--origin", "HEAD", ledger=GONE)
+check("claim --origin HEAD is resolved in the worktree: a commit that exists only there",
+      r.returncode == 0 and status(GONE)["claims"][0]["origin"] == only_here
+      and only_here != git(repo, "rev-parse", "HEAD"), (r.stderr, status(GONE)["claims"]))
+shutil.rmtree(gone_tree, onerror=lambda func, path, _: (os.chmod(path, stat.S_IWRITE), func(path)))
+r = run("pause", "--text", "folder is gone", ledger=GONE)
+state = status(GONE)
+check("pause is not refused for a claimed worktree whose folder was removed; its tip is null",
+      r.returncode == 0 and state["paused"]["text"] == "folder is gone" and state["claims"][0]["tip"] is None,
+      (r.stderr, state["claims"]))
+r = run("resume", ledger=GONE)
+check("resume prints the claim with its worktree and no tip when the folder is gone",
+      f"- G1 in {os.path.abspath(gone_tree)}" in r.stdout.splitlines(), r.stdout)
+
+FULL = ".superpowers/full.jsonl"
+run("start", "--slug", "full", ledger=FULL)
+add("dev", "DONE", "T1", ledger=FULL)
+check("a ledger with no full qa run has full_qa null", status(FULL)["full_qa"] is None)
+r = run("add", "--agent", "reviewer", "--verdict", "PASS", "--full", ledger=FULL)
+check("--full is refused on the reviewer", r.returncode != 0 and "--full" in r.stderr, r.stderr)
+r = run("add", "--agent", "dev", "--task", "T2", "--verdict", "DONE", "--full", ledger=FULL)
+check("--full is refused on the dev", r.returncode != 0 and "--full" in r.stderr, r.stderr)
+check("refused --full runs write nothing", len(status(FULL)["runs"]) == 1)
+r = run("add", "--agent", "qa", "--verdict", "PASS", "--full", "--report", "first.md", ledger=FULL)
+state = status(FULL)
+check("--full on qa is stored on the run and shows as full_qa",
+      r.returncode == 0 and state["qa"][0].get("full") is True and state["full_qa"] == state["qa"][0]
+      and state["full_qa"]["head"], (r.stderr, state["full_qa"]))
+run("add", "--agent", "qa", "--verdict", "PASS", "--report", "plain.md", ledger=FULL)
+state = status(FULL)
+check("a qa run without --full has no full key and does not replace full_qa",
+      "full" not in state["qa"][0] and state["full_qa"]["report"] == "first.md", state["full_qa"])
+add("dev", "DONE", "T3", ledger=FULL)
+run("add", "--agent", "qa", "--verdict", "PASS", "--full", "--report", "second.md", ledger=FULL)
+add("reviewer", "PASS", ledger=FULL)
+add("dev", "DONE", "T4", ledger=FULL)
+state = status(FULL)
+check("full_qa is the latest full qa run across the whole delivery, even from an earlier cycle",
+      state["cycle"] > 1 and state["full_qa"]["report"] == "second.md", state["full_qa"])
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
