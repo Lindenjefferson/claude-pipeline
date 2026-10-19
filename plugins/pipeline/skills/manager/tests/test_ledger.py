@@ -1,4 +1,4 @@
-import atexit, json, os, shutil, stat, subprocess, sys, tempfile
+import atexit, datetime, json, os, re, shutil, stat, subprocess, sys, tempfile
 
 LEDGER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ledger.py")
 repo = tempfile.mkdtemp(prefix="ledger_")
@@ -864,5 +864,191 @@ add("dev", "DONE", "T4", ledger=FULL)
 state = status(FULL)
 check("full_qa is the latest full qa run across the whole delivery, even from an earlier cycle",
       state["cycle"] > 1 and state["full_qa"]["report"] == "second.md", state["full_qa"])
+
+def stamp(hours):
+    return (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=hours)).isoformat(timespec="seconds")
+
+
+def window(percent, hours=2):
+    return {"percent": percent, "resets_at": stamp(hours)}
+
+
+def usage_case(name, windows=None, local=None, raw=None, extra=None, close=False):
+    """A ledger in its own folder (repo/u/<name>/.superpowers) so usage.json never leaks into the other cases."""
+    root = os.path.join(repo, "u", name)
+    os.makedirs(os.path.join(root, ".superpowers"), exist_ok=True)
+    if windows is not None or raw is not None:
+        with open(os.path.join(root, ".superpowers", "usage.json"), "w", encoding="utf-8") as handle:
+            handle.write(raw if raw is not None else json.dumps({"at": stamp(0), "windows": windows, **(extra or {})}))
+    if local is not None:
+        with open(os.path.join(root, "CLAUDE.local.md"), "w", encoding="utf-8") as handle:
+            handle.write(local)
+    ledger = f"u/{name}/.superpowers/ledger.jsonl"
+    run("start", "--slug", name, ledger=ledger)
+    add("dev", "DONE", "T1", ledger=ledger)
+    if close:
+        add("reviewer", "PASS", ledger=ledger)
+        add("qa", "PASS", ledger=ledger)
+    return ledger
+
+
+def advice(name, windows=None, **kwargs):
+    return status(usage_case(name, windows, **kwargs))["usage"]
+
+
+def lines_of(ledger):
+    with open(os.path.join(repo, ledger), encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
+
+
+def local(economy=None, five=None, week=None, always=None):
+    rows = [("Economia a partir de quanto uso, em %", economy),
+            ("Pausa a partir de quanto uso da janela de 5 horas, em %", five),
+            ("Pausa a partir de quanto uso da semana, em %", week), ("Sempre econômico", always)]
+    return "# Local\n" + "".join(f"- {label}: `{value}`\n" for label, value in rows if value is not None)
+
+
+ledger = usage_case("none", close=True)
+state = status(ledger)
+check("no usage.json and no Sempre econômico: usage is null and the cycle is unchanged",
+      state["usage"] is None and state["ready_for_gate"] is True and "usage" not in lines_of(ledger)[1],
+      state.get("usage"))
+check("no usage.json: the text has no usage line", "usage:" not in run("status", ledger=ledger).stdout)
+
+got = advice("low", {"five_hour": window(59), "seven_day": window(59)})
+check("under every default threshold: windows as read, no economy, no wait",
+      got["economy"] is None and got["wait"] is None and got["windows"]["five_hour"]["percent"] == 59
+      and set(got["windows"]["seven_day"]) == {"percent", "resets_at"}, got)
+got = advice("e5", {"five_hour": window(60)})
+check("economy by the 5-hour window at the default 60", got["economy"] == "five_hour at 60%" and got["wait"] is None, got)
+got = advice("e7", {"five_hour": window(10), "seven_day": window(61.5, 48)})
+check("economy by the weekly window", got["economy"] == "seven_day at 61%", got)
+got = advice("w5", {"five_hour": window(84.9)})
+check("the 5-hour pause starts at 85, not before", got["wait"] is None, got)
+got = advice("w5b", {"five_hour": window(85)})
+check("wait for the 5-hour window at 85", got["wait"] == {"window": "five_hour", "percent": 85,
+                                                          "resets_at": got["windows"]["five_hour"]["resets_at"]}, got)
+got = advice("w7", {"five_hour": window(10), "seven_day": window(95, 48)})
+check("wait for the week at 95", got["wait"] and got["wait"]["window"] == "seven_day", got)
+got = advice("both", {"five_hour": window(90, 4), "seven_day": window(96, 30)})
+check("both over the pause: the one that resets later", got["wait"]["window"] == "seven_day", got)
+got = advice("both2", {"five_hour": window(90, 6), "seven_day": window(96, 1)})
+check("both over the pause: the later reset wins whichever window it is", got["wait"]["window"] == "five_hour", got)
+
+got = advice("past", {"five_hour": window(99, -1), "seven_day": window(10)})
+check("a window past its resets_at is ignored", list(got["windows"]) == ["seven_day"] and got["wait"] is None
+      and got["economy"] is None, got)
+state = status(usage_case("allpast", {"five_hour": window(99, -1)}))
+check("every window past: nothing to advise, usage is null", state["usage"] is None, state.get("usage"))
+got = advice("missing", {"seven_day": window(70)})
+check("either window may be missing", list(got["windows"]) == ["seven_day"] and got["economy"] == "seven_day at 70%", got)
+got = advice("extras", {"five_hour": {**window(70), "label": "x"}, "monthly": window(99)}, extra={"version": 3})
+check("unknown fields and windows are ignored", list(got["windows"]) == ["five_hour"]
+      and set(got["windows"]["five_hour"]) == {"percent", "resets_at"} and got["economy"] == "five_hour at 70%", got)
+
+z = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=2)
+got = advice("zform", {"five_hour": {"percent": 90, "resets_at": z.strftime("%Y-%m-%dT%H:%M:%S.123Z")},
+                       "spend_limit": {"percent": 99, "resets_at": None}})
+check("resets_at as toISOString output (milliseconds and Z) is read; an extra kind is ignored",
+      got["wait"] and got["wait"]["window"] == "five_hour" and list(got["windows"]) == ["five_hour"], got)
+past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+check("a Z form in the past is ignored", advice("zpast", {"five_hour": {"percent": 90, "resets_at": past}}) is None)
+ledger = usage_case("nullreset", {"five_hour": {"percent": 90, "resets_at": None}, "seven_day": window(10)})
+got = status(ledger)["usage"]
+text = run("status", ledger=ledger).stdout
+check("a null resets_at counts as valid: the window stays and can ask to wait",
+      got["windows"]["five_hour"]["resets_at"] is None and got["wait"] == {"window": "five_hour", "percent": 90,
+                                                                           "resets_at": None}, got)
+check("the text omits the reset time it does not have",
+      re.search(r"^usage: 5h 90%, week 10%$", text, re.M) and "until the window resets" in text, text)
+got = advice("nullboth", {"five_hour": {"percent": 90, "resets_at": None}, "seven_day": window(96, 48)})
+check("when both are over the pause, a known reset beats an unknown one", got["wait"]["window"] == "seven_day", got)
+
+got = advice("always", {"five_hour": window(5)}, local=local(always="sim"))
+check("Sempre econômico turns economy on", got["economy"] == "always (CLAUDE.local.md)", got)
+state = status(usage_case("always2", local=local(always="Yes")))
+check("Sempre econômico works with no usage.json and shows as an empty usage",
+      state["usage"] == {"windows": {}, "economy": "always (CLAUDE.local.md)", "wait": None}, state.get("usage"))
+check("Sempre econômico `não` and a placeholder keep it off",
+      advice("always3", {"five_hour": window(5)}, local=local(always="não"))["economy"] is None
+      and advice("always4", {"five_hour": window(5)}, local=local(always="_(sim ou não)_"))["economy"] is None)
+
+got = advice("custom", {"five_hour": window(40), "seven_day": window(75, 48)},
+             local=local(economy=30, five=50, week=70))
+check("thresholds come from CLAUDE.local.md",
+      got["economy"] == "five_hour at 40%" and got["wait"]["window"] == "seven_day", got)
+got = advice("labels", {"five_hour": window(40)}, local="- ECONOMIA A PARTIR DE QUANTO USO, EM %: `30`\n"
+                                                         "- pausa a partir de quanto uso da janela de 5 horas, em %: `40`\n")
+check("labels match ignoring case and accents", got["economy"] == "five_hour at 40%" and got["wait"] is not None, got)
+got = advice("placeholder", {"five_hour": window(70)}, local=local(economy="_(60)_", five="_(85)_"))
+check("a placeholder falls back to the defaults", got["economy"] == "five_hour at 70%" and got["wait"] is None, got)
+got = advice("placeholder2", {"five_hour": window(40)},
+             local="- Economia a partir de quanto uso, em %: _(padrão 60: escreva `30` para economizar antes)_\n"
+                   "- Pausa a partir de quanto uso da janela de 5 horas, em %: _(padrão 85: `20`)_\n"
+                   "- Sempre econômico: _(sim, entre crases, numa conta Pro, ...; padrão não: `sim`)_\n")
+check("a placeholder with a backtick inside is still a placeholder: defaults apply",
+      got["economy"] is None and got["wait"] is None, got)
+for number, bad in enumerate(("0", "101", "-5", "abc", "")):
+    got = advice(f"bad{number}", {"five_hour": window(50), "seven_day": window(50)},
+                 local=local(economy=bad, five=bad, week=bad))
+    check(f"an invalid threshold ({bad!r}) falls back to the defaults",
+          got["economy"] is None and got["wait"] is None, got)
+got = advice("edge", {"five_hour": window(99)}, local=local(five=100))
+check("100 is a valid threshold", got["wait"] is None, got)
+
+ledger = usage_case("broken", raw="{not json")
+r = run("status", ledger=ledger)
+check("broken usage.json does not stop status and the text says it once",
+      r.returncode == 0 and r.stdout.count("usage.json unreadable") == 1 and "ready for gate" in r.stdout
+      and status(ledger)["usage"] is None, (r.stderr, r.stdout))
+check("broken usage.json does not stop add", add("reviewer", "PASS", ledger=ledger).returncode == 0
+      and "usage" not in lines_of(ledger)[-1])
+ledger = usage_case("shape", raw=json.dumps({"windows": {"five_hour": "high", "seven_day": {"percent": "x"}}}))
+check("a window of the wrong shape is ignored without a traceback",
+      run("status", ledger=ledger).returncode == 0 and status(ledger)["usage"] is None)
+
+text = run("status", ledger=usage_case("text", {"five_hour": window(52.5), "seven_day": window(41, 48)})).stdout
+fiveh = [row for row in text.splitlines() if row.startswith("usage: 5h")]
+check("text: one usage line with both windows", len(fiveh) == 1 and re.fullmatch(
+    r"usage: 5h 52% \(resets \d\d:\d\dZ\), week 41%", fiveh[0]) and "usage: economy" not in text
+      and "usage: wait" not in text, text)
+text = run("status", ledger=usage_case("text2", {"five_hour": window(90), "seven_day": window(65, 48)})).stdout
+check("text: economy and wait lines", "usage: economy (five_hour at 90%): reviewer on sonnet, one copy at a time" in text
+      and re.search(r"usage: wait \(five_hour at 90%\): dispatch nothing new; pause at the next safe point until "
+                    r"\d{4}-\d\d-\d\dT", text), text)
+
+clean = status(usage_case("ref", close=True))
+waiting = status(usage_case("ref2", {"five_hour": window(99), "seven_day": window(99, 48)}, close=True))
+check("wait does not change the gate: ready_for_gate, pending and steps stay",
+      waiting["usage"]["wait"] is not None and waiting["ready_for_gate"] is True
+      and waiting["pending"] == clean["pending"] and waiting["steps"] == clean["steps"], waiting["usage"])
+check("status --check ignores wait on a closed cycle",
+      run("status", "--check", ledger="u/ref2/.superpowers/ledger.jsonl").returncode == 0)
+open_cycle = usage_case("ref3", {"five_hour": window(99)})
+check("an open cycle stays pending the same way with a wait",
+      status(open_cycle)["pending"] == ["reviewer has not reviewed the latest changes", "qa has not run on the cycle's tasks"]
+      and run("status", "--check", ledger=open_cycle).returncode == 1)
+
+ledger = usage_case("snap", {"five_hour": window(82.5), "seven_day": window(41, 48), "monthly": window(1)})
+check("add stores the snapshot of the valid windows", lines_of(ledger)[1]["usage"] == {"five_hour": 82.5, "seven_day": 41},
+      lines_of(ledger))
+ledger = usage_case("snap2", {"five_hour": window(82.5, -1), "seven_day": window(41, 48)})
+check("the snapshot leaves out a window past its reset", lines_of(ledger)[1]["usage"] == {"seven_day": 41}, lines_of(ledger))
+check("add with no usage.json stores no usage key",
+      all("usage" not in entry for entry in lines_of(usage_case("snap3"))))
+
+deep = os.path.join(repo, "u", "custom", "deep")
+os.makedirs(deep, exist_ok=True)
+with open(os.path.join(deep, "usage.json"), "w", encoding="utf-8") as handle:
+    json.dump({"windows": {"five_hour": window(90)}}, handle)
+with open(os.path.join(repo, "u", "custom", "usage.json"), "w", encoding="utf-8") as handle:
+    json.dump({"windows": {"five_hour": window(10)}}, handle)
+with open(os.path.join(repo, "u", "custom", "CLAUDE.local.md"), "w", encoding="utf-8") as handle:
+    handle.write(local(five=95))
+ledger = "u/custom/deep/ledger.jsonl"
+run("start", "--slug", "custom", ledger=ledger)
+got = status(ledger)["usage"]
+check("--ledger at a custom path reads usage.json from that folder and CLAUDE.local.md from its parent",
+      got["windows"]["five_hour"]["percent"] == 90 and got["wait"] is None and got["economy"] == "five_hour at 90%", got)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

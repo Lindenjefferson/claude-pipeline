@@ -56,9 +56,29 @@ function stubs(on, found, log = { runs: 0, mtime: 1 }, pythons = ['python']) {
     return { value: found ? { exitCode: 0, stdout: JSON.stringify(found), stderr: '' }
                           : { exitCode: 1, stdout: '', stderr: 'no delivery started' } }
   })
+  // the subscription's rate-limit windows ([] on an API key) and every usage.json written
+  log.writes ??= []
+  on('session.usage', () => ({ value: { context: {}, rateLimits: log.rateLimits ?? [] } }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  on('fs.write', (_$, e) => {
+    if (log.writeFails) throw new Error('disk full')
+    log.writes.push({ path: e.path, data: JSON.parse(e.text) })
+    return { value: undefined }
+  })
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
   return clock
 }
+
+const MEASURE = { context: {}, rateLimits: [], changed: ['rateLimits'] } as const
+const FIVE = { kind: 'five_hour', percentUsed: 82.5, resetsAt: '2026-10-17T20:00:00Z' }
+const WEEK = { kind: 'seven_day', percentUsed: 41, resetsAt: '2026-10-20T12:00:00.000Z' }
+const WINDOWS = { five_hour: { percent: 82.5, resets_at: '2026-10-17T20:00:00.000Z' },
+                  seven_day: { percent: 41, resets_at: '2026-10-20T12:00:00.000Z' } }
+// a reset at this local time, as the ISO string ledger.py reads and the band says back in local time
+const LOCAL = new Date(2026, 9, 17, 21, 5)
+const USAGE = { windows: { five_hour: { percent: 85, resets_at: LOCAL.toISOString() },
+                           seven_day: { percent: 41, resets_at: '2026-10-20T12:00:00+00:00' } },
+                economy: null, wait: null }
 
 async function start($, clock) {
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
@@ -242,4 +262,78 @@ test('/andamento opens the pane and the pane draws the same table', async ($, on
   expect(await ui.find({ type: 'Text', text: 'etapa 5 · ciclo 2 de 3 · autônomo' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /T2\.1\s+rodando/ })).toBeDefined()
   await ui.unmount()
+})
+
+test('at start and on each measure the subscription usage goes to usage.json beside the ledger', async ($, on) => {
+  const log = { runs: 0, mtime: 1, rateLimits: [FIVE, WEEK], writes: [] }
+  const clock = stubs(on, STATUS, log)
+  await start($, clock)
+  expect(log.writes.length).toBe(1)
+  expect(log.writes[0].path.replaceAll('\\', '/')).toMatch(/\/work\/\.superpowers\/usage\.json$/)
+  expect(log.writes[0].data.windows).toEqual(WINDOWS)
+  expect(new Date(log.writes[0].data.at).toISOString()).toBe(new Date(NOW).toISOString())
+  log.rateLimits = [{ ...FIVE, percentUsed: 90 }, WEEK, { kind: 'spend_limit', percentUsed: 12, resetsAt: '2026-11-01T00:00:00Z' }]
+  await $.session.measure(MEASURE)
+  expect(log.writes.length).toBe(2)
+  expect(log.writes[1].data.windows.five_hour.percent).toBe(90)
+  expect(log.writes[1].data.windows.spend_limit).toEqual({ percent: 12, resets_at: '2026-11-01T00:00:00.000Z' })
+})
+
+test('an API-key session, with no rate-limit windows, writes no usage.json', async ($, on) => {
+  const log = { runs: 0, mtime: 1, rateLimits: [], writes: [] }
+  const clock = stubs(on, STATUS, log)
+  await start($, clock)
+  await $.session.measure(MEASURE)
+  expect(log.writes).toEqual([])
+})
+
+test('usage.json is not rewritten when only its time would change', async ($, on) => {
+  const log = { runs: 0, mtime: 1, rateLimits: [FIVE, WEEK], writes: [] }
+  const clock = stubs(on, STATUS, log)
+  await start($, clock)
+  await clock.advance(30000)
+  await $.session.measure(MEASURE)
+  await $.session.measure(MEASURE)
+  expect(log.writes.length).toBe(1)
+})
+
+test('a usage.json write failure leaves the band and the next write alone', async ($, on) => {
+  const log = { runs: 0, mtime: 1, rateLimits: [FIVE, WEEK], writes: [], writeFails: true }
+  const clock = stubs(on, STATUS, log)
+  await start($, clock)
+  await $.session.measure(MEASURE)
+  const ui = await $.ui.mount(BAND)
+  expect(await ui.find({ type: 'Text', text: /^etapa 5 · ciclo 2 de 3/ })).toBeDefined()
+  await ui.unmount()
+  log.writeFails = false
+  await $.session.measure(MEASURE)
+  expect(log.writes.length).toBe(1)
+})
+
+test('economy shows in the title, and a wait puts the reset first in "depois", in local time', () => {
+  const saving = { ...STATUS, usage: { ...USAGE, economy: 'five_hour at 85%' } }
+  expect(bandLine(saving, NOW)).toContain('etapa 5 · ciclo 2 de 3 · autônomo · econômico · dev na T2.1')
+  expect(paneLines(saving, [], NOW)[0]).toBe('etapa 5 · ciclo 2 de 3 · autônomo · econômico')
+  expect(bandLine({ ...saving, paused: { text: 'x', at: DISPATCHED } }, NOW)).toContain('autônomo · econômico · pausada')
+  const five = { ...STATUS, usage: { ...USAGE, wait: { window: 'five_hour', percent: 85, resets_at: LOCAL.toISOString() } } }
+  expect(bandLine(five, NOW)).toContain(
+    'depois: esperar o reset da janela de 5 horas (85%, volta às 21:05) e correção (2 achados da revisão)')
+  const week = { ...STATUS, usage: { ...USAGE, wait: { window: 'seven_day', percent: 97, resets_at: LOCAL.toISOString() } } }
+  expect(bandLine(week, NOW)).toContain('depois: esperar o reset da semana (97%, volta em 17/10 21:05) e correção')
+  expect(paneLines(week, [], NOW)).toContain('- esperar o reset da semana (97%, volta em 17/10 21:05)')
+  const idle = { ...five, steps: [] }
+  expect(bandLine(idle, NOW)).toContain('depois: esperar o reset da janela de 5 horas (85%, volta às 21:05)')
+})
+
+test('the pane says how much of each window the account used', () => {
+  const lines = paneLines({ ...STATUS, usage: { ...USAGE, windows: { ...USAGE.windows, five_hour: { percent: 82.5, resets_at: null } } } }, [], NOW)
+  expect(lines).toContain('Uso da conta: 5 h 82% · semana 41%')
+})
+
+test('with no usage, or an older ledger without it, the band and the pane are unchanged', () => {
+  const plain = bandLine(STATUS, NOW)
+  expect(bandLine({ ...STATUS, usage: null }, NOW)).toBe(plain)
+  expect(bandLine({ ...STATUS, usage: { windows: {}, economy: null, wait: null } }, NOW)).toBe(plain)
+  expect(paneLines({ ...STATUS, usage: null }, [], NOW)).toEqual(paneLines(STATUS, [], NOW))
+  expect(paneLines(STATUS, [], NOW).join(' ')).not.toContain('Uso da conta')
 })

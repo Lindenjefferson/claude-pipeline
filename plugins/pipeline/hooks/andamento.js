@@ -3,12 +3,14 @@
 // a delivery, one line above the prompt says the plan cycle, whether it is paused, the tasks in flight with their
 // time, a verdict no next step covers, what comes next, the tasks and cycles left and the VALIDAR items waiting.
 // /andamento opens a pane with what is left per cycle, the current cycle's runs, the next steps, the earlier cycles
-// and the other fronts (each worktree with a ledger of its own), and answers in text where nothing draws. Every rule stays in ledger.py (its
-// steps and scope): this file only lays them out. It checks the ledger file every 5 s and runs ledger.py again only
-// when the file changed, or once a minute (every 5 minutes while there is no ledger file). It runs ledger.py with the
-// first of python and python3 that is Python 3, as hooks/python.sh does. A ledger.py failure (a broken ledger, no
-// Python 3) shows in the band and the pane instead of passing for "no delivery". Other mods' band content is kept
-// below the line.
+// and the other fronts (each worktree with a ledger of its own), and answers in text where nothing draws. Every rule
+// stays in ledger.py (its steps and scope): this file only lays them out. It checks the ledger file every 5 s and
+// runs ledger.py again only when the file changed, or once a minute (every 5 minutes while there is no ledger file).
+// It runs ledger.py with the first of python and python3 that is Python 3, as hooks/python.sh does. It also writes
+// the account's rate-limit windows to usage.json beside the ledger (on session.measure, only when they changed;
+// advice for ledger.py, whose `usage` it shows: econômico, the wait for a reset, the pane's usage line). A ledger.py
+// failure (a broken ledger, no Python 3) shows in the band and the pane instead of passing for "no delivery". Other
+// mods' band content is kept below the line.
 
 const PANE = 'andamento'
 const POLL_MS = 5000
@@ -23,6 +25,7 @@ let mtime = null
 let lastRead = -Infinity
 let fronts = []
 let python = null
+let written = null
 
 function clock(minutes) {
   return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}`
@@ -59,7 +62,30 @@ function title(r) {
     : scope.current === String(scope.position) ? `ciclo ${scope.position} de ${scope.total}`
     : `ciclo ${scope.current} (${scope.position} de ${scope.total})`
   return [String(r.slug).replace(/[-_]+/g, ' '), cycle, ...(r.autonomous ? ['autônomo'] : []),
-          ...(r.paused ? ['pausada'] : [])].join(' · ')
+          ...(r.usage && r.usage.economy ? ['econômico'] : []), ...(r.paused ? ['pausada'] : [])].join(' · ')
+}
+
+const WINDOW = { five_hour: ['5 h', 'da janela de 5 horas'], seven_day: ['semana', 'da semana'] }
+
+function two(number) {
+  return String(number).padStart(2, '0')
+}
+
+// ledger.py's wait advice, in the user's local time: "esperar o reset da semana (97%, volta em 17/10 21:05)"
+function waitText(wait) {
+  const at = new Date(wait.resets_at)
+  const hour = `${two(at.getHours())}:${two(at.getMinutes())}`
+  const [, name] = WINDOW[wait.window] || [wait.window, `da janela ${wait.window}`]
+  const back = wait.window === 'five_hour' ? `volta às ${hour}` : `volta em ${two(at.getDate())}/${two(at.getMonth() + 1)} ${hour}`
+  return `esperar o reset ${name} (${Math.floor(wait.percent)}%, ${back})`
+}
+
+function usageLine(usage) {
+  const order = Object.keys(WINDOW)
+  const windows = Object.entries((usage && usage.windows) || {})
+  if (!windows.length) return null
+  windows.sort(([a], [b]) => (order.includes(a) ? order.indexOf(a) : 9) - (order.includes(b) ? order.indexOf(b) : 9))
+  return `Uso da conta: ${windows.map(([kind, w]) => `${(WINDOW[kind] || [kind])[0]} ${Math.floor(w.percent)}%`).join(' · ')}`
 }
 
 function left(scope) {
@@ -95,10 +121,11 @@ export function bandLine(r, now) {
     parts.push(verdict.verdict === 'PASS' ? `${AGENT[agent]} ok`
       : `${AGENT[agent]} reprovou (${plural(verdict.open, 'aberto', 'abertos')})`)
   }
+  const wait = r.usage && r.usage.wait
   if (r.ready_for_gate) parts.push('pronto para o gate')
-  else if (steps.length) {
+  else if (steps.length || wait) {
     const decide = steps.filter((step) => step.step === 'decide').map((step) => step.id)
-    const next = steps.filter((step) => step.step !== 'decide').map((step) => said(step))
+    const next = [...(wait ? [waitText(wait)] : []), ...steps.filter((step) => step.step !== 'decide').map((step) => said(step))]
     parts.push(`depois: ${listed(decide.length ? [...next, `decidir ${listed(decide)}`] : next)}`)
   }
   if (r.scope && r.scope.tasks_left) parts.push(`${r.scope.tasks_left === 1 ? 'falta' : 'faltam'} ${left(r.scope)}`)
@@ -116,6 +143,8 @@ export function paneLines(r, fronts, now, failure = null) {
   const lines = []
   if (r) {
     lines.push(title(r), '')
+    const usage = usageLine(r.usage)
+    if (usage) lines.push(usage, '')
     if (r.scope && r.scope.tasks_left) {
       lines.push(`${r.scope.tasks_left === 1 ? 'Falta' : 'Faltam'} ${left(r.scope)}:`)
       for (const cycle of r.scope.cycles) {
@@ -133,7 +162,10 @@ export function paneLines(r, fronts, now, failure = null) {
       lines.push(row(['dev', task, 'rodando', since(at, now), '-']))
     }
     if (r.ready_for_gate) lines.push('', 'Pronto para o gate.')
-    else if ((r.steps || []).length) lines.push('', 'Depois:', ...r.steps.map((step) => `- ${said(step)}`))
+    else if ((r.steps || []).length || (r.usage && r.usage.wait)) {
+      lines.push('', 'Depois:', ...(r.usage && r.usage.wait ? [`- ${waitText(r.usage.wait)}`] : []),
+                 ...(r.steps || []).map((step) => `- ${said(step)}`))
+    }
     const items = waiting(r)
     if (items.length) {
       lines.push('', 'Decisões que esperam você (VALIDAR):')
@@ -222,6 +254,30 @@ async function refresh($) {
   return true
 }
 
+function stamp(iso) {
+  if (!iso) return null
+  const at = new Date(iso)
+  return Number.isNaN(at.getTime()) ? null : at.toISOString()
+}
+
+// usage.json beside the ledger: the windows {kind: {percent, resets_at}} and when they were read. Nothing without a
+// ledger file or without windows (an API key); nothing when only the time changed. Never throws.
+async function writeUsage($) {
+  try {
+    if (!watched || mtime === null) return
+    const windows = {}
+    for (const limit of (await $.session.usage()).rateLimits || []) {
+      windows[limit.kind] = { percent: limit.percentUsed, resets_at: stamp(limit.resetsAt) }
+    }
+    const body = JSON.stringify(windows)
+    if (!Object.keys(windows).length || body === written) return
+    const folder = watched.slice(0, Math.max(watched.lastIndexOf('/'), watched.lastIndexOf('\\')) + 1)
+    const at = new Date(await $.clock.now()).toISOString()
+    await $.fs.write(`${folder}usage.json`, JSON.stringify({ at, windows }))
+    written = body
+  } catch {}
+}
+
 async function otherFronts($) {
   let listing = ''
   try {
@@ -250,11 +306,17 @@ export function register(on) {
     })
     $.clock.after(0, async () => {
       if (await refresh($)) $.ui.invalidate('ui.render')
+      await writeUsage($)
     })
     try {
       await $.command.register({ name: 'andamento', immediate: true,
                                  description: 'Andamento da entrega: o ciclo, os agentes, o que falta e as outras frentes' })
     } catch {}
+    return next(e)
+  })
+
+  on('session.measure', async ($, e, next) => {
+    await writeUsage($)
     return next(e)
   })
 

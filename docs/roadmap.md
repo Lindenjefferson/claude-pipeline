@@ -1,6 +1,6 @@
 # Roadmap do plugin `pipeline`
 
-O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.8.9) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
+O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.8.10) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
 ## Backlog
 
@@ -9,7 +9,6 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 
 ### Em espera (voltam com um sinal)
 
-- **Custo e teto de orçamento por entrega** (2.5.0, 2.6.0; o `ccusage` a pedido do usuário; também no Omnigent): os tokens já vêm do aviso de término; volta se os medidos desde a 2.8 mostrarem entregas estourando, e o `ccusage` entra junto, como o custo no relatório do gate (com `--offline` ele não tem o preço de todos os modelos).
 - **Verificador que tenta refutar cada achado de segurança, e cobertura acumulada no gate** (2.8.1): um agente a mais por achado e uma mudança grande no gate; volta se uma entrega mostrar achado falso ou caminho não examinado.
 - **Nome do ciclo do plano no `status`** (CF, depois da 2.8.7): o `status` diz "cycle 3" onde o `scope` gravou "Ciclo R" (a linha de andamento já mostra o nome); volta se o número causar um erro de range ou uma rodada a mais.
 - **Revisão de design sobre as capturas do `dev`, antes de integrar** (CF, depois da 2.8.7, decisão do usuário): custa ~190k tokens por tarefa com tela, e a 2.8.8 atacou a mesma causa; volta se uma revisão de design ainda abrir uma rodada por defeito que a própria tarefa criou.
@@ -21,6 +20,7 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 ### Recusado
 
 - **Revisão externa no gate** (2.6.0): manda o diff para fora e exige outra CLI e uma chave de LLM; o `reviewer` já cobre, e o gate é sem LLM de propósito.
+- **Custo da entrega com o `ccusage`** (pedido do usuário): ele estima dólares pelo preço da API; numa assinatura o que limita é o uso da janela e da semana, que o próprio Claude Code dá ao mod desde a 2.8.10.
 - **WSL2 para o modo multi-instância** (2.8): é escolha de ambiente, não do plugin, que roda no Linux desde a 2.8.6; não resolve o gargalo medido (a suíte longa e, no CF, a memória, que o WSL disputa).
 - **Tirar do scan de segredos os lock files de outros ecossistemas** (2.8.5): nenhum falso positivo achado, e a exclusão seria um desvio que um agente controla.
 - **Liberar `publish` local no `never_allow` do kickoff** (2.8.5): o custo é uma pergunta ao usuário, que decide.
@@ -32,6 +32,20 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 - **Chat em grupo com moderador** (Maestro): a conversa não passa pelo ledger.
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
+
+## 2.8.10 — uso da assinatura: economizar e pausar antes do limite (PR #32)
+
+Origem: pedido do usuário, que vai trocar a conta Max 20x por uma Pro, com janelas de uso bem menores. A etapa 5 do CF gastou 9,03 M tokens em 43 execuções medidas (`dev` 76%, `reviewer` em opus 17%, `qa` 8%), e na Pro isso seriam muitas janelas de 5 horas. Numa assinatura o que limita é a janela de 5 horas e a semana, não o custo, e a documentação do Claude Code dá esse uso aos mods (`$.session.usage()` e o evento `session.measure`). Substitui o item "teto de orçamento" que estava em espera desde a 2.5.0.
+
+- [x] **O mod grava o uso da conta**: a cada mudança, a porcentagem e o reset da janela de 5 horas e da semana vão para `.superpowers/usage.json`, ao lado do ledger (fora do git). É a única escrita do mod, e o teste de integridade confere que é só essa.
+- [x] **O ledger aconselha, sem bloquear**: o `status` lê o `usage.json` e os limites opcionais do `CLAUDE.local.md`. Com uma janela acima do limite de economia (60%), o modo é econômico; com a de 5 horas acima de 85% ou a semana acima de 95%, o conselho é esperar o reset. O conselho nunca entra no que falta para o gate. Cada `add` guarda a porcentagem da hora, para medir quanto cada agente consome.
+- [x] **O manager segue o conselho, sozinho** (decisão do usuário): no modo econômico, despacha o `reviewer` em sonnet e uma cópia por vez, com uma nota; na espera, não despacha nada novo, integra o que reportar e faz `pause` até o reset. Um agente cortado pelo limite não ganha `add`: o trabalho da worktree vira `wip:` e a entrega espera do mesmo jeito.
+- [x] **A linha de andamento** mostra "econômico", a espera com a hora da volta e, no painel, o uso da conta.
+- [x] **O template do `CLAUDE.local.md`** ganha a seção "Uso da conta", com os três limites e o "Sempre econômico", para uma conta Pro economizar desde o início.
+
+O prompt do manager cresceu 81 palavras (de 4763 para 4844), uma regra só; a decisão de esperar ou economizar é do ledger, testada.
+
+Números que esta versão deve mudar: agentes cortados por limite de uso no meio da tarefa (nas notas) passam a zero; a parte do `reviewer` em opus no total de tokens cai quando a conta está em economia; a porcentagem gasta por execução, que o `add` passa a registrar, dá o custo de uma entrega na Pro.
 
 ## 2.8.9 — suíte inteira no fim, pausa e retomada no ledger (PR #31)
 
@@ -143,6 +157,7 @@ Números que esta versão deve mudar, que o `feedback-plugin` da próxima entreg
 
 Termine a entrega em andamento antes de atualizar o plugin. Ao pular versões, leia as notas de cada uma, da mais antiga para a mais nova.
 
+- **2.8.10**: lê os ledgers da 2.8.9 (um `add` sem `usage` continua valendo). O `status --json` ganha `usage`, e o mod passa a gravar `.superpowers/usage.json`, já ignorado pelo `.gitignore` do kickoff. Os limites de uso são opcionais: sem as linhas novas da seção "Uso da conta" do template do `CLAUDE.local.md`, valem 60%, 85% e 95%; numa conta Pro, acrescente à mão a seção com "Sempre econômico: `sim`".
 - **2.8.9**: lê os ledgers da 2.8.8 (um `claim` sem worktree nem origem continua valendo). `ledger.py` ganha `pause --text`, `resume`, `claim --worktree --origin` e `add --agent qa --full`, e o `status --json` ganha `claims`, `paused` e `full_qa`. O gate ganha a checagem "Full suite": num projeto com "Verificação de interface" e nenhuma linha "Testes (<nome>)", a entrega precisa de um `qa` com a suíte inteira no head final, registrado com `--full`, ou de uma linha "Testes (<nome>)" com essa suíte; um projeto cuja linha "Testes" já roda a suíte de interface junto com os outros testes a divide em duas, "Testes" sem ela e "Testes (interface)" com ela, para não rodá-la duas vezes. Uma linha "Testes do <x>" passa a dar aviso: para o gate rodá-la, escreva "Testes (<x>)". O `CLAUDE.local.md` de quem já tem ganha à mão as duas linhas novas do template (memória livre mínima para despachar e cópias pesadas com o usuário na máquina), porque o kickoff não reescreve o arquivo; sem elas, o manager usa só o pico por cópia, como antes.
 - **2.8.8**: lê os ledgers da 2.8.7. `ledger.py` ganha `extend --reason`, para a decisão do usuário de seguir com as correções depois do limite de rodadas. Com o `scope` gravado, o `add` de uma tarefa de um ciclo posterior do plano é recusado até o ciclo aberto fechar. Projetos que já têm a seção "Execução em paralelo" editam à mão as duas linhas dela que mudaram (conferir a cópia e derrubar o armazenamento), porque o kickoff só acrescenta seções que faltam; sem elas, o manager prepara e remove a cópia como antes.
 - **2.8.7**: lê os ledgers da 2.8.6 (uma entrada antiga com `summary` continua lida). `add --summary` saiu; `add` ganha `--report <path>` (reviewer e qa) e `--task spec|plan` (reviewer), `waive` ganha `--task`, e o `status --json` ganha `from`, `metrics.reviews` e o passo `review`. Rode o `kickoff` de novo para a linha do pico por cópia do `CLAUDE.local.md` contar a verificação (build e suíte). Um projeto com telas e sem a linha "Formatos de tela" preenchida recebe a pergunta do manager antes do primeiro ciclo. O `git config --global pipeline.home` deixa de ser necessário: a primeira sessão depois da atualização grava o `pipeline.home` do repositório na pasta da versão em uso. O `security-review` passa a rodar só quando a entrega toca um domínio sensível; no modo supervisionado, o `validar` vem antes do gate; o gate interrompe o comando que passa do "Tempo máximo" (o valor vai entre crases); saiu o ciclo seguinte em segundo plano.
