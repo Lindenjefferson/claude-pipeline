@@ -31,10 +31,10 @@ Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o
 
 ## Preparar uma máquina
 
-O que um computador novo precisa para trabalhar no projeto, depois de clonar e instalar o plugin, para o kickoff deixá-lo pronto quase sozinho. Ele roda os comandos destas linhas com uma confirmação do usuário, nunca improvisa um que não está aqui e nunca copia, inventa ou adivinha um segredo.
+O que um computador novo precisa para trabalhar no projeto, depois de clonar e instalar o plugin, para o kickoff deixá-lo pronto quase sozinho, na ordem em que as linhas estão (mude a ordem quando um valor depende de um serviço de pé). Ele mostra cada comando, recusa os perigosos e roda o resto com uma confirmação do usuário, nunca improvisa um que não está aqui e nunca copia, inventa ou adivinha um segredo.
 
 - Pré-requisitos (cada ferramenta, a versão, o comando que a confere e, por sistema, o que a instala ou abre): _(ex.: a versão do runtime, o comando que a mostra e o instalador do Windows e do Linux; um serviço que precisa estar aberto e como abri-lo)_
-- Arquivos de ambiente (de qual exemplo copiar e de onde vêm os valores: o comando que os baixa do serviço onde o projeto roda, com o usuário logado, ou os que ele preenche à mão): _(ou "nenhum")_
+- Arquivos de ambiente (de qual exemplo copiar e de onde vêm os valores: o comando que grava o arquivo com eles, do serviço onde o projeto roda ou de um serviço local já de pé, ou os que o usuário preenche à mão): _(ou "nenhum")_
 - Serviços locais (o que subir antes de trabalhar): _(comando, ou "nenhum")_
 - Prova de que a máquina está pronta: _(comando curto, como os testes rápidos e o status dos serviços)_
 
