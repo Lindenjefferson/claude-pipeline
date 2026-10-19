@@ -37,7 +37,7 @@ Each rule has tests at both boundaries.
 
 ## 6. UI states (per screen)
 - Loading, empty, error (a specific message per failure the user can provoke, shown where it happens), success.
-- The data states each screen shows differently (negative, overdue, a past period, an optional part filled in): the plan lists them per screen, so qa captures each from the cycle's first run.
+- The data states each screen shows differently (zero or negative, an old record, an optional field filled in): the plan lists them per screen, so qa captures each from the cycle's first run.
 - Destructive actions: confirmation, copy, focus after close.
 - The project's layout requirements (widths, touch targets, overflow), each to be asserted in the screen's automated interface test; keyboard order; what live regions announce.
 - What happens to typed values after a validation error (never the password).

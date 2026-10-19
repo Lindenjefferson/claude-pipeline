@@ -58,9 +58,9 @@ falls in the range too). steps: one {"step": dev|reviewer|qa|fix|review|ask|stop
 with its detail (task and verdict, agent, open findings and the report path, a qa re-run, a review round and its
 report, a deferred id and text); a task in flight is no step. scope: the plan cycles recorded
 with scope, in the order first recorded (a later scope for a cycle replaces its tasks in place, an empty one removes
-it), each with the tasks that have no DONE run yet; the current cycle (the one holding the task in flight, else the
-latest task); and how many tasks and cycles are left (a cycle whose tasks are done counts until it closes). With no
-scope recorded, scope is null.
+it), each with the tasks that have no DONE run yet; the current cycle (the one holding the task in flight once the
+open cycle has closed, else the latest task); and how many tasks and cycles are left (a cycle whose tasks are done
+counts until it closes). With no scope recorded, scope is null.
 
 Without --ledger, the ledger is .superpowers/ledger.jsonl at the root of the current worktree, or of the main
 worktree when the current one has none (a task worktree), except for start, which always uses the current one. A
