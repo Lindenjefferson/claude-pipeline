@@ -22,6 +22,7 @@
   resolve --id <id> --decision <text>                         the final decision on a deferred item
   lesson  --text <rule> [--check <test or lint rule>]         a lesson, automated when --check names the check
   status  [--json] [--check]                                  the current cycle, what it still needs, and metrics
+  capacity [--json]                                           free memory and disk, and the parallel copies that fit
 
 A claim is written when the dev is dispatched and freed by the dev's add (or release); status lists the tasks in
 flight and the gate waits for them, so a manager resuming after a compaction sees which runs it still owes a report.
@@ -91,6 +92,15 @@ none), the room the next run may use. seconds_left, from now, is null when reset
 "until <resets_at> (in 2h13m)". It is advice for the manager, never pending: pending, steps and ready_for_gate do not change. Every add records
 the valid windows' percent as usage.
 
+capacity answers, before a dispatch that prepares or verifies, how many parallel copies fit: the free memory (Windows
+GlobalMemoryStatusEx, Linux MemAvailable; PIPELINE_CAPACITY_MEMORY_GB and PIPELINE_CAPACITY_DISK_GB override the
+measure, and an empty or invalid value counts as unknown) and the free disk of the worktree root, against the Execução
+em paralelo lines of CLAUDE.local.md (peak of a copy, memory and disk; free-memory floor; heavy copies with the user
+on the machine, which caps copies in supervised mode only). copies is the largest n with free - n*peak >= max(peak,
+floor), so one more copy and the floor stay free (null when the peak or the memory is unknown); dispatch is false below
+the floor. It needs no delivery, exits 1 when dispatch is false, and --json gives memory_free_gb, disk_free_gb, peak_gb,
+disk_peak_gb, floor_gb, heavy_limit, autonomous, dispatch, copies and reason.
+
 Without --ledger, the ledger is .superpowers/ledger.jsonl at the root of the current worktree, or of the main
 worktree when the current one has none (a task worktree), except for start, which always uses the current one. A
 line that is not JSON stops every command with its line number, so a truncated write is never skipped silently."""
@@ -99,6 +109,7 @@ import datetime
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -931,6 +942,142 @@ def status(args):
         sys.exit(1)
 
 
+NUMBER = r"\d+(?:[.,]\d+)?"
+HEAVY_WORDS = {"uma": 1, "um": 1, "one": 1, "duas": 2, "dois": 2, "two": 2, "tres": 3, "three": 3, "quatro": 4,
+               "four": 4}
+
+
+def plain_text(text):
+    return "".join(c for c in unicodedata.normalize("NFD", text.lower()) if not unicodedata.combining(c))
+
+
+def gigabytes(text):
+    return float(text.replace(",", "."))
+
+
+def first_number(text, unit=False):
+    """The first number inside backticks, else the first number, or the first followed by GB or G."""
+    ticked = re.search(r"`[^`\d]*(" + NUMBER + r")[^`]*`", text)
+    if ticked:
+        return gigabytes(ticked.group(1))
+    found = re.search(r"(" + NUMBER + (r")\s*g(?:b)?\b" if unit else ")"), text)
+    return gigabytes(found.group(1)) if found else None
+
+
+def capacity_settings(path):
+    """CLAUDE.local.md, Execução em paralelo: the memory and disk peak of a copy, the free-memory floor, the heavy limit."""
+    found = {"peak": None, "disk_peak": None, "floor": None, "heavy": None}
+    labels = {"quanto uma copia ocupa no pico": "peak", "memoria livre minima para despachar": "floor",
+              "com o usuario usando a maquina": "heavy"}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            rows = handle.read().splitlines()
+    except (OSError, ValueError):
+        return found
+    for row in rows:
+        plain = plain_text(row).lstrip(" -*")
+        for label, key in labels.items():
+            if not plain.startswith(label) or ":" not in plain:
+                continue
+            rest = plain.partition(":")[2].strip()
+            if rest.startswith("_("):
+                continue
+            if key == "peak":
+                memory, _, disk = rest.partition("disco")
+                found["peak"] = first_number(memory, unit=True)
+                found["disk_peak"] = first_number(disk, unit=True) if disk else None
+            elif key == "floor":
+                found["floor"] = first_number(rest)
+            else:
+                ticked = re.search(r"`\s*(\d+)\s*`", rest) or re.search(r"\d+", rest)
+                word = next((HEAVY_WORDS[w] for w in re.findall(r"[a-z]+", rest) if w in HEAVY_WORDS), None)
+                found["heavy"] = int(ticked.group(ticked.lastindex or 0)) if ticked else word
+    return found
+
+
+def measure(variable, probe):
+    """Free GB: the env override when set (empty or invalid means unknown), else the probe; None when unknown."""
+    if variable in os.environ:
+        try:
+            value = float(os.environ[variable].replace(",", "."))
+        except ValueError:
+            return None
+        return value if value >= 0 and value == value and value != float("inf") else None
+    try:
+        return probe()
+    except (OSError, ValueError, AttributeError, ImportError):
+        return None
+
+
+def free_memory_gb():
+    if sys.platform == "win32":
+        import ctypes
+
+        class Status(ctypes.Structure):
+            _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong), ("total", ctypes.c_ulonglong),
+                        ("avail", ctypes.c_ulonglong), ("page_total", ctypes.c_ulonglong),
+                        ("page_avail", ctypes.c_ulonglong), ("virtual_total", ctypes.c_ulonglong),
+                        ("virtual_avail", ctypes.c_ulonglong), ("extended", ctypes.c_ulonglong)]
+
+        status = Status()
+        status.length = ctypes.sizeof(Status)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return None
+        return status.avail / 1024 ** 3
+    if sys.platform.startswith("linux"):
+        with open("/proc/meminfo", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) / 1024 ** 2
+    return None
+
+
+def fit(free, peak, reserve):
+    """The largest n >= 0 with free - n*peak >= reserve."""
+    return max(0, int((free - reserve) / peak + 1e-9)) if peak > 0 else None
+
+
+def capacity(args):
+    entries = read(args.ledger)
+    root = os.path.dirname(os.path.dirname(os.path.abspath(args.ledger)))
+    memory = measure("PIPELINE_CAPACITY_MEMORY_GB", free_memory_gb)
+    disk = measure("PIPELINE_CAPACITY_DISK_GB", lambda: shutil.disk_usage(root).free / 1024 ** 3)
+    setting = capacity_settings(os.path.join(root, "CLAUDE.local.md"))
+    peak, disk_peak, floor, heavy = setting["peak"], setting["disk_peak"], setting["floor"], setting["heavy"]
+    free_mode = autonomous(entries)
+    dispatch = None if memory is None else memory >= (floor or 0)
+    copies, notes = None, []
+    if memory is not None and peak:
+        copies = fit(memory, peak, max(peak, floor or 0))
+        if disk_peak and disk is not None:
+            copies = min(copies, fit(disk, disk_peak, disk_peak))
+            notes.append(f"disk {disk:g} GB free, peak {disk_peak:g}")
+        if not free_mode and heavy is not None and heavy < copies:
+            copies = heavy
+            notes.append(f"supervised limit {heavy}")
+    if memory is None:
+        reason = "free memory unknown: set PIPELINE_CAPACITY_MEMORY_GB"
+    elif dispatch is False:
+        reason = f"{memory:.1f} GB free, below the floor {floor:g}: do not dispatch"
+    elif not peak:
+        reason = "peak unknown: measure the first copy's drop in free memory"
+    else:
+        shown = "no parallel copy; one dispatch fits" if not copies else f"{copies} parallel cop{'y' if copies == 1 else 'ies'} fit"
+        reason = f"{memory:.1f} GB free, floor {floor or 0:g}, peak {peak:g}: {shown}"
+        if notes:
+            reason += f" ({'; '.join(notes)})"
+    report = {"memory_free_gb": memory, "disk_free_gb": disk, "peak_gb": peak, "disk_peak_gb": disk_peak,
+              "floor_gb": floor, "heavy_limit": heavy, "autonomous": free_mode, "dispatch": dispatch,
+              "copies": copies, "reason": reason}
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False))
+    else:
+        label = {True: "yes", False: "no", None: "unknown"}[dispatch]
+        print(f"capacity: dispatch {label}, copies {'unknown' if copies is None else copies}; {reason}")
+    if dispatch is False:
+        sys.exit(1)
+
+
 def count(text):
     if not text.isdigit():
         raise argparse.ArgumentTypeError(f"a count is a whole number of 0 or more, not {text!r}")
@@ -1012,6 +1159,9 @@ def main():
     command.add_argument("--text", required=True)
     command.add_argument("--check", default="")
     command.set_defaults(run=lesson)
+    command = commands.add_parser("capacity")
+    command.add_argument("--json", action="store_true")
+    command.set_defaults(run=capacity)
     command = commands.add_parser("status")
     command.add_argument("--json", action="store_true")
     command.add_argument("--check", action="store_true")

@@ -27,7 +27,8 @@ Cada componente tem **uma** fonte de verdade, o próprio arquivo. Os outros docu
 | Hooks de sessão e de ferramenta (retomada após compactação, `pipeline.home` na versão em uso, pular o `pre-commit`, branch principal no modo autônomo, servidor de dev solto) | docstrings de [`hooks/session-start.py`](plugins/pipeline/hooks/session-start.py) e [`hooks/bash-guard.py`](plugins/pipeline/hooks/bash-guard.py), registrados em [`hooks/hooks.json`](plugins/pipeline/hooks/hooks.json); a escolha entre `python` e `python3`, no topo de [`hooks/python.sh`](plugins/pipeline/hooks/python.sh) |
 | Linha de andamento, painel `/andamento` e o uso da conta em `usage.json` (mod) | comentário do topo de [`hooks/andamento.js`](plugins/pipeline/hooks/andamento.js), listado em `modules` no `hooks.json` |
 | Testes dos scripts | `plugins/pipeline/skills/manager/tests/`, `plugins/pipeline/hooks/tests/` (o do mod é `andamento.test.ts`) |
-| Versões entregues, notas de atualização, backlog | [`docs/roadmap.md`](docs/roadmap.md) |
+| Versões entregues, backlog | [`docs/roadmap.md`](docs/roadmap.md) |
+| Notas de atualização (vão com a versão instalada) e como atualizar um projeto | [`plugins/pipeline/UPGRADING.md`](plugins/pipeline/UPGRADING.md), aplicadas pela skill [`atualizar`](plugins/pipeline/skills/atualizar/SKILL.md) |
 | Apresentação, começo rápido, componentes em uma linha | [`README.md`](README.md) |
 | Manifesto e marketplace | [`plugins/pipeline/.claude-plugin/plugin.json`](plugins/pipeline/.claude-plugin/plugin.json), [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) |
 
@@ -47,7 +48,7 @@ O `kickoff` prepara o projeto uma vez. A cada pedido, o `manager` dimensiona o t
   Toda ideia termina no roadmap: na versão, em "Em espera" com o sinal que a traz de volta, ou em "Recusado" com o motivo em uma linha; a que veio de um projeto é marcada, no arquivo de atritos dele, com a versão ou o destino. Antes de fechar cada versão, uma revisão por outro modelo, com base nos ledgers e relatórios das entregas, e uma revisão do diff inteiro e dos arquivos que ele toca tiram o que ficou repetido, específico de stack, impossível de conferir ou sem uso, e conferem que a documentação e o repositório continuam organizados: cada informação no arquivo que o mapa diz, links válidos, nenhum arquivo solto ou sem uso. Uma lição que se repete em dois projetos é candidata a princípio em `checklists/general.md`.
 - **Fonte única por componente.** Comportamento novo vai para o arquivo do componente; README e este `CLAUDE.md` ganham no máximo uma linha com link. Ao mudar um componente, conferir que README, `CLAUDE.md`, `docs/roadmap.md` e os outros componentes que o citam continuam consistentes (mesmos termos, nenhuma cópia). Única cópia permitida: os três princípios acima, idênticos palavra por palavra na seção "Propósito e princípios" do README; as duas cópias mudam juntas, no mesmo commit.
 - **Enxugar ao tocar.** Ao editar um arquivo, remover o que ficou obsoleto, duplicado ou sem uso, e listar o que saiu no PR.
-- **Teste primeiro** para `ledger.py`, `gate.py`, os hooks e o mod: o teste novo falha antes da mudança. Ledgers de versões anteriores continuam legíveis, ou a quebra vai para as notas de atualização.
+- **Teste primeiro** para `ledger.py`, `gate.py`, os hooks e o mod: o teste novo falha antes da mudança. Ledgers de versões anteriores continuam legíveis, ou a quebra vai para as notas de atualização (`plugins/pipeline/UPGRADING.md`).
 - Sem datas no texto dos documentos: o git registra quando cada coisa mudou. A origem vai como versão, PR ou "decisão do usuário".
 - Arquivos em UTF-8 e LF (`.gitattributes`). Prompts de skills e agentes em inglês; README, este arquivo e o roadmap em português.
 - Nunca `git commit --no-verify`.
@@ -66,6 +67,6 @@ Cada arquivo de teste Python roda sozinho com o Python 3 (sem pytest) e imprime 
 ## Versão e release
 
 - Trabalho numa branch `feat/...` ou `fix/...` a partir da `master`, entregue por PR.
-- Cada release sobe a `version` de `plugin.json` (instalações do GitHub ficam fixas nela) e move os itens entregues em `docs/roadmap.md` para a seção da versão, com o número do PR e, se algo muda para quem atualiza, uma linha em "Notas de atualização".
+- Cada release sobe a `version` de `plugin.json` (instalações do GitHub ficam fixas nela) e move os itens entregues em `docs/roadmap.md` para a seção da versão, com o número do PR e, uma linha da versão em `plugins/pipeline/UPGRADING.md` ("nada muda" quando nada muda, para a skill `atualizar` saber).
 - As lições de uma entrega acumulam na versão seguinte e saem num ponto de parada da entrega (nenhum agente rodando); correção de script quebrado (hook, gate, ledger) pode sair sozinha.
 - Merge e instalação do plugin atualizado só com pedido explícito do dono.
