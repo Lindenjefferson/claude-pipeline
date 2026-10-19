@@ -37,7 +37,9 @@ ledger-<old-slug>.jsonl next to the ledger first. --check exits 1 while anything
 it. A cycle whose reviewer or qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on
 up to three, then the delivery stops. extend, once status asks the user or stops, records the user's decision to go
 on (a note, VALIDAR in autonomous mode): the current cycle gets one more fix round, and a reviewer or qa FAIL after
-it asks or stops again; it never carries to the next cycle. waive is refused when the dev ran after that FAIL (the fix needs its review); it
+it asks or stops again; it never carries to the next cycle. With scope recorded, a task of a later plan cycle may be
+claimed while the current cycle is open, but its add is refused until the cycle closes, so the next cycle's range
+starts at the head that closed this one. waive is refused when the dev ran after that FAIL (the fix needs its review); it
 records the reason as a note and counts as that agent's PASS at the head it reviewed. Notes marked --validar (and
 waivers in autonomous mode) are listed apart, numbered V1, V2... in the order written, for the user to confirm on
 return; validate records the decision, and status lists the items still waiting apart from the decided ones. A
@@ -332,6 +334,12 @@ def add(args):
     blocking = args.critical + args.important
     if args.agent in ("reviewer", "qa") and (args.verdict == "FAIL") != (blocking > 0):
         sys.exit("FAIL needs open Critical/Important findings (--critical or --important > 0) and PASS none")
+    if args.agent == "dev" and not FOLLOW_UP.fullmatch(args.task):
+        cycle = cycles(entries)[-1]
+        later = later_cycle(entries, cycle, args.task) if cycle_state(cycle)[1] else None
+        if later:
+            sys.exit(f"{args.task} is a task of plan cycle {later}: integrate and add it once this cycle closes "
+                     "(status says what the cycle still needs), so the next cycle's range starts where this one ends")
     entry = {"type": "run", "agent": args.agent, "task": args.task, "verdict": args.verdict, "open": blocking,
              "critical": args.critical, "important": args.important, "minor": args.minor,
              "origin": origins(args.origin, blocking + args.minor), "head": git_head(ledger=args.ledger) or ""}
@@ -470,19 +478,35 @@ def scope(args):
     print(f"cycle {args.cycle}: {len(tasks)} tasks" if tasks else f"cycle {args.cycle} removed from the scope")
 
 
-def progress(entries, closed, held):
+def plan_cycles(entries):
     plan = {}
     for entry in entries:
         if entry["type"] == "scope":
             plan[entry["cycle"]] = entry["tasks"]
-    plan = {cycle: tasks for cycle, tasks in plan.items() if tasks}
+    return {cycle: tasks for cycle, tasks in plan.items() if tasks}
+
+
+def later_cycle(entries, cycle, task):
+    plan = plan_cycles(entries)
+    names = list(plan)
+
+    def position(name):
+        return next((index for index, cycle_name in enumerate(names) if name in plan[cycle_name]), None)
+    current = [position(entry["task"]) for entry in cycle if entry["agent"] == "dev" and not is_task(entry, FOLLOW_UP)]
+    current = [index for index in current if index is not None]
+    target = position(task)
+    return names[target] if current and target is not None and target > current[-1] else None
+
+
+def progress(entries, closed, held):
+    plan = plan_cycles(entries)
     if not plan:
         return None
     done = {entry["task"] for entry in runs(entries) if entry["agent"] == "dev" and entry["verdict"] in DONE}
     latest = [entry["task"] for entry in runs(entries) if entry["agent"] == "dev" and not is_task(entry, FOLLOW_UP)]
     names = list(plan)
     current = names[0]
-    for task in latest + list(held):
+    for task in latest + (list(held) if closed else []):
         current = next((cycle for cycle in names if task in plan[cycle]), current)
     cycles = [{"cycle": cycle, "tasks": tasks, "left": [task for task in tasks if task not in done]}
               for cycle, tasks in plan.items()]
@@ -612,8 +636,11 @@ def status(args):
     # a task in flight again after a verdict that was not done is no step: its run is pending below
     kept = [(text, step) for text, step in zip(pending, state["steps"]) if step.get("task") not in held]
     pending = loops + [text for text, _ in kept]
-    pending += [f"dev {task} dispatched at {at}, no report yet (add it when it reports, or release --task {task})"
-                for task, at in held.items()]
+    for task, at in held.items():
+        later = None if closed else later_cycle(entries, groups[-1], task)
+        pending.append(f"dev {task} dispatched at {at}, for plan cycle {later}: integrate and add it once this cycle "
+                       f"closes, or release --task {task}" if later else
+                       f"dev {task} dispatched at {at}, no report yet (add it when it reports, or release --task {task})")
     pending += [f"deferred {item['id']} has no decision: {item['text']}" for item in items if not item["decision"]]
     steps += [step for _, step in kept] + [{"step": "decide", "id": item["id"], "text": item["text"]}
                                            for item in items if not item["decision"]]
