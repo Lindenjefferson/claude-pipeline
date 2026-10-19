@@ -25,7 +25,7 @@ tamanho → (spec) → plano ✋ → ciclos: dev por tarefa (as independentes em
 4. O `gate.py` confere localmente o ledger, os critérios de aceite com teste, build, tipos, lint, testes (a suíte inteira no head final, rodada por ele ou por um `qa`), auditoria de dependências e segredos, e grava um relatório de qualidade com as métricas da entrega.
 5. Você decide o merge e o push (✋ 2). Nada sai da máquina sem esse pedido.
 
-Com você ausente, o modo autônomo do [manager](plugins/pipeline/skills/manager/SKILL.md) troca as aprovações por uma lista VALIDAR e não faz merge nem push.
+Com você ausente, o [modo autônomo](plugins/pipeline/skills/manager/references/autonomous.md) do manager troca as aprovações por uma lista VALIDAR e não faz merge nem push.
 
 ## Começo rápido
 
@@ -48,7 +48,7 @@ Para atualizar: `claude plugin marketplace update linden-plugins` e, em cada pro
 | Componente | Função |
 |---|---|
 | [`kickoff`](plugins/pipeline/skills/kickoff/SKILL.md) | Prepara um projeto novo ou existente: `CLAUDE.md`, `CLAUDE.local.md`, `docs/`, `.gitignore`, hook de segredos, permissões dos agentes e grafo. |
-| [`manager`](plugins/pipeline/skills/manager/SKILL.md) | Conduz a entrega do tamanho ao merge, em ciclos, com duas aprovações suas. |
+| [`manager`](plugins/pipeline/skills/manager/SKILL.md) | Conduz a entrega do tamanho ao merge, em ciclos, com duas aprovações suas; o que vale só numa situação (modo autônomo, pausa, telas, paralelo, várias sessões) está em [`references/`](plugins/pipeline/skills/manager/references/), lido quando ela ocorre. |
 | [`validar`](plugins/pipeline/skills/validar/SKILL.md) | Percorre com você, item a item, as decisões tomadas em seu nome (lista VALIDAR) e grava cada resposta. |
 | [`feedback-plugin`](plugins/pipeline/skills/feedback-plugin/SKILL.md) | No fim da entrega, escreve o pedido para a sessão do plugin, com métricas e lições candidatas a regra geral. |
 | [`discovery`](plugins/pipeline/agents/discovery.md) | Extrai fatos das fontes brutas (planilhas, apps de referência, documentos) antes do design. |
@@ -57,7 +57,8 @@ Para atualizar: `claude plugin marketplace update linden-plugins` e, em cada pro
 | [`qa`](plugins/pipeline/agents/qa.md) | Roda a suíte e confere os critérios de aceite do ciclo, com a verificação de interface do projeto quando há tela. |
 | [`ledger.py`](plugins/pipeline/skills/manager/ledger.py) | Registro da entrega: o que cada agente concluiu, o que falta, itens adiados e métricas. |
 | [`gate.py`](plugins/pipeline/skills/manager/gate.py) | Checagem final local, sem agente: READY ou NOT READY e o relatório de qualidade. |
-| [`general.md`](plugins/pipeline/checklists/general.md) | Princípios gerais de qualidade que o `dev` e o `reviewer` aplicam. |
+| [`general.md`](plugins/pipeline/checklists/general.md) | Princípios gerais de qualidade que o `dev` e o `reviewer` aplicam: o índice e três fatias (dados e entradas do servidor; contas; servidor, navegador, telas, tokens e builds), cada uma lida quando o produto tem o que os itens dela tratam. |
+| [`agents-shared.md`](plugins/pipeline/checklists/agents-shared.md) | O que `dev` e `qa` têm em comum (grafo de conhecimento, servidor de dev, processos que iniciam); o `reviewer` usa só o grafo. |
 | [`spec-checklist.md`](plugins/pipeline/skills/manager/templates/spec-checklist.md) | O que toda spec e todo plano respondem, com o pré-mortem de cada escrita. |
 | [Hook de segredos e UTF-8](plugins/pipeline/hooks/pre-commit-secret-scan.py) | `pre-commit` do git que bloqueia `.env`, linhas com cara de segredo e linhas adicionadas que não são UTF-8 ou têm caracteres invisíveis; o docstring explica falso positivo e a correção. |
 | [Hook de retomada](plugins/pipeline/hooks/session-start.py) | `SessionStart` (toda sessão): depois de compactação ou retomada, devolve ao manager o `status` do ledger; em toda sessão, mantém o `pipeline.home` do repositório na versão do plugin em uso. Registrado em [`hooks.json`](plugins/pipeline/hooks/hooks.json). |
