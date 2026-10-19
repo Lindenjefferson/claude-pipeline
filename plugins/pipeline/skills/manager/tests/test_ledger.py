@@ -524,4 +524,116 @@ scope = status(SCOPE)["scope"]
 check("the current cycle is the one of the task in flight or the latest task",
       scope["current"] == "R" and scope["position"] == 2, scope)
 
+REDO = ".superpowers/redo.jsonl"
+run("start", "--slug", "redo", ledger=REDO)
+add("dev", "BLOCKED", "T1", ledger=REDO)
+run("claim", "--task", "T1", ledger=REDO)
+redo = status(REDO)
+check("a task sent back to the dev and in flight again is no step and no pending verdict",
+      redo["in_flight"] == ["T1"] and not any(step.get("task") == "T1" for step in redo["steps"])
+      and not any(item.startswith("dev T1: BLOCKED") for item in redo["pending"]), redo)
+
+REPORTS = ".superpowers/reports.jsonl"
+run("start", "--slug", "reports", ledger=REPORTS)
+add("dev", "DONE", "T1", ledger=REPORTS)
+r = run("add", "--agent", "dev", "--task", "T2", "--verdict", "DONE", "--summary", "x", ledger=REPORTS)
+check("--summary is gone", r.returncode != 0, r.stdout)
+r = run("add", "--agent", "dev", "--task", "T2", "--verdict", "DONE", "--report", "x.md", ledger=REPORTS)
+check("a dev run has no report file: --report is refused", r.returncode != 0 and "--report" in r.stderr, r.stderr)
+r = run("add", "--agent", "reviewer", "--verdict", "FAIL", "--important", "2", "--origin", "execution=2", "--report",
+        "/w/.superpowers/reports/reports/1-reviewer.md", ledger=REPORTS)
+run("add", "--agent", "qa", "--verdict", "FAIL", "--important", "1", "--origin", "execution=1", "--report",
+    "/w/.superpowers/reports/reports/1-qa.md", ledger=REPORTS)
+state = status(REPORTS)
+check("add --report keeps the report path with the run and in its fix step",
+      r.returncode == 0 and state["reviewer"][0]["report"] == "/w/.superpowers/reports/reports/1-reviewer.md"
+      and state["steps"] == [{"step": "fix", "agent": "reviewer", "open": 2, "report": "/w/.superpowers/reports/reports/1-reviewer.md"},
+                             {"step": "fix", "agent": "qa", "open": 1, "report": "/w/.superpowers/reports/reports/1-qa.md"}],
+      (r.stderr, state["steps"]))
+text = run("status", ledger=REPORTS).stdout
+check("the pending text names the report of each open FAIL",
+      "reviewer FAIL (2 open, report /w/.superpowers/reports/reports/1-reviewer.md)" in text and "1-qa.md" in text, text)
+add("dev", "DONE", "fix-1", ledger=REPORTS)
+check("a run without --report has no report key", "report" not in status(REPORTS)["runs"][0]
+      and not any("report" in step for step in status(REPORTS)["steps"]), status(REPORTS)["steps"])
+for flag in ("--seconds", "--tokens"):
+    r = run("add", "--agent", "dev", "--task", "T3", "--verdict", "DONE", flag, "0", ledger=REPORTS)
+    check(f"{flag} 0 is refused: leave it out when unmeasured", r.returncode != 0 and "leave it out" in r.stderr, r.stderr)
+
+LOOP = ".superpowers/loop.jsonl"
+run("start", "--slug", "loop", ledger=LOOP)
+r = run("add", "--agent", "qa", "--task", "plan", "--verdict", "PASS", ledger=LOOP)
+check("only the reviewer reviews a plan or a spec", r.returncode != 0 and "--task" in r.stderr, r.stderr)
+check("a reviewer task other than spec or plan is refused",
+      run("add", "--agent", "reviewer", "--task", "T1", "--verdict", "PASS", ledger=LOOP).returncode != 0)
+
+
+def review(verdict, task="plan", open_count=0, ledger=LOOP, report=None):
+    args = ["add", "--agent", "reviewer", "--task", task, "--verdict", verdict]
+    if open_count:
+        args += ["--important", str(open_count), "--origin", f"plan={open_count}"]
+    return run(*(args + (["--report", report] if report else [])), "--seconds", "5m", ledger=ledger)
+
+
+r = review("FAIL", open_count=2, report="/w/r1.md")
+state = status(LOOP)
+check("a plan review FAIL is a review step with its round, outside the cycles",
+      r.returncode == 0 and state["cycle"] == 1 and state["tasks"] == {} and state["reviewer"] == []
+      and state["steps"] == [{"step": "review", "task": "plan", "round": 2, "open": 2, "report": "/w/r1.md"}, {"step": "dev"}]
+      and state["pending"][0] == "plan review round 1 FAIL (2 open, report /w/r1.md): apply the corrections and dispatch "
+                                 "the reviewer on them again", (r.stderr, state["steps"], state["pending"]))
+check("status --check fails while the plan review is open", run("status", "--check", ledger=LOOP).returncode == 1)
+review("FAIL", open_count=1)
+review("FAIL", open_count=1)
+state = status(LOOP)
+check("supervised: the third plan review FAIL asks the user",
+      state["steps"][0] == {"step": "ask", "task": "plan", "rounds": 3}
+      and state["pending"][0] == "plan review still fails after 3 rounds: ask the user", state)
+run("mode", "autonomous", ledger=LOOP)
+state = status(LOOP)
+check("autonomous: a 4th round checks only the corrections, and its PASS becomes note --validar",
+      state["steps"][0] == {"step": "review", "task": "plan", "round": 4, "open": 1, "last": True}
+      and "note --validar" in state["pending"][0], state)
+review("FAIL", open_count=1)
+state = status(LOOP)
+check("autonomous: a 4th FAIL stops the delivery",
+      state["steps"][0] == {"step": "stop", "task": "plan", "rounds": 4} and "note --validar" in state["pending"][0], state)
+review("PASS", open_count=0)
+state = status(LOOP)
+check("a plan review PASS closes the loop and the cycle steps stay",
+      state["steps"] == [{"step": "dev"}] and state["pending"] == ["no dev task yet"], state)
+check("plan reviews are counted in the metrics by rounds, findings and time, apart from the cycles",
+      state["metrics"]["reviews"] == {"plan": {"rounds": 5, "critical": 0, "important": 5, "minor": 0, "seconds": 1500,
+                                               "tokens": 0}}
+      and state["metrics"]["time"]["agents"] == {"reviewer": 1500} and state["metrics"]["origins"]["plan"] == 5
+      and state["metrics"]["cycles"][0]["seconds"] == 0, state["metrics"])
+review("FAIL", task="spec", open_count=1)
+check("a spec review has its own loop", status(LOOP)["steps"][0]["task"] == "spec", status(LOOP)["steps"])
+r = run("waive", "--agent", "reviewer", "--task", "spec", "--reason", "user approved the spec with the finding", ledger=LOOP)
+state = status(LOOP)
+check("waive --task closes a review loop the user accepted as it is",
+      r.returncode == 0 and not any(step.get("task") == "spec" for step in state["steps"])
+      and state["validar"][-1]["text"] == "waived reviewer spec FAIL: user approved the spec with the finding",
+      (r.stderr, state))
+check("waive --task of a review that passed is refused",
+      run("waive", "--agent", "reviewer", "--task", "plan", "--reason", "x", ledger=LOOP).returncode != 0)
+
+FROM = ".superpowers/from.jsonl"
+base_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
+run("start", "--slug", "from", ledger=FROM)
+check("cycle 1 starts at the base", status(FROM)["from"] == base_head, status(FROM).get("from"))
+subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "T1"], cwd=repo, check=True, capture_output=True)
+add("dev", "DONE", "T1", ledger=FROM)
+add("reviewer", "PASS", ledger=FROM)
+add("qa", "PASS", ledger=FROM)
+closing_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
+check("a closed cycle still reports its own from", status(FROM)["from"] == base_head)
+subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "T2"], cwd=repo, check=True, capture_output=True)
+add("dev", "DONE", "T2", ledger=FROM)
+check("the next cycle starts at the head recorded by the run that closed the previous one",
+      status(FROM)["from"] == closing_head, status(FROM).get("from"))
+check("text status names the cycle's from", f"from {closing_head[:12]}" in run("status", ledger=FROM).stdout)
+check("an old ledger without heads has no from for a later cycle",
+      status(".superpowers/legacy.jsonl").get("from") == "abc")
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

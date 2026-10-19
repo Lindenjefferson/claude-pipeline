@@ -16,9 +16,9 @@
   --fingerprint         prints the fingerprints of the flagged lines read from stdin (a diff, or a
                         file with --path <path>).
 
-The hook stores no path: it finds this scanner through CLAUDE_PIPELINE_HOME or `git config pipeline.home`
-(the plugin root, <clone>/plugins/pipeline; set once per machine with git config --global) and blocks the
-commit when neither resolves.
+The hook stores no path: it finds this scanner through CLAUDE_PIPELINE_HOME or `git config pipeline.home` (the
+plugin root, which the install writes into the repository's config and the plugin's session-start hook keeps on the
+running version) and blocks the commit when neither resolves.
 
 Not flagged: a column assigned to itself, qualified names (t.col, excluded.col), SQL keywords, written-out
 identifiers (with _, or camelCase whose parts each have two lower-case letters and a vowel, up to 40
@@ -355,7 +355,7 @@ root="${""" + HOME_VAR + """:-$(git config --get pipeline.home)}"
 script="$root/hooks/pre-commit-secret-scan.py"
 if [ -z "$root" ] || [ ! -f "$script" ]; then
   echo "Commit blocked: secret scanner not found (looked in '$root')." >&2
-  echo "Set """ + HOME_VAR + """ or run: git config --global pipeline.home <pipeline plugin root>" >&2
+  echo "Open a Claude Code session in this repository (the pipeline plugin sets it), or set """ + HOME_VAR + """" >&2
   exit 1
 fi
 for py in python python3; do
@@ -448,8 +448,9 @@ def install():
         os.remove(old_push)
         print(f"removed {old_push} (this scanner no longer runs on push)")
     plugin_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__))).replace("\\", "/")
-    print(f"the hook finds the scanner through ${HOME_VAR} or `git config pipeline.home`; "
-          f"set it once per machine: git config --global pipeline.home \"{plugin_root}\"")
+    git(["config", "--local", "pipeline.home", plugin_root], None)
+    print(f"set this repository's pipeline.home to {plugin_root}; the plugin's session-start hook keeps it on the "
+          "running version")
     sys.exit(0)
 
 
