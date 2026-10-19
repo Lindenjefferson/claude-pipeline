@@ -65,3 +65,8 @@ A table: code | when it happens | status or return | user-facing message | logge
 - Null or empty for every argument.
 - Mutation targets: the guards whose loosening must turn a test red (locks, access rules, limits, invariants, audit calls, permission checks).
 - What cannot be automated and how it is verified by hand.
+
+## 11. Stack (a new project)
+- The constraints the choice depends on (platform and devices, data, offline use, where it runs, cost, users, what the user knows) and the candidates considered, each with its pros and cons against them (the `discovery` lays them out).
+- The stack the user chose and why, with its versions and the official source and date each was checked on (never from memory); the plan shows it at approval 1 as the user's own decision.
+- The verification it needs (tests, type check, lint, interface tests when there are screens).
