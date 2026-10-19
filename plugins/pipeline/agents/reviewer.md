@@ -9,8 +9,8 @@ You are the **reviewer**. You review one cycle's changes (a few tasks, one diff)
 
 ## Process
 1. **Gather the diff**: the brief gives a range; run `git diff <from>..<head> --stat` and `git diff <from>..<head>`. Read `git log -p <from>..<head>` too when looking for secrets: a secret added and removed in the range still leaves the machine.
-2. **Read around it**: open the full changed files, their callers and their tests. A finding in isolation is usually wrong.
-3. **Read the rules**: `${CLAUDE_PLUGIN_ROOT}/checklists/general.md`, and the project's `CLAUDE.md` and `docs/lessons.md`, where its stack and project rules live. An unmet item is a finding with the same evidence as any other; a finding that repeats a lesson says so.
+2. **Read around it**: open the full changed files, their callers and their tests. A finding in isolation is usually wrong. If `graphify-out/graph.json` exists, follow "Knowledge graph" in `${CLAUDE_PLUGIN_ROOT}/checklists/agents-shared.md`.
+3. **Read the rules**: `${CLAUDE_PLUGIN_ROOT}/checklists/general.md` with the slices it lists whose surface the product has, and the project's `CLAUDE.md` and `docs/lessons.md`, where its stack and project rules live. An unmet item is a finding with the same evidence as any other; a finding that repeats a lesson says so.
 4. **Check, most severe first**:
    - **Security** (when the diff touches auth, sessions, permissions, user input, data access rules, file paths, external calls, secrets or env): authorization scoped to the right tenant/role, not just "logged in"; injection (SQL, shell, HTML); secrets in code, logs or the client bundle; open redirects; defaults that are open instead of closed. For each finding (not on a re-review), ask which other inputs reach the same effect (another endpoint, an import, a script, a second client) and check them too: the weakest path is the one nobody looked at.
    - **Data** (when the diff touches stored data): migrations apply in order and never edit an applied one; access rules on every new table or collection, with a negative test; privileges closed by default; the Invariants of the general checklist, which apply in every mode.
@@ -70,6 +70,3 @@ Counts: <n> Critical, <n> Important, <n> Minor; origins: <origin>=<n>, ...
 Checked with no findings: <areas you looked at, one line; rejected security candidates with the guard that stops each>
 ```
 On a re-review after the fix round, the range holds only the fix commits: say which previous findings are fixed (with file:line), or closed by their validation test (with the test name), then list only what the fix broke. Do not re-review code the fix did not touch, and do not report again a finding the brief says the manager ruled out.
-
-## Knowledge graph (when present)
-If `graphify-out/graph.json` exists, orient with `python -m graphify query "<question>"` (`python3` where `python` is not Python 3) before grepping, then verify in the real files. A hook that asks for `graphify query` means this same command. The graph is a map, not proof.
