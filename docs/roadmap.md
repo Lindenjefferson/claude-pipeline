@@ -11,13 +11,18 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
   - Gatilho: o kickoff termina perguntando se há material de referência; se houver, a primeira entrega é grande e começa pelo `discovery`.
   - Modo projeto novo do `discovery`: além de minerar as fontes, ele levanta as restrições do produto (plataforma, dados, offline, onde roda, custo, o que o usuário já conhece), de 2 a 3 stacks candidatas com prós e contras contra essas restrições, as versões atuais conferidas na fonte e as ferramentas de verificação que cada uma pede.
   - A decisão continua sendo do usuário: as opções são insumo, nunca uma escolha. O `spec-checklist` ganha a seção de stack, e a escolhida entra em `## Product decisions`, aprovada no ✋ 1 e transformada nas linhas de "Comandos" do `CLAUDE.md`.
-  - Questionário pré-respondido: cada pergunta do `spec-checklist` (pré-mortem de cada escrita, premissas, domínio) que as fontes respondem chega preenchida, com a citação; o brainstorming só pergunta ao usuário o que ficou em aberto.
+  - Questionário com bate-bola (o usuário achou esse debate muito esclarecedor e ele fica): para cada pergunta em aberto do `spec-checklist` (pré-mortem de cada escrita, premissas, domínio), o `discovery` entrega a dúvida, de 2 a 3 opções e uma sugestão com o porquê; o manager conduz o debate uma pergunta por vez, e o usuário decide. Só o que as fontes já respondem chega preenchido, com a citação, e pode ser reaberto.
   - Kickoff sem confirmação para o que só protege: o scan de segredos e as regras `deny` e `ask` entram por padrão, com um resumo; só as entradas `allow`, que ampliam permissões, são mostradas para confirmar. Os pedidos de permissão do próprio Claude Code continuam, porque o plugin não pode nem deve contorná-los.
 
   Esforço: M.
 
+- **Atualizar o plugin num projeto com uma skill `atualizar`** (para a 2.9.2; cada atualização da 2.8.8 à 2.8.10 pediu linhas à mão no `CLAUDE.md` ou no `CLAUDE.local.md`, que o kickoff não acrescenta dentro de uma seção que já existe): num ponto de parada da entrega, lê as notas de atualização entre as duas versões, acrescenta as linhas novas dos templates preenchidas com o que der para medir, mostra o resumo e abre a sessão nova. Esforço: M.
+- **`ledger.py capacity`** (para a 2.9.2; no CF um `qa` rodou com 0,7 GB livres, e conferir a memória antes de despachar ainda é julgamento do manager): mede a memória e o disco livres, compara com o mínimo e o pico do `CLAUDE.local.md` e responde quantas cópias cabem. Esforço: P/M.
+
 ### Em espera (voltam com um sinal)
 
+- **"Comandos" propostos pelo kickoff a partir do manifesto do projeto** (pedido do usuário: deixar o técnico automático): ler o que o projeto declara (scripts do gerenciador de pacotes, Makefile ou equivalente), propor as linhas e medir o tempo de cada comando; volta com o próximo projeto novo, onde dá para medir.
+- **`feedback-plugin` gravando as lições no formato do filtro** (evidência, custo no ledger, número que deve mudar), para a sessão do plugin só triar; volta quando o volume de lições por entrega justificar.
 - **Verificador que tenta refutar cada achado de segurança, e cobertura acumulada no gate** (2.8.1): um agente a mais por achado e uma mudança grande no gate; volta se uma entrega mostrar achado falso ou caminho não examinado.
 - **Nome do ciclo do plano no `status`** (CF, depois da 2.8.7): o `status` diz "cycle 3" onde o `scope` gravou "Ciclo R" (a linha de andamento já mostra o nome); volta se o número causar um erro de range ou uma rodada a mais.
 - **Revisão de design sobre as capturas do `dev`, antes de integrar** (CF, depois da 2.8.7, decisão do usuário): custa ~190k tokens por tarefa com tela, e a 2.8.8 atacou a mesma causa; volta se uma revisão de design ainda abrir uma rodada por defeito que a própria tarefa criou.
