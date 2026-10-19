@@ -32,10 +32,8 @@ Com você ausente, o modo autônomo do [manager](plugins/pipeline/skills/manager
 Requisitos: Claude Code com plugins (a linha de andamento e o `/andamento` pedem a v2.1.287 ou mais nova, testados na v2.1.302), Python 3 e git no `PATH` (o Python com o nome `python` ou `python3`; testado no Windows e no Linux, ainda não no macOS), no Windows o Git Bash, onde rodam os hooks do plugin e o `gate.py` roda os comandos do projeto, e os plugins [`superpowers`](https://github.com/obra/superpowers) (`superpowers@claude-plugins-official`) e `frontend-design@claude-plugins-official` (rodada e revisão de design, só em produtos com tela), declarados como dependência; o `kickoff` avisa quando falta um e diz como instalar. Opcional: [graphify](https://github.com/Graphify-Labs/graphify) (`pip install graphifyy`) para o grafo de conhecimento.
 
 ```bash
-# uma vez por máquina
-git clone https://github.com/Lindenjefferson/claude-pipeline.git
-claude plugin marketplace add ./claude-pipeline
-git config --global pipeline.home "<caminho do clone>/plugins/pipeline"   # o hook de segredos acha o scanner por aqui
+# uma vez por máquina (repositório privado: o git da máquina precisa estar autenticado no GitHub)
+claude plugin marketplace add Lindenjefferson/claude-pipeline
 
 # em cada projeto: habilitado só nele, nunca globalmente (o escopo local não vai para o git)
 claude plugin install pipeline@linden-plugins --scope local
@@ -43,7 +41,7 @@ claude plugin install pipeline@linden-plugins --scope local
 
 Numa sessão na pasta do projeto, peça o **kickoff** para preparar a estrutura e depois uma entrega ("implementar o módulo de relatórios", "corrigir o bug do login"): o **manager** conduz do tamanho ao gate. Para desabilitar: `claude plugin uninstall pipeline@linden-plugins --scope local`.
 
-O marketplace também pode vir direto do GitHub (`claude plugin marketplace add Lindenjefferson/claude-pipeline`, repositório privado); um clone local é carregado do disco, então as edições valem na próxima sessão.
+Para atualizar: `claude plugin marketplace update linden-plugins` e, em cada projeto, `claude plugin update pipeline@linden-plugins --scope local`; uma sessão aberta segue na versão que carregou até reiniciar. Para desenvolver o plugin, use um clone local (`claude plugin marketplace add ./claude-pipeline`), que é carregado do disco: as edições valem na próxima sessão.
 
 ## Componentes
 
@@ -62,13 +60,13 @@ O marketplace também pode vir direto do GitHub (`claude plugin marketplace add 
 | [`general.md`](plugins/pipeline/checklists/general.md) | Princípios gerais de qualidade que o `dev` e o `reviewer` aplicam. |
 | [`spec-checklist.md`](plugins/pipeline/skills/manager/templates/spec-checklist.md) | O que toda spec e todo plano respondem, com o pré-mortem de cada escrita. |
 | [Hook de segredos e UTF-8](plugins/pipeline/hooks/pre-commit-secret-scan.py) | `pre-commit` do git que bloqueia `.env`, linhas com cara de segredo e linhas adicionadas que não são UTF-8 ou têm caracteres invisíveis; o docstring explica falso positivo e a correção. |
-| [Hook de retomada](plugins/pipeline/hooks/session-start.py) | `SessionStart` (`compact` e `resume`): devolve ao manager o `status` do ledger. Registrado em [`hooks.json`](plugins/pipeline/hooks/hooks.json). |
+| [Hook de retomada](plugins/pipeline/hooks/session-start.py) | `SessionStart` (toda sessão): depois de compactação ou retomada, devolve ao manager o `status` do ledger; em toda sessão, mantém o `pipeline.home` do repositório na versão do plugin em uso. Registrado em [`hooks.json`](plugins/pipeline/hooks/hooks.json). |
 | [Guarda do Bash](plugins/pipeline/hooks/bash-guard.py) | `PreToolUse` em `Bash`: nega pular o `pre-commit` (`--no-verify`, `-n`, `core.hooksPath`), o que chega na branch principal no modo autônomo e o comando da linha "Rodar em desenvolvimento" do `CLAUDE.md` do projeto fora do modo background. |
 | [Andamento](plugins/pipeline/hooks/andamento.js) | Mod do Claude Code: com entrega aberta, uma linha em português acima do prompt com o ciclo do plano, as tarefas em andamento, o que vem depois e quantas tarefas e ciclos faltam; `/andamento` abre o painel com a tabela do ciclo e as outras frentes. |
 
 ## Atualização
 
-- Instalações a partir do GitHub ficam fixas na `version` do `plugin.json`: `claude plugin update pipeline@linden-plugins` traz a versão nova.
+- Instalações a partir do GitHub ficam fixas na `version` do `plugin.json` (como atualizar: "Começo rápido").
 - Termine a entrega em andamento antes de atualizar. O que muda de uma versão para outra (formato do ledger, arquivos que saíram) está em [`docs/roadmap.md`](docs/roadmap.md#notas-de-atualização).
 - Ative também a proteção de push contra segredos do seu provedor (no GitHub, secret scanning push protection): o hook local é contra acidentes, não contra quem o pula.
 

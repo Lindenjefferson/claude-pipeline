@@ -125,6 +125,11 @@ test('the pane spells out each kind of step', () => {
   expect(paneLines(asked, [], NOW)).toContain('- falar com você (revisão ainda reprova depois da correção)')
   expect(paneLines(asked, [], NOW)).toContain('- dev na T2.1 (voltou BLOCKED)')
   expect(paneLines({ ...STATUS, steps: [{ step: 'dev' }] }, [], NOW)).toContain('- primeira tarefa do dev')
+  const loop = { ...STATUS, steps: [{ step: 'review', task: 'plan', round: 2, open: 3, report: '/w/r.md' },
+                                     { step: 'ask', task: 'spec', rounds: 3 }, { step: 'stop', task: 'plan', rounds: 4 }] }
+  expect(paneLines(loop, [], NOW)).toContain('- revisão do plano, rodada 2 (3 achados abertos)')
+  expect(paneLines(loop, [], NOW)).toContain('- falar com você (revisão da spec ainda reprova depois de 3 rodadas)')
+  expect(paneLines(loop, [], NOW)).toContain('- parar e registrar como VALIDAR (revisão do plano ainda reprova depois de 4 rodadas)')
   const ready = { ...STATUS, dispatched: {}, steps: [], ready_for_gate: true }
   expect(paneLines(ready, [], NOW)).toContain('Pronto para o gate.')
 })
