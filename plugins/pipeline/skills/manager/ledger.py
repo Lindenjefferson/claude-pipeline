@@ -77,14 +77,18 @@ counts until it closes). With no scope recorded, scope is null.
 
 status also reads usage.json from the ledger's folder (the subscription windows the mod writes: five_hour and
 seven_day, each {percent, resets_at}; a window past its resets_at, a missing or broken file and unknown fields are
-ignored; a null resets_at counts as valid, and a broken file is named once in the text) and the optional thresholds
+ignored; a null resets_at counts as valid; a JSON error is retried once after 200 ms, as the mod's write is not
+atomic; a file still broken is named once in the text) and the optional thresholds
 in CLAUDE.local.md at the root of the ledger's worktree (Economia a partir de quanto uso, em %, default 60; Pausa a
 partir de quanto uso da janela de 5 horas, em %, default 85; Pausa a partir de quanto uso da semana, em %, default
 95; Sempre econômico, default não). A value counts only when it starts with a backtick and holds a number from 1 to
 100 (sim or yes for Sempre econômico); a placeholder such as _(...)_ keeps the default. status --json gives usage:
 {windows, economy, wait} or null: economy is the reason (a window at or above the economy threshold, or Sempre
-econômico) or null; wait is the window at or above its pause threshold (the one that resets later when both are) or
-null. It is advice for the manager, never pending: pending, steps and ready_for_gate do not change. Every add records
+econômico) or null; wait is the window whose percent plus its margin is at or above its pause threshold (the one that resets
+later when both are) or null: {window, percent, margin, resets_at, seconds_left}. The margin is the largest of the
+last 5 positive deltas between consecutive usage snapshots of the runs (a negative delta is a reset, skipped; 0 with
+none), the room the next run may use. seconds_left, from now, is null when resets_at is; the text line ends with
+"until <resets_at> (in 2h13m)". It is advice for the manager, never pending: pending, steps and ready_for_gate do not change. Every add records
 the valid windows' percent as usage.
 
 Without --ledger, the ledger is .superpowers/ledger.jsonl at the root of the current worktree, or of the main
@@ -97,6 +101,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import unicodedata
 
 VERDICTS = {
@@ -381,8 +386,13 @@ def usage_windows(ledger):
     if not os.path.exists(path):
         return {}, False
     try:
-        with open(path, encoding="utf-8") as handle:
-            data = json.load(handle)
+        try:
+            with open(path, encoding="utf-8") as handle:
+                data = json.load(handle)
+        except ValueError:  # the mod's write is not atomic: a half-written file may be valid a moment later
+            time.sleep(0.2)
+            with open(path, encoding="utf-8") as handle:
+                data = json.load(handle)
         now, valid = datetime.datetime.now(datetime.timezone.utc), {}
         for name in ("five_hour", "seven_day"):
             item = data["windows"].get(name)
@@ -408,13 +418,35 @@ def reset_at(item):
     return reset if reset.tzinfo else reset.replace(tzinfo=datetime.timezone.utc)
 
 
-def usage_advice(windows, settings):
+def usage_margins(entries):
+    """Per window, the largest of the last 5 positive deltas between consecutive usage snapshots of the runs (a
+    negative delta is a reset in between); 0 with none."""
+    last, deltas = {}, {}
+    for entry in runs(entries):
+        for name, percent in (entry.get("usage") or {}).items():
+            if isinstance(percent, bool) or not isinstance(percent, (int, float)):
+                continue
+            if name in last and percent > last[name]:
+                deltas.setdefault(name, []).append(percent - last[name])
+            last[name] = percent
+    return {name: max(found[-5:]) for name, found in deltas.items()}
+
+
+def usage_advice(windows, settings, margins=None):
+    margins = margins or {}
     economy = next((f"{name} at {int(item['percent'])}%" for name, item in windows.items()
                     if item["percent"] >= settings["economy"]), None)
     economy = economy or ("always (CLAUDE.local.md)" if settings["always"] else None)
-    over = [(name, item) for name, item in windows.items() if item["percent"] >= settings[name]]
+    over = [(name, item) for name, item in windows.items()
+            if item["percent"] + margins.get(name, 0) >= settings[name]]
     name, item = max(over, key=lambda pair: reset_at(pair[1]) or EARLIEST) if over else (None, None)
-    wait = {"window": name, "percent": item["percent"], "resets_at": item["resets_at"]} if name else None
+    wait = None
+    if name:
+        reset = reset_at(item)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        wait = {"window": name, "percent": item["percent"], "margin": margins.get(name, 0),
+                "resets_at": item["resets_at"],
+                "seconds_left": max(0, int((reset - now).total_seconds())) if reset else None}
     if not windows and not economy:
         return None
     return {"windows": windows, "economy": economy, "wait": wait}
@@ -836,7 +868,7 @@ def status(args):
                           "(resume when work restarts)")
         steps.insert(0, {"step": "resume", **pause_state})
     windows, unreadable = usage_windows(args.ledger)
-    usage = usage_advice(windows, usage_settings(usage_files(args.ledger)[1]))
+    usage = usage_advice(windows, usage_settings(usage_files(args.ledger)[1]), usage_margins(entries))
     plans = [entry["plan"] for entry in entries if entry["type"] == "plan"]
     full = [entry for entry in runs(entries) if entry["agent"] == "qa" and entry.get("full")]
     report = {"slug": entries[0].get("slug"), "base": entries[0].get("base"), "ledger": os.path.abspath(args.ledger),
@@ -878,8 +910,12 @@ def status(args):
             print(f"usage: economy ({usage['economy']}): reviewer on sonnet, one copy at a time")
         if usage and usage["wait"]:
             wait = usage["wait"]
-            print(f"usage: wait ({wait['window']} at {int(wait['percent'])}%): dispatch nothing new; "
-                  f"pause at the next safe point until {wait['resets_at'] or 'the window resets'}")
+            left = wait["seconds_left"]
+            print(f"usage: wait ({wait['window']} at {int(wait['percent'])}%"
+                  + (f" + {int(wait['margin'])}% per run" if wait["margin"] else "")
+                  + "): dispatch nothing new; pause at the next safe point until "
+                  + (f"{wait['resets_at']} (in {left // 3600}h{left % 3600 // 60:02d}m)" if left is not None
+                     else "the window resets"))
         for item in pending:
             print(f"pending: {item}")
         for text in report["notes"]:

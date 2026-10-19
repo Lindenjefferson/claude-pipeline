@@ -926,8 +926,9 @@ check("economy by the weekly window", got["economy"] == "seven_day at 61%", got)
 got = advice("w5", {"five_hour": window(84.9)})
 check("the 5-hour pause starts at 85, not before", got["wait"] is None, got)
 got = advice("w5b", {"five_hour": window(85)})
-check("wait for the 5-hour window at 85", got["wait"] == {"window": "five_hour", "percent": 85,
-                                                          "resets_at": got["windows"]["five_hour"]["resets_at"]}, got)
+wait = got["wait"]
+check("wait for the 5-hour window at 85", {k: wait[k] for k in ("window", "percent", "margin", "resets_at")} == {
+    "window": "five_hour", "percent": 85, "margin": 0, "resets_at": got["windows"]["five_hour"]["resets_at"]}, got)
 got = advice("w7", {"five_hour": window(10), "seven_day": window(95, 48)})
 check("wait for the week at 95", got["wait"] and got["wait"]["window"] == "seven_day", got)
 got = advice("both", {"five_hour": window(90, 4), "seven_day": window(96, 30)})
@@ -958,7 +959,8 @@ got = status(ledger)["usage"]
 text = run("status", ledger=ledger).stdout
 check("a null resets_at counts as valid: the window stays and can ask to wait",
       got["windows"]["five_hour"]["resets_at"] is None and got["wait"] == {"window": "five_hour", "percent": 90,
-                                                                           "resets_at": None}, got)
+                                                                           "margin": 0, "resets_at": None,
+                                                                           "seconds_left": None}, got)
 check("the text omits the reset time it does not have",
       re.search(r"^usage: 5h 90%, week 10%$", text, re.M) and "until the window resets" in text, text)
 got = advice("nullboth", {"five_hour": {"percent": 90, "resets_at": None}, "seven_day": window(96, 48)})
@@ -1050,5 +1052,99 @@ run("start", "--slug", "custom", ledger=ledger)
 got = status(ledger)["usage"]
 check("--ledger at a custom path reads usage.json from that folder and CLAUDE.local.md from its parent",
       got["windows"]["five_hour"]["percent"] == 90 and got["wait"] is None and got["economy"] == "five_hour at 90%", got)
+
+def set_usage(name, percent, hours=2, seven=None):
+    windows = {"five_hour": window(percent, hours)}
+    if seven is not None:
+        windows["seven_day"] = window(seven, 48)
+    with open(os.path.join(repo, "u", name, ".superpowers", "usage.json"), "w", encoding="utf-8") as handle:
+        json.dump({"windows": windows}, handle)
+
+
+def margin_case(name, percents, final, hours=2, seven=None):
+    """The first percent is the usage_case snapshot; each further one is a run added at that usage; final is what the mod shows last."""
+    ledger = usage_case(name, {"five_hour": window(percents[0])})
+    for index, percent in enumerate(percents[1:]):
+        set_usage(name, percent)
+        add("reviewer" if index % 2 == 0 else "qa", "PASS", ledger=ledger)
+    set_usage(name, final, hours, seven)
+    return status(ledger)
+
+
+state = margin_case("mg1", [50, 60, 30, 34], 78)
+check("margin is the largest positive delta between snapshots; a reset in between is skipped",
+      state["usage"]["wait"] and state["usage"]["wait"]["margin"] == 10, state["usage"])
+text = run("status", ledger="u/mg1/.superpowers/ledger.jsonl").stdout
+check("wait by margin below the threshold: 78% + 10% >= 85%, and the text says it",
+      "usage: wait (five_hour at 78% + 10% per run):" in text, text)
+state = margin_case("mg2", [50, 60, 30, 34], 70)
+check("no wait when percent + margin stays under the threshold", state["usage"]["wait"] is None, state["usage"])
+state = margin_case("mg3", [10], 84)
+check("no deltas means margin 0: 84% under 85% is no wait", state["usage"]["wait"] is None, state["usage"])
+state = margin_case("mg4", [10], 90)
+check("no deltas: wait at the threshold carries margin 0 and the old text",
+      state["usage"]["wait"]["margin"] == 0
+      and "usage: wait (five_hour at 90%):" in run("status", ledger="u/mg4/.superpowers/ledger.jsonl").stdout)
+state = margin_case("mg5", [10, 40, 41, 42, 43, 44, 45], 70)
+check("margin looks only at the last 5 positive deltas", state["usage"]["wait"] is None, state["usage"])
+state = margin_case("mg6", [10, 40, 41, 41, 30, 32, 33], 83)
+check("zero and negative deltas are skipped; the last 5 positive deltas are 1, 1, 2, 1 and 30",
+      state["usage"]["wait"]["margin"] == 30, state["usage"])
+
+state = margin_case("sl1", [10], 90, hours=2.2)
+wait = state["usage"]["wait"]
+text = run("status", ledger="u/sl1/.superpowers/ledger.jsonl").stdout
+check("seconds_left is in the wait JSON, from now", isinstance(wait.get("seconds_left"), int)
+      and 7800 < wait["seconds_left"] <= 7920, wait)
+check("the wait text ends with the reset and the time left", re.search(r"until \d{4}-\d\d-\d\dT\S+ \(in 2h1\dm\)$", text, re.M),
+      text)
+ledger = usage_case("sl2", {"five_hour": {"percent": 90, "resets_at": None}})
+check("an unknown reset has no seconds_left and no (in ...)",
+      status(ledger)["usage"]["wait"]["seconds_left"] is None
+      and "until the window resets" in run("status", ledger=ledger).stdout
+      and "(in " not in run("status", ledger=ledger).stdout)
+
+import importlib.util, threading, time
+spec = importlib.util.spec_from_file_location("ledger_under_test", LEDGER)
+ledger_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ledger_module)
+retry_root = os.path.join(repo, "u", "retry", ".superpowers")
+os.makedirs(retry_root, exist_ok=True)
+usage_path = os.path.join(retry_root, "usage.json")
+with open(usage_path, "w", encoding="utf-8") as handle:
+    handle.write('{"windows": {"five_hour": {"perc')
+
+
+def finish_write():
+    time.sleep(0.08)
+    with open(usage_path, "w", encoding="utf-8") as handle:
+        json.dump({"windows": {"five_hour": window(40)}}, handle)
+
+
+thread = threading.Thread(target=finish_write)
+thread.start()
+got, unreadable = ledger_module.usage_windows(os.path.join(retry_root, "ledger.jsonl"))
+thread.join()
+check("a file that becomes valid during the retry is read", not unreadable and got["five_hour"]["percent"] == 40,
+      (got, unreadable))
+with open(usage_path, "w", encoding="utf-8") as handle:
+    handle.write("{broken")
+check("a file still broken after the retry is unreadable",
+      ledger_module.usage_windows(os.path.join(retry_root, "ledger.jsonl")) == ({}, True))
+
+main_super = os.path.join(repo, ".superpowers")
+main_local = os.path.join(repo, "CLAUDE.local.md")
+with open(os.path.join(main_super, "usage.json"), "w", encoding="utf-8") as handle:
+    json.dump({"windows": {"five_hour": window(90)}}, handle)
+with open(main_local, "w", encoding="utf-8") as handle:
+    handle.write(local(five=95))
+try:
+    got = json.loads(run("status", "--json", cwd=task_tree).stdout)["usage"]
+finally:
+    os.remove(os.path.join(main_super, "usage.json"))
+    os.remove(main_local)
+check("from a task worktree, the default ledger reads the main worktree's usage.json and CLAUDE.local.md",
+      got and got["windows"]["five_hour"]["percent"] == 90 and got["wait"] is None
+      and got["economy"] == "five_hour at 90%", got)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

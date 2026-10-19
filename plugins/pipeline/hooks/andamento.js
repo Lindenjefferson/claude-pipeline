@@ -71,13 +71,16 @@ function two(number) {
   return String(number).padStart(2, '0')
 }
 
-// ledger.py's wait advice, in the user's local time: "esperar o reset da semana (97%, volta em 17/10 21:05)"
+// ledger.py's wait advice, in the user's local time: "esperar o reset da semana (97% + 9% por execução, volta em 17/10 21:05)".
+// With no usable reset time it says none (new Date(null) is the epoch).
 function waitText(wait) {
-  const at = new Date(wait.resets_at)
-  const hour = `${two(at.getHours())}:${two(at.getMinutes())}`
+  const at = wait.resets_at ? new Date(wait.resets_at) : null
   const [, name] = WINDOW[wait.window] || [wait.window, `da janela ${wait.window}`]
+  const used = `${Math.floor(wait.percent)}%${wait.margin > 0 ? ` + ${Math.round(wait.margin)}% por execução` : ''}`
+  if (!at || Number.isNaN(at.getTime())) return `esperar o reset ${name} (${used})`
+  const hour = `${two(at.getHours())}:${two(at.getMinutes())}`
   const back = wait.window === 'five_hour' ? `volta às ${hour}` : `volta em ${two(at.getDate())}/${two(at.getMonth() + 1)} ${hour}`
-  return `esperar o reset ${name} (${Math.floor(wait.percent)}%, ${back})`
+  return `esperar o reset ${name} (${used}, ${back})`
 }
 
 function usageLine(usage) {
@@ -261,13 +264,15 @@ function stamp(iso) {
 }
 
 // usage.json beside the ledger: the windows {kind: {percent, resets_at}} and when they were read. Nothing without a
-// ledger file or without windows (an API key); nothing when only the time changed. Never throws.
+// ledger file or without windows (an API key); nothing when only the time changed. A window with no usable reset time
+// is left out: ledger.py would never expire it. Never throws.
 async function writeUsage($) {
   try {
     if (!watched || mtime === null) return
     const windows = {}
     for (const limit of (await $.session.usage()).rateLimits || []) {
-      windows[limit.kind] = { percent: limit.percentUsed, resets_at: stamp(limit.resetsAt) }
+      const resets = stamp(limit.resetsAt)
+      if (resets) windows[limit.kind] = { percent: limit.percentUsed, resets_at: resets }
     }
     const body = JSON.stringify(windows)
     if (!Object.keys(windows).length || body === written) return
