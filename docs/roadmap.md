@@ -23,7 +23,7 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 - **Trocar uma lição de "suíte inteira" por uma checagem** (lição do CF depois da 2.8.7): já está coberto pelo passo 4.5 do manager ("can this be a check?") e pela 2.8.7. O CF trouxe a confirmação: uma checagem de seletor por texto exato achou 91 seletores sem `exact` em 21 specs, a suíte inteira (875 testes) rodou uma vez, em 21,9 min, e a tarefa de tela passou a rodar só os specs afetados.
 - **qa de rodada de correção só com os testes afetados** (análise de tempo do CF depois da 2.8.7): já é a regra do `qa.md` ("the full suite is not repeated"). O CF rodou a suíte inteira porque 63 de 72 specs importam o helper que as rodadas mudaram; seguir os imports no comando de afetados é do projeto (D27 do CF).
 
-## 2.8.8 — instruções em dia e rodadas mais curtas
+## 2.8.8 — instruções em dia e rodadas mais curtas (PR #29)
 
 Origem: uma conferência dos arquivos de instrução (README, `CLAUDE.md`, roadmap, skills) contra o fluxo atual, pedida pelo usuário, e as lições do controle-financeiro depois da 2.8.7.
 
