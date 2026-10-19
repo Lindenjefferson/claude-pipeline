@@ -7,6 +7,13 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 - **Guarda do Bash também na ferramenta PowerShell** (2.7.2): no Windows a sessão principal tem a ferramenta PowerShell, que o `bash-guard.py` não vê (os agentes não a têm). Entra com um leitor das aspas do PowerShell, testado. Esforço: P.
 - **VALIDAR das entregas empilhadas na faixa** (revisão da 2.8): a faixa e o `/andamento` contam só o ledger atual; os itens de uma entrega anterior empilhada (`ledger-<slug>.jsonl`) não aparecem, e um arquivo desses não diz se é entrega empilhada à espera ou já encerrada. Entra se o `start --archive` passar a registrar isso. Esforço: P.
 
+- **Começo de projeto pelo `discovery`** (pedido do usuário, para a 2.9.1). Hoje o `discovery` só roda no passo 2 de uma entrega grande, e a stack de um projeto novo é escolhida sem registro: nenhum checklist pede as alternativas nem o critério. A proposta:
+  - Gatilho: o kickoff termina perguntando se há material de referência; se houver, a primeira entrega é grande e começa pelo `discovery`.
+  - Modo projeto novo do `discovery`: além de minerar as fontes, ele levanta as restrições do produto (plataforma, dados, offline, onde roda, custo, o que o usuário já conhece), de 2 a 3 stacks candidatas com prós e contras contra essas restrições, as versões atuais conferidas na fonte e as ferramentas de verificação que cada uma pede.
+  - A decisão continua sendo do usuário: as opções são insumo, nunca uma escolha. O `spec-checklist` ganha a seção de stack, e a escolhida entra em `## Product decisions`, aprovada no ✋ 1 e transformada nas linhas de "Comandos" do `CLAUDE.md`.
+
+  Esforço: M.
+
 ### Em espera (voltam com um sinal)
 
 - **Verificador que tenta refutar cada achado de segurança, e cobertura acumulada no gate** (2.8.1): um agente a mais por achado e uma mudança grande no gate; volta se uma entrega mostrar achado falso ou caminho não examinado.
@@ -38,14 +45,14 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 Origem: pedido do usuário, que vai trocar a conta Max 20x por uma Pro, com janelas de uso bem menores. A etapa 5 do CF gastou 9,03 M tokens em 43 execuções medidas (`dev` 76%, `reviewer` em opus 17%, `qa` 8%), e na Pro isso seriam muitas janelas de 5 horas. Numa assinatura o que limita é a janela de 5 horas e a semana, não o custo, e a documentação do Claude Code dá esse uso aos mods (`$.session.usage()` e o evento `session.measure`). Substitui o item "teto de orçamento" que estava em espera desde a 2.5.0.
 
 - [x] **O mod grava o uso da conta**: a cada mudança, a porcentagem e o reset da janela de 5 horas e da semana vão para `.superpowers/usage.json`, ao lado do ledger (fora do git). É a única escrita do mod, e o teste de integridade confere que é só essa.
-- [x] **O ledger aconselha, sem bloquear**: o `status` lê o `usage.json` e os limites opcionais do `CLAUDE.local.md`. Com uma janela acima do limite de economia (60%), o modo é econômico; com a de 5 horas acima de 85% ou a semana acima de 95%, o conselho é esperar o reset. O conselho nunca entra no que falta para o gate. Cada `add` guarda a porcentagem da hora, para medir quanto cada agente consome.
-- [x] **O manager segue o conselho, sozinho** (decisão do usuário): no modo econômico, despacha o `reviewer` em sonnet e uma cópia por vez, com uma nota; na espera, não despacha nada novo, integra o que reportar e faz `pause` até o reset. Um agente cortado pelo limite não ganha `add`: o trabalho da worktree vira `wip:` e a entrega espera do mesmo jeito.
+- [x] **O ledger aconselha, sem bloquear**: o `status` lê o `usage.json` e os limites opcionais do `CLAUDE.local.md`. Com uma janela acima do limite de economia (60%), o modo é econômico; quando a janela de 5 horas mais o que uma execução costuma gastar chega a 85% (ou a semana a 95%), o conselho é esperar o reset, com o tempo que falta. O conselho nunca entra no que falta para o gate. Cada `add` guarda a porcentagem da janela naquela hora, e a maior alta recente entre dois `add` é a margem de uma execução.
+- [x] **O manager segue o conselho, sozinho** (decisão do usuário): no modo econômico, despacha o `reviewer` em sonnet e uma cópia por vez, com uma nota; na espera, não despacha nada novo, para os agentes em andamento como na pausa por recurso (`wip:` e `pause`), apaga o heartbeat e dorme até o reset. Na volta, um agente que o limite cortou não ganha `add`: o que ele deixou vira `wip:` e volta a um `dev`.
 - [x] **A linha de andamento** mostra "econômico", a espera com a hora da volta e, no painel, o uso da conta.
 - [x] **O template do `CLAUDE.local.md`** ganha a seção "Uso da conta", com os três limites e o "Sempre econômico", para uma conta Pro economizar desde o início.
 
-O prompt do manager cresceu 81 palavras (de 4763 para 4844), uma regra só; a decisão de esperar ou economizar é do ledger, testada.
+O prompt do manager cresceu 115 palavras (de 4763 para 4878), uma regra só (a espera para os agentes em andamento, como a pausa por recurso); a decisão de esperar ou economizar é do ledger, testada.
 
-Números que esta versão deve mudar: agentes cortados por limite de uso no meio da tarefa (nas notas) passam a zero; a parte do `reviewer` em opus no total de tokens cai quando a conta está em economia; a porcentagem gasta por execução, que o `add` passa a registrar, dá o custo de uma entrega na Pro.
+Números que esta versão deve mudar: agentes cortados por limite de uso no meio da tarefa (nas notas) passam a zero; a parte do `reviewer` em opus no total de tokens cai quando a conta está em economia; a porcentagem da janela em cada `add` dá uma estimativa do custo de uma entrega na Pro.
 
 ## 2.8.9 — suíte inteira no fim, pausa e retomada no ledger (PR #31)
 

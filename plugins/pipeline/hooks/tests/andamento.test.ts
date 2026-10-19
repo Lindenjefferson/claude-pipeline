@@ -337,3 +337,46 @@ test('with no usage, or an older ledger without it, the band and the pane are un
   expect(paneLines({ ...STATUS, usage: null }, [], NOW)).toEqual(paneLines(STATUS, [], NOW))
   expect(paneLines(STATUS, [], NOW).join(' ')).not.toContain('Uso da conta')
 })
+
+test('a wait with no reset time says no time instead of printing the epoch', () => {
+  const five = { ...STATUS, usage: { ...USAGE, wait: { window: 'five_hour', percent: 90, resets_at: null } } }
+  expect(bandLine(five, NOW)).toContain('depois: esperar o reset da janela de 5 horas (90%) e correção')
+  const week = { ...STATUS, usage: { ...USAGE, wait: { window: 'seven_day', percent: 97.4, resets_at: null } } }
+  expect(bandLine(week, NOW)).toContain('depois: esperar o reset da semana (97%) e correção')
+  expect(paneLines(week, [], NOW)).toContain('- esperar o reset da semana (97%)')
+  expect(paneLines(week, [], NOW).join(' ')).not.toContain('1970')
+  const odd = { ...STATUS, usage: { ...USAGE, wait: { window: 'five_hour', percent: 90, resets_at: 'not a date' } } }
+  expect(bandLine(odd, NOW)).toContain('esperar o reset da janela de 5 horas (90%) e correção')
+})
+
+test('a wait adds the margin one run is expected to use, when there is one', () => {
+  const wait = { window: 'five_hour', percent: 78.6, resets_at: LOCAL.toISOString(), margin: 9 }
+  expect(bandLine({ ...STATUS, usage: { ...USAGE, wait } }, NOW)).toContain(
+    'esperar o reset da janela de 5 horas (78% + 9% por execução, volta às 21:05) e correção')
+  expect(paneLines({ ...STATUS, usage: { ...USAGE, wait: { ...wait, window: 'seven_day', margin: 4 } } }, [], NOW)).toContain(
+    '- esperar o reset da semana (78% + 4% por execução, volta em 17/10 21:05)')
+  expect(bandLine({ ...STATUS, usage: { ...USAGE, wait: { ...wait, resets_at: null } } }, NOW)).toContain(
+    'esperar o reset da janela de 5 horas (78% + 9% por execução) e correção')
+  for (const margin of [0, undefined, null]) {
+    expect(bandLine({ ...STATUS, usage: { ...USAGE, wait: { ...wait, margin } } }, NOW)).toContain(
+      'esperar o reset da janela de 5 horas (78%, volta às 21:05) e correção')
+  }
+})
+
+test('with only the weekly window, the pane line and the title still draw', () => {
+  const only = { ...STATUS, usage: { windows: { seven_day: { percent: 41.9, resets_at: null } }, economy: 'seven_day at 85%', wait: null } }
+  expect(paneLines(only, [], NOW)).toContain('Uso da conta: semana 41%')
+  expect(paneLines(only, [], NOW)[0]).toBe('etapa 5 · ciclo 2 de 3 · autônomo · econômico')
+  expect(bandLine(only, NOW)).toContain('autônomo · econômico · dev na T2.1')
+})
+
+test('a rate limit with no usable reset time is not written to usage.json', async ($, on) => {
+  const log = { runs: 0, mtime: 1, rateLimits: [{ kind: 'five_hour', percentUsed: 82.5 }, WEEK], writes: [] }
+  const clock = stubs(on, STATUS, log)
+  await start($, clock)
+  expect(log.writes.length).toBe(1)
+  expect(log.writes[0].data.windows).toEqual({ seven_day: WINDOWS.seven_day })
+  log.rateLimits = [{ ...FIVE, resetsAt: 'garbage' }, { ...WEEK, resetsAt: null }]
+  await $.session.measure(MEASURE)
+  expect(log.writes.length).toBe(1)
+})
