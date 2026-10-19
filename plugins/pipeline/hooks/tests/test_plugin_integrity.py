@@ -54,9 +54,17 @@ check("hooks.json commands make no network call, privilege change or silent fail
       commands and not any(RISKY.search(command) for command in commands), commands)
 check("hooks.json loads the progress mod", config.get("modules") == ["./andamento.js"], config.get("modules"))
 mod = open(os.path.join(ROOT, "hooks", "andamento.js"), encoding="utf-8").read()
-check("the progress mod only reads: no network, model, prompt, tool approval, store or file write",
-      not re.search(r"\$\.(http|model|prompt|tool|store|fs\.write|session\.send|env\.set)\b", mod)
+check("the progress mod only reads: no network, model, prompt, tool approval or store",
+      not re.search(r"\$\.(http|model|prompt|tool|store|session\.send|env\.set)\b", mod)
       and "'tool.call'" not in mod and "'tool.check'" not in mod, "")
+WRITE = re.compile(r"^write\(\s*(`[^`]*usage\.json`|'[^']*usage\.json'|\"[^\"]*usage\.json\")\s*,")
+writes = re.findall(r"\$\.fs\.(?!(?:stat|read\w*|exists|list)\b)(\w+\(.*)", mod)
+check("the progress mod's one file write has a usage.json literal as its first argument",
+      len(writes) == 1 and bool(WRITE.match(writes[0])), writes)
+check("that write check rejects a write to anything but a usage.json literal",
+      WRITE.match("write(`${folder}usage.json`, body)") and not WRITE.match("write(path, body) // usage.json")
+      and not WRITE.match("write(`${folder}other.json`, body) // usage.json")
+      and not WRITE.match("write(name + 'usage.json', body)"), "")
 
 settings = json.load(open(os.path.join(ROOT, "skills", "kickoff", "templates", "settings.allowlist.json"),
                           encoding="utf-8"))
