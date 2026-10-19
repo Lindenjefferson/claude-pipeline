@@ -34,7 +34,7 @@ State the tier in one line so the user can override it. Anything touching auth, 
 |---|---|---|
 | small | 1–3 files, obvious change, no new contract | 1 → 4 (one task, no written plan) → 6 → 7 |
 | standard | a few files, one real design choice | 1 → 3 → 4 → 5 → 6 → 7 |
-| large | new module, open questions, a spec to write | 1 → 2 → 3 → 4 → 5 → 6 → 7 |
+| large | new module, open questions, a spec to write, the first delivery of a new project | 1 → 2 → 3 → 4 → 5 → 6 → 7 |
 
 For a bug fix, the first task is a test that reproduces the bug and fails; use `superpowers:systematic-debugging` to find the cause.
 
@@ -42,7 +42,7 @@ When a task or a fix creates, redesigns or changes a screen, read `${CLAUDE_PLUG
 
 ## Steps
 1. **Branch.** From a clean tree on the default branch: `git switch -c <feat|fix>/<slug>`, then ledger `start` (and `mode autonomous` if the user turned it on). The spec, the plan and everything after them are committed on this branch, never on the default one.
-2. **Spec** (large only). Raw sources to mine (spreadsheets, reference apps, documents): dispatch `discovery` first. Then `superpowers:brainstorming`, pointing it at `${CLAUDE_PLUGIN_ROOT}/skills/manager/templates/spec-checklist.md`. If the spec touches a sensitive domain (step 0), tell brainstorming to skip its builder check, then dispatch `reviewer` in **spec mode**, which covers it, and run the review loop of step 3; product decisions go to the user. Commit the spec.
+2. **Spec** (large only). Raw sources to mine (spreadsheets, reference apps, documents) or a new project with no stack yet: dispatch `discovery` first, telling it which, with the request. Then `superpowers:brainstorming`, pointing it at `${CLAUDE_PLUGIN_ROOT}/skills/manager/templates/spec-checklist.md`; when `discovery` ran, tell it that the findings' pre-answered list is shown first for the user to confirm or reopen, and that each open question's options and suggestion are its menu, one question at a time; the user decides, the stack included. If the spec touches a sensitive domain (step 0), tell brainstorming to skip its builder check, then dispatch `reviewer` in **spec mode**, which covers it, and run the review loop of step 3; product decisions go to the user. Commit the spec.
 3. **Plan** (standard and large). Read the project's `docs/lessons.md` first, then `superpowers:writing-plans`, or a subagent with the same brief (spec path, lessons, the rules of this step) to draft a long plan without spending your context; you apply the product decisions. Thin vertical slices grouped in **cycles of at most about 6 tasks**.
    - **Design round** (a screen created or redesigned): `references/screens.md`, before drafting the plan.
    - **Each task** has an id, `Goal:` (one line: the spec item it serves and what the user gets from it), `Depends on:` (task ids, or none), `Touches:` (the files and shared resources it changes: schema, a migration number, a config file, a seed), and its acceptance criteria; a task with a screen also lists the data states qa captures (spec checklist section 6).
@@ -54,6 +54,7 @@ When a task or a fix creates, redesigns or changes a screen, read `${CLAUDE_PLUG
    - **Invariants and layout.** Each item of Invariants in `${CLAUDE_PLUGIN_ROOT}/checklists/general.md` and of its slice `web-and-ui.md` that the plan touches gets its task and its test (the data-layer enforcement, the lock and its two-session test, the layout check with the project's numbers).
    - **New dependencies** each carry a justification (why, the alternative without it, who maintains it).
    - **Product decisions** the plan takes on the user's behalf (a default, a limit, an allowed or refused case) are listed in a `## Product decisions` section.
+   - **New project:** the first task scaffolds the chosen stack and fills the "Comandos" lines of `CLAUDE.md` (`RED: n/a`); once it is integrated, run the kickoff's step 7 for the allowlist.
    - End the plan with an empty `## Errata` section.
    - **Plan review.** Dispatch `reviewer` in **plan mode** on the plan and run the review loop.
    - **Review loop** (spec and plan): record each round with `add --task spec|plan` and its report file, apply the reviewer's Critical and Important corrections, take product questions to the user, and dispatch it again on the corrections until PASS. `status` says when to ask the user instead (`waive` what the user accepts) and, in autonomous mode, what the last round checks and when to stop.
