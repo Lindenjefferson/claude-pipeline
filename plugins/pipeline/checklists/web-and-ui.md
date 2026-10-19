@@ -1,6 +1,6 @@
 # General checklist: web and UI
 
-Slice of `general.md` (its first paragraph says how an item is read and when it applies): the product has a browser, a server a browser talks to, or screens.
+Slice of `general.md` (its first paragraph says how an item is read and when it applies): the product has a server, a browser or screens, issues tokens, or ships builds.
 
 ## Web and UI
 - **Redirect targets are checked after normalization** — `/.//evil.com` and `/a/..//evil.com` normalize to `//evil.com`. Verify: the target is resolved against the app origin and the origin compared; tests cover `//x`, `/\x`, `/./`, `/.//x`, `/a/..//x`, `%2F%2F`, `javascript:`.
