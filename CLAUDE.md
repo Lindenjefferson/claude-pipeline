@@ -33,7 +33,7 @@ Cada componente tem **uma** fonte de verdade, o próprio arquivo. Os outros docu
 
 ## Como as peças se encaixam
 
-O `kickoff` prepara o projeto uma vez. A cada pedido, o `manager` dimensiona o trabalho, escreve spec e plano (o `reviewer` revisa o plano e o usuário aprova: ✋ 1), cria a branch e roda ciclos: `dev` por tarefa, depois `reviewer` e `qa` em paralelo, uma rodada de correção. Cada execução de agente vai para o `ledger.py`, que diz o que falta. No fim, o `gate.py` lê o ledger e o `CLAUDE.md` do projeto e responde READY ou NOT READY; com READY, o usuário aprova merge e push (✋ 2). Os detalhes estão nos arquivos do mapa acima.
+O `kickoff` prepara o projeto uma vez. A cada pedido, o `manager` dimensiona o trabalho, cria a branch, escreve spec e plano (o `reviewer` revisa os dois e o usuário aprova o plano: ✋ 1) e roda ciclos: `dev` por tarefa, depois `reviewer` e `qa` em paralelo, uma rodada de correção. Cada execução de agente vai para o `ledger.py`, que diz o que falta. No fim, o `gate.py` lê o ledger e o `CLAUDE.md` do projeto e responde READY ou NOT READY; com READY, o usuário aprova merge e push (✋ 2). Os detalhes estão nos arquivos do mapa acima.
 
 ## Regras para mudar o plugin
 

@@ -13,7 +13,19 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 - **Teto de orçamento por entrega** (2.5.0, 2.6.0): volta se os tokens medidos desde a 2.8 mostrarem entregas estourando.
 - **Verificador que tenta refutar cada achado de segurança e registro de cobertura acumulado no gate** (2.8.1): um agente a mais por achado, e uma mudança grande no gate. Voltam se uma entrega mostrar achado falso ou caminho não examinado.
 - **WSL2 para o modo multi-instância** (2.8): não resolve o gargalo medido (a suíte e2e longa, item 17 da [proposta 2.7.0](proposta-2.7.0.md)); plugins não carregam nas sessões WSL do app Desktop; custa outra instalação do Claude Code (memória, plugins e configurações à parte), integração mais difícil com o navegador do Windows e hooks e `pipeline.home` reinstalados. Volta se o próprio Windows virar o gargalo; migração só entre entregas. Esforço: P no plugin.
-- Recusado: revisão externa no gate (2.6.0). O `open-code-review` exige CLI Node e chave de um provedor de LLM e envia o diff para fora; o `reviewer` já cobre isso, e o gate é sem LLM de propósito.
+
+### Recusado
+
+- **Revisão externa no gate** (2.6.0): o `open-code-review` exige CLI Node e chave de um provedor de LLM e envia o diff para fora; o `reviewer` já cobre isso, e o gate é sem LLM de propósito.
+- **Saídas da lista original da 2.8**: a statusline, o `/frentes` abrindo abas, o semáforo do recurso compartilhado, a linha do tempo em gráfico, a página de telas, o `/aprovar` e o aviso de decisão pendente separado, com o motivo na [proposta](proposta-2.8.md).
+
+## 2.8.8 — instruções em dia
+
+Origem: uma conferência dos arquivos de instrução (README, `CLAUDE.md`, roadmap, skills) contra o fluxo atual, pedida pelo usuário.
+
+- [x] **`CLAUDE.md` com a ordem do fluxo**: a branch vem antes da spec desde a 2.7.1, e o `reviewer` revisa a spec e o plano.
+- [x] **`validar` antes do gate**: a descrição da skill diz que ela roda antes do gate no modo supervisionado, como o manager faz desde a 2.8.7.
+- [x] **Seção "Recusado" no roadmap**, que o filtro de ideias do `CLAUDE.md` cita: o item que estava em "Em espera" e as saídas da 2.8, que só estavam na proposta.
 
 ## 2.8.7 — aprendizados do ciclo R do controle-financeiro (PR #28)
 
@@ -146,6 +158,7 @@ Origem: a revisão da 2.8 do backlog contra as etapas 4 e 5 do controle-financei
 
 Termine a entrega em andamento antes de atualizar o plugin. Ao pular versões, leia as notas de cada uma, da mais antiga para a mais nova.
 
+- **2.8.8**: nada muda para quem atualiza.
 - **2.8.7**: lê os ledgers da 2.8.6 (uma entrada antiga com `summary` continua lida). `add --summary` saiu; `add` ganha `--report <path>` (reviewer e qa) e `--task spec|plan` (reviewer), `waive` ganha `--task`, e o `status --json` ganha `from`, `metrics.reviews` e o passo `review`. Rode o `kickoff` de novo para a linha do pico por cópia do `CLAUDE.local.md` contar a verificação (build e suíte). Um projeto com telas e sem a linha "Formatos de tela" preenchida recebe a pergunta do manager antes do primeiro ciclo. O `git config --global pipeline.home` deixa de ser necessário: a primeira sessão depois da atualização grava o `pipeline.home` do repositório na pasta da versão em uso. O `security-review` passa a rodar só quando a entrega toca um domínio sensível; no modo supervisionado, o `validar` vem antes do gate; o gate interrompe o comando que passa do "Tempo máximo" (o valor vai entre crases); saiu o ciclo seguinte em segundo plano.
 - **2.8.6**: lê os ledgers da 2.8.5. No Windows, os hooks do plugin passam a pedir o Git Bash, que a 2.8.5 já pedia para o gate; sem ele, o Claude Code roda os hooks no PowerShell, onde o lançador não roda. No Linux, o link `python-is-python3` deixa de ser necessário.
 - **2.8.5**: lê os ledgers da 2.8.4. No Windows, o gate passa a rodar os "Comandos" no Git Bash em vez do cmd.exe, como o `dev` e o `qa` já rodavam: um comando escrito só para o cmd.exe (`%VAR%`, `\` nos caminhos) precisa ser reescrito. Rode o `kickoff` de novo para receber as linhas novas do template ("Tempo máximo" em "Comandos", "Formatos de tela" em "Fluxo de entrega" e a regra da documentação de API).
