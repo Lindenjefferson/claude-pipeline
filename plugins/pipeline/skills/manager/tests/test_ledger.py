@@ -740,7 +740,7 @@ r = run("claim", "--task", "P2", ledger=PAUSE)
 claim2 = status(PAUSE)["claims"][1]
 check("a claim with neither option is stored without them",
       r.returncode == 0 and claim2 == {"task": "P2", "at": claim2["at"], "worktree": None, "origin": None,
-                                       "head_moved": False}, status(PAUSE)["claims"])
+                                       "tip": None, "head_moved": False}, status(PAUSE)["claims"])
 run("release", "--task", "P2", ledger=PAUSE)
 subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "delivery moved"], cwd=repo, check=True,
                capture_output=True)
@@ -749,8 +749,9 @@ state = status(PAUSE)
 text = run("status", ledger=PAUSE).stdout
 check("a new commit on the delivery branch makes the claim's head_moved true",
       state["claims"][0]["head_moved"] is True, state["claims"])
-check("status text says the delivery head moved and to integrate",
-      f"; the delivery head moved to {new_head[:12]} since: integrate its commits onto it" in text, text)
+check("status text names the delivery head as a fact, not an instruction",
+      f"; the delivery head is now {new_head[:12]}" in text and "integrate its commits" not in text
+      and "head moved" not in text, text)
 
 with open(os.path.join(pause_tree, "wip.txt"), "w", encoding="utf-8") as handle:
     handle.write("half done\n")
@@ -778,10 +779,16 @@ check("while paused, paused is {text, at} in the JSON",
 check("while paused, status --check exits 1", run("status", "--check", ledger=PAUSE).returncode == 1)
 check("the claim stays held through the pause", state["in_flight"] == ["P1"], state["in_flight"])
 r = run("resume", ledger=PAUSE)
-check("resume prints resumed and one line per claim in flight, with its worktree and origin",
-      r.returncode == 0 and r.stdout.splitlines()[0] == "resumed"
-      and f"- P1 in {os.path.abspath(pause_tree)} from {origin[:12]}" in r.stdout.splitlines(), (r.stdout, r.stderr))
+tip = git(pause_tree, "rev-parse", "HEAD")
+check("resume prints resumed and one line per claim in flight, with its worktree and the tip to continue from",
+      r.returncode == 0 and r.stdout.splitlines()[0] == "resumed" and tip != origin
+      and f"- P1 in {os.path.abspath(pause_tree)} at {tip[:12]}" in r.stdout.splitlines(), (r.stdout, r.stderr))
 state = status(PAUSE)
+check("status --json gives each claim's tip (the worktree HEAD after the wip commit) and keeps the origin",
+      state["claims"][0]["tip"] == tip and state["claims"][0]["origin"] == origin, state["claims"])
+check("the pause text stays in the notes after resume, in ledger order, as paused: <text>",
+      state["notes"] == ["paused: waiting for the user"]
+      and "note: paused: waiting for the user" in run("status", ledger=PAUSE).stdout, state["notes"])
 check("after resume, paused is null and the claim is still in flight",
       state["paused"] is None and state["in_flight"] == ["P1"]
       and not any("paused" in item for item in state["pending"]), state)
@@ -802,7 +809,8 @@ with open(os.path.join(repo, OLD), "w", encoding="utf-8", newline="\n") as handl
 state = status(OLD)
 check("a claim written in the old shape still works: no worktree, no origin, head not moved",
       state["in_flight"] == ["L1"] and state["claims"] == [{"task": "L1", "at": "2026-10-01T10:01:00+00:00",
-                                                           "worktree": None, "origin": None, "head_moved": False}]
+                                                           "worktree": None, "origin": None, "tip": None,
+                                                           "head_moved": False}]
       and state["paused"] is None and state["full_qa"] is None, state)
 check("the old claim's text line has no place suffix",
       "dev L1 dispatched at 2026-10-01T10:01:00+00:00, no report yet" in run("status", ledger=OLD).stdout)
@@ -810,6 +818,26 @@ run("pause", "--text", "stop here", ledger=OLD)
 r = run("resume", ledger=OLD)
 check("pause and resume work on a claim with no worktree: the line is just the task",
       r.returncode == 0 and "- L1" in r.stdout.splitlines(), r.stdout + r.stderr)
+
+GONE = ".superpowers/gone.jsonl"
+run("start", "--slug", "gone", ledger=GONE)
+gone_tree = os.path.join(worktrees, "gone")
+git(repo, "worktree", "add", "-q", "-b", "gone-branch", gone_tree)
+git(gone_tree, "-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "only here")
+only_here = git(gone_tree, "rev-parse", "HEAD")
+r = run("claim", "--task", "G1", "--worktree", gone_tree, "--origin", "HEAD", ledger=GONE)
+check("claim --origin HEAD is resolved in the worktree: a commit that exists only there",
+      r.returncode == 0 and status(GONE)["claims"][0]["origin"] == only_here
+      and only_here != git(repo, "rev-parse", "HEAD"), (r.stderr, status(GONE)["claims"]))
+shutil.rmtree(gone_tree, onerror=lambda func, path, _: (os.chmod(path, stat.S_IWRITE), func(path)))
+r = run("pause", "--text", "folder is gone", ledger=GONE)
+state = status(GONE)
+check("pause is not refused for a claimed worktree whose folder was removed; its tip is null",
+      r.returncode == 0 and state["paused"]["text"] == "folder is gone" and state["claims"][0]["tip"] is None,
+      (r.stderr, state["claims"]))
+r = run("resume", ledger=GONE)
+check("resume prints the claim with its worktree and no tip when the folder is gone",
+      f"- G1 in {os.path.abspath(gone_tree)}" in r.stdout.splitlines(), r.stdout)
 
 FULL = ".superpowers/full.jsonl"
 run("start", "--slug", "full", ledger=FULL)
