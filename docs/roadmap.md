@@ -1,6 +1,6 @@
 # Roadmap do plugin `pipeline`
 
-O que falta fazer e o que cada versão entregou; o que muda para quem atualiza está em [`plugins/pipeline/UPGRADING.md`](../plugins/pipeline/UPGRADING.md). Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.9.2) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
+O que falta fazer e o que cada versão entregou; o que muda para quem atualiza está em [`plugins/pipeline/UPGRADING.md`](../plugins/pipeline/UPGRADING.md). Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.9.3) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
 ## Backlog
 
@@ -23,6 +23,7 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 
 - **Revisão externa no gate** (2.6.0): manda o diff para fora e exige outra CLI e uma chave de LLM; o `reviewer` já cobre, e o gate é sem LLM de propósito.
 - **Custo da entrega com o `ccusage`** (pedido do usuário): ele estima dólares pelo preço da API; numa assinatura o que limita é o uso da janela e da semana, que o próprio Claude Code dá ao mod desde a 2.8.10.
+- **Levar a entrega em andamento para outra máquina** (exportar o ledger e os relatórios): decisão do usuário, que só troca de computador entre etapas.
 - **WSL2 para o modo multi-instância** (2.8): é escolha de ambiente, não do plugin, que roda no Linux desde a 2.8.6; não resolve o gargalo medido (a suíte longa e, no CF, a memória, que o WSL disputa).
 - **Tirar do scan de segredos os lock files de outros ecossistemas** (2.8.5): nenhum falso positivo achado, e a exclusão seria um desvio que um agente controla.
 - **Liberar `publish` local no `never_allow` do kickoff** (2.8.5): o custo é uma pergunta ao usuário, que decide.
@@ -34,6 +35,20 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 - **Chat em grupo com moderador** (Maestro): a conversa não passa pelo ledger.
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
+
+## 2.9.3 — preparar uma máquina nova quase sozinho (PR #36)
+
+Origem: pedido do usuário. Um projeto que já está no GitHub ou em produção, num computador novo: depois de clonar e instalar o plugin, o que faltava para trabalhar (no CF: o Node do `.nvmrc`, o Docker aberto, `npm install`, o `.env.local` a partir do `.env.example`, `npm run db:start`) estava espalhado em linhas do `CLAUDE.md` e em arquivos do projeto, sem roteiro.
+
+- [x] **Seção "Preparar uma máquina" no template do `CLAUDE.md`**: os pré-requisitos com o comando que confere cada um e, por sistema, o que o instala ou abre; os arquivos de ambiente, de qual exemplo vêm e de onde vêm os valores (o comando que os baixa do serviço onde o projeto roda, ou os que se preenchem à mão); os serviços locais; e a prova de que a máquina está pronta. O plugin dá o formato, e o projeto declara os comandos, então nada depende de stack.
+- [x] **Passo 9 do kickoff, máquina nova**: percebe um clone num computador novo (`CLAUDE.md` presente, sem o hook de segredos ou o `CLAUDE.local.md`) e segue a seção: confere e, com o que o projeto declara, instala ou abre os pré-requisitos, instala as dependências, cria os arquivos de ambiente e baixa os valores quando o projeto diz de onde, sobe os serviços e roda a prova. Pede uma confirmação para a lista de comandos, só roda comando que o projeto declara, nunca sobrescreve um arquivo de ambiente e nunca copia, inventa ou adivinha um segredo; diz no fim o que ficou com o usuário.
+- [x] **Setup pronto ao escolher a stack** (pedido do usuário, a ideia do claude-code-setup): num projeto novo, a primeira tarefa (a que monta a stack) já preenche a seção, junto com os "Comandos"; depois dela, o manager roda os passos 7 e 9 do kickoff (a allowlist e esta máquina pronta). O `discovery` também sugere, para cada stack candidata, as extensões do Claude Code que ajudariam (um plugin oficial da linguagem ou dos testes, um servidor MCP do armazenamento de dados), cada uma instalada só com o sim do usuário e depois da checagem de "Third-party extensions".
+
+O prompt cresceu: o kickoff ganhou 407 palavras (de 1958 para 2365; é lido uma vez por projeto ou máquina), o template do `CLAUDE.md` 212, o `discovery` 48, o manager 30 (de 3634 para 3664) e o `spec-checklist` 12. No kickoff, a maior parte é a segurança do passo 9 (mostrar, recusar e confirmar cada comando que vem do repositório).
+
+Números que esta versão deve mudar (nenhum do ledger: a preparação acontece fora de uma entrega; o `feedback-plugin` conta nas notas da preparação): passos à mão para deixar um computador novo pronto caem para o que é do usuário (um login, um valor secreto, um app que só ele abre).
+
+A revisão de fechamento (Fable) achou 4 Important e 5 Minor, todos corrigidos: o passo 9 rodava comandos do repositório clonado sem a inspeção do passo 7 (agora mostra cada um, recusa os perigosos e lê os scripts); a ordem fixa não servia ao CF, cujos valores vêm do banco local de pé (agora vale a ordem da seção, e o comando grava o arquivo, sem o kickoff transcrever segredo); a detecção disparava na mesma máquina (agora pede o hook, o `CLAUDE.local.md` e as dependências ausentes, registrados no passo 1); e as extensões escolhidas não tinham onde ser registradas (agora entram na seção 11 da spec).
 
 ## 2.9.2 — atualizar um projeto sem trabalho manual e memória conferida por script (PR #35)
 
