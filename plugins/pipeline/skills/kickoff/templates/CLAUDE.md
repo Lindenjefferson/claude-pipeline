@@ -31,7 +31,7 @@ Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o
 
 ## Execução em paralelo
 
-O `manager` roda em paralelo, cada uma numa worktree do git, as tarefas que não dependem uma da outra nem tocam os mesmos arquivos. Sem esta seção preenchida, as tarefas rodam uma de cada vez.
+O `manager` roda em paralelo, cada uma numa worktree do git, as tarefas que não dependem uma da outra nem tocam os mesmos arquivos (o doc do módulo à parte: um conflito só nele o `manager` junta na integração). Sem esta seção preenchida, as tarefas rodam uma de cada vez.
 
 - Como rodar N cópias ao mesmo tempo (o que muda por worktree): _(porta, variáveis de ambiente, dados de teste)_
 - Armazenamento de dados por cópia: _(outra instância com portas próprias ou um esquema por cópia; ou "compartilhado", e a verificação que grava roda uma tarefa por vez)_; como derrubá-lo e conferir que caiu (o `manager` faz antes de remover a worktree): _(nenhum container nem porta da cópia de pé)_
