@@ -141,6 +141,16 @@ test('an old ledger without VALIDAR ids, runs, tokens, steps or scope still draw
   expect(paneLines(old, [], NOW)[0]).toBe('etapa 5 · ciclo 2 · autônomo')
 })
 
+test('a paused delivery says so in the title and spells out the resume step', () => {
+  const text = 'rerun the gate after the API key is set'
+  const paused = { ...STATUS, dispatched: {}, scope: null, validar: [], reviewer: [], paused: { text, at: DISPATCHED },
+                   steps: [{ step: 'resume', text, at: DISPATCHED }] }
+  expect(bandLine(paused, NOW)).toBe(`etapa 5 · ciclo 2 · autônomo · pausada · depois: retomar a entrega (pausada: ${text})`)
+  expect(paneLines(paused, [], NOW)[0]).toBe('etapa 5 · ciclo 2 · autônomo · pausada')
+  expect(paneLines(paused, [], NOW)).toContain(`- retomar a entrega (pausada: ${text})`)
+  expect(bandLine({ ...paused, paused: null, steps: [] }, NOW)).toBe('etapa 5 · ciclo 2 · autônomo')
+})
+
 test('with a delivery open, the band is drawn above the prompt and keeps what other mods draw there', async ($, on) => {
   const clock = stubs(on, STATUS)
   await start($, clock)

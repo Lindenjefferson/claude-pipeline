@@ -12,7 +12,9 @@ folder, **/ matches zero or more folders and {a,b} is either; an invalid glob, o
 prints a warning; without that line, every tracked file that is not Markdown); no commit after the head of the
 ledger's latest reviewer run changes anything but the plan, docs/lessons.md, docs/quality-reports/ or the user's
 .pipeline-secrets-allow (first-parent commits only, so a merged front is not counted, and tasks are integrated by
-fast-forward or cherry-pick); every command of that section passes (lines like "- Testes: `<command>`"; Build,
+fast-forward or cherry-pick); when "Comandos" has a "Verificação de interface" line and the gate runs no
+"Testes (<name>)" or "Testes 2" line, a qa run added with --full whose head is followed by no commit but those same
+exempt files (Full suite); every command of that section passes (lines like "- Testes: `<command>`"; Build,
 Typecheck, Lint, Testes and the optional Auditoria are run, a second line of the same kind runs too under its own
 label, such as "Testes (e2e)", a blank command counts as not configured, and --cmd adds or overrides one, or with no
 command removes it), each in a POSIX shell, as the Bash tool runs them (Git Bash on Windows, and cmd.exe with a
@@ -22,6 +24,8 @@ and, outside Windows, the processes it started are stopped); the commands change
 and no secret or .env file is added anywhere in <base>..HEAD, the whole history that a push would send. A check that
 does not apply is SKIP with the reason; only Testes is required. When the "Comandos" section differs from the one at
 <base>, the gate prints the difference as a warning (and the report shows it) and still runs the branch's commands.
+A "Comandos" line labeled Testes, Tests or Test plus other words (not "Testes afetados") is no gate command: it is a
+warning (and the report lists it) to name it "Testes (<name>)".
 Prints READY or NOT READY and exits 0 or 1.
 
 <base> is --base (an error when it is not a commit), or else the base the ledger recorded at start, or else the
@@ -51,6 +55,8 @@ COMMANDS = {"build": "Build", "typecheck": "Typecheck", "tipos": "Typecheck", "l
             "tests": "Testes", "test": "Testes", "auditoria": "Auditoria", "audit": "Auditoria"}
 ORDER = ["Build", "Typecheck", "Lint", "Testes", "Auditoria"]
 TEST_FILES = "arquivos de teste"
+NOT_COMMANDS = {TEST_FILES, "testes afetados"}
+INTERFACE = ("verificação de interface", "verificacao de interface")
 CRITERION = re.compile(r"(?<![\w-])AC-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*")
 MINUTES = 15
 DAY = 24 * 60 * 60
@@ -114,6 +120,11 @@ def project_commands(overrides):
         else:
             commands.pop(name, None)
     return commands
+
+
+def unrun_tests():
+    return [label for label, value in comandos() if value and re.match(r"(?:testes|tests|test)\b", label_key(label))
+            and label_key(label) not in COMMANDS and label_key(label) not in NOT_COMMANDS]
 
 
 def comandos_change(base):
@@ -248,22 +259,47 @@ def traceability(plan):
     return not missing, ("criteria with no test: " + ", ".join(missing)) if missing else ""
 
 
-def reviewed(ledger):
-    reviews = (ledger or {}).get("reviewer") or []
-    head = reviews[0].get("head") if reviews else ""
-    if not head:
-        return True, "no reviewer head in the ledger"
+def changed_after(ledger, head):
+    """The files changed after <head> that no review or full qa is owed for, or the reason <head> is no ancestor."""
     if git("merge-base", "--is-ancestor", head, "HEAD")[0] != 0:
-        return False, f"the reviewed head {head[:7]} is not in this history: run the reviewer on the current head"
+        return None, []
     plan = ledger.get("plan") or ""
     if os.path.isabs(plan):
         plan = os.path.relpath(plan, git("rev-parse", "--show-toplevel")[1].strip())
     plan = plan.replace("\\", "/").removeprefix("./")
     out = git("log", "--first-parent", "--no-merges", "-z", "--name-only", "--format=", f"{head}..HEAD")[1]
     changed = sorted({name.strip("\n") for name in out.split("\0")} - {"", plan, LESSONS, SECRETS_ALLOW})
-    changed = [name for name in changed if not name.startswith(REPORTS + "/")]
+    return True, [name for name in changed if not name.startswith(REPORTS + "/")]
+
+
+def reviewed(ledger):
+    reviews = (ledger or {}).get("reviewer") or []
+    head = reviews[0].get("head") if reviews else ""
+    if not head:
+        return True, "no reviewer head in the ledger"
+    found, changed = changed_after(ledger, head)
+    if not found:
+        return False, f"the reviewed head {head[:7]} is not in this history: run the reviewer on the current head"
     return not changed, (f"changed after the reviewed head {head[:7]} with no review: " + ", ".join(changed)
                          if changed else "")
+
+
+def full_suite(ledger, commands):
+    if not any(label_key(label) in INTERFACE and value for label, value in comandos()):
+        return True, "no Verificação de interface line"
+    other = next((name for name in commands if name.startswith("Testes") and name != "Testes"), None)
+    if other:
+        return True, f"the gate runs the interface suite ({other})"
+    full = ledger.get("full_qa")
+    head = full and full.get("head")
+    if not head:
+        return False, ("the interface suite runs in no gate line and no qa ran the full suite at the final head: "
+                       'dispatch qa on the full test command and add it with --full, or put the suite on a '
+                       '"Testes (<name>)" line')
+    found, changed = changed_after(ledger, head)
+    if not found:
+        return False, f"the full qa head {head[:7]} is not in this history: run qa on the full suite at the current head"
+    return not changed, (f"changed after the full qa at {head[:7]}: " + ", ".join(changed) if changed else "")
 
 
 def ledger_state(path):
@@ -347,7 +383,7 @@ def report_path(slug):
     return f"{REPORTS}/{datetime.date.today().isoformat()}-{slug}.md"
 
 
-def write_report(slug, base, head, checks, ledger, changed):
+def write_report(slug, base, head, checks, ledger, changed, unrun):
     path = report_path(slug)
     os.makedirs(REPORTS, exist_ok=True)
     today = datetime.date.today().isoformat()
@@ -366,6 +402,8 @@ def write_report(slug, base, head, checks, ledger, changed):
             lines += ["", "## Deferred", ""]
             lines += [f"- {item['id']} {item['text']} -> {item['decision']}" for item in ledger["deferred"]]
         lines += [""] + metrics_lines(ledger.get("metrics"))
+    if unrun:
+        lines += ["## Test lines not run", ""] + [f"- {label}" for label in unrun] + [""]
     if changed:
         lines += ["## Comandos changed", "", "```diff"] + changed + ["```", ""]
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
@@ -419,25 +457,31 @@ def main():
     dirty = git("status", "--porcelain")[1].strip()
     checks.append(("Clean tree", not dirty, dirty))
 
+    commands = project_commands(args.cmd)
     if ledger:
         checks.append(("Criteria", *traceability(ledger.get("plan"))))
         checks.append(("Reviewed", *reviewed(ledger)))
+        checks.append(("Full suite", *full_suite(ledger, commands)))
 
     changed = comandos_change(base)
     if changed:
         print(f"warning: the Comandos section of CLAUDE.md changed in {base[:7]}..HEAD; the gate runs the branch's "
               "commands:\n    " + "\n    ".join(changed), flush=True)
 
+    unrun = unrun_tests()
+    for label in unrun:
+        print(f'warning: the Comandos line "{label}" is not run by the gate: name it "Testes (<name>)" to run it',
+              flush=True)
+
     draft = report_path(args.report) if args.report and not dirty else None
     if draft:
         existed = git("cat-file", "-e", f"HEAD:{draft}")[0] == 0
-        write_report(args.report, base, head, checks, ledger, changed)
+        write_report(args.report, base, head, checks, ledger, changed, unrun)
         git("add", draft)
 
     ready = False
     try:
         before = tracked_changes()
-        commands = project_commands(args.cmd)
         shell, seconds = bash(), time_limit()
         if not shell:
             print("warning: no Git Bash found; the commands run in cmd.exe", flush=True)
@@ -463,7 +507,7 @@ def main():
         print("Overall:    READY" if ready else "Overall:    NOT READY")
     finally:
         if draft and ready:
-            write_report(args.report, base, head, checks, ledger, changed)
+            write_report(args.report, base, head, checks, ledger, changed, unrun)
             git("add", draft)
             print(f"report staged: {draft}")
         elif draft:
