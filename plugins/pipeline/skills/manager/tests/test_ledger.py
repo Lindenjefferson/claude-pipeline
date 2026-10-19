@@ -1311,4 +1311,90 @@ result = subprocess.run([sys.executable, LEDGER, "--ledger", os.path.join(capaci
 check("capacity measures the machine without overrides",
       result.stdout.startswith("capacity:") and result.returncode in (0, 1), result)
 
+
+# diff size of each dev task
+SIZE = ".superpowers/size.jsonl"
+size_tree = os.path.join(worktrees, "size")
+
+
+def put(cwd, name, text, message):
+    with open(os.path.join(cwd, name), "wb") as handle:
+        handle.write(text if isinstance(text, bytes) else text.encode("utf-8"))
+    git(cwd, "add", name)
+    git(cwd, "commit", "-q", "-m", message)
+
+
+def ledger_entries(ledger):
+    with open(os.path.join(repo, ledger), encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
+
+
+def diff_of(ledger, task):
+    found = [entry for entry in ledger_entries(ledger) if entry.get("agent") == "dev" and entry.get("task") == task]
+    return found[-1].get("diff") if found else "no run"
+
+
+run("start", "--slug", "size", ledger=SIZE)
+put(repo, "s1.txt", "a\nb\nc\n", "S1")
+add("dev", "DONE", "S1", ledger=SIZE)
+check("a sequential task with no previous run is measured from the delivery base",
+      diff_of(SIZE, "S1") == {"files": 1, "added": 3, "removed": 0}, diff_of(SIZE, "S1"))
+put(repo, "s1.txt", "a\nb\nX\nY\n", "S2")
+add("dev", "DONE", "S2", ledger=SIZE)
+check("a sequential task is measured from the head the previous run stored",
+      diff_of(SIZE, "S2") == {"files": 1, "added": 2, "removed": 1}, diff_of(SIZE, "S2"))
+put(repo, "bin.dat", b"\x00\x01\x02\xff" * 50, "binary")
+put(repo, "s3.txt", "one\n", "S3 text")
+add("dev", "DONE", "S3", ledger=SIZE)
+check("a binary file counts as one file and no lines",
+      diff_of(SIZE, "S3") == {"files": 2, "added": 1, "removed": 0}, diff_of(SIZE, "S3"))
+add("reviewer", "PASS", ledger=SIZE)
+put(repo, "s4.txt", "x\ny\n", "S4")
+add("dev", "DONE_WITH_CONCERNS", "fix-1", ledger=SIZE)
+check("the previous run of any agent sets the start",
+      diff_of(SIZE, "fix-1") == {"files": 1, "added": 2, "removed": 0}, diff_of(SIZE, "fix-1"))
+
+git(repo, "worktree", "add", "-q", "--detach", size_tree)
+origin = git(size_tree, "rev-parse", "HEAD")
+run("claim", "--task", "W1", "--worktree", size_tree, "--origin", origin, ledger=SIZE)
+put(size_tree, "w1.txt", "1\n2\n3\n4\n", "W1 commit")
+put(repo, "other.txt", "o\n" * 10, "another task integrated")
+r = add("dev", "DONE", "W1", ledger=SIZE)
+check("a worktree task counts only its own commits, though the main head moved",
+      r.returncode == 0 and diff_of(SIZE, "W1") == {"files": 1, "added": 4, "removed": 0},
+      (r.stderr, diff_of(SIZE, "W1")))
+
+BROKEN = ".superpowers/broken.jsonl"
+run("start", "--slug", "broken", ledger=BROKEN)
+with open(os.path.join(repo, BROKEN), encoding="utf-8") as handle:
+    text = handle.read().replace(git(repo, "rev-parse", "HEAD"), "0" * 40)
+with open(os.path.join(repo, BROKEN), "w", encoding="utf-8", newline="\n") as handle:
+    handle.write(text)
+r = add("dev", "DONE", "B1", ledger=BROKEN)
+check("a git failure stores no diff and the add still succeeds",
+      r.returncode == 0 and "0" * 40 in text and "diff" not in ledger_entries(BROKEN)[-1],
+      (r.stderr, ledger_entries(BROKEN)[-1]))
+
+LINES = ".superpowers/lines.jsonl"
+at = "2026-10-01T10:00:00+00:00"
+with open(os.path.join(repo, LINES), "w", encoding="utf-8", newline="\n") as handle:
+    handle.write(json.dumps({"type": "start", "slug": "lines", "base": "abc", "at": at}) + "\n")
+    for task, verdict, diff in (("T1", "NEEDS_CONTEXT", {"files": 1, "added": 5, "removed": 5}),
+                                ("T1", "DONE", {"files": 3, "added": 90, "removed": 20}),
+                                ("T2", "DONE", {"files": 1, "added": 40, "removed": 0}),
+                                ("T3", "DONE", None),
+                                ("fix-1", "DONE", {"files": 1, "added": 20, "removed": 10}),
+                                ("cleanup", "DONE", {"files": 2, "added": 2, "removed": 10})):
+        entry = {"type": "run", "agent": "dev", "task": task, "verdict": verdict, "open": 0, "head": "", "at": at}
+        handle.write(json.dumps({**entry, **({"diff": diff} if diff else {})}) + "\n")
+lines = status(LINES)["metrics"].get("lines")
+check("metrics.lines sums the lines per task over its dev runs, the total and the unmeasured runs",
+      lines and lines["tasks"] == {"T1": 120, "T2": 40, "fix-1": 30, "cleanup": 12} and lines["total"] == 202
+      and lines["unmeasured"] == 1, lines)
+check("metrics.lines gives the follow-up lines (fix-N and cleanup) and their share, to 2 decimals",
+      lines and lines["follow_up"] == 42 and lines["share"] == 0.21, lines)
+old = status(".superpowers/legacy.jsonl")["metrics"].get("lines")
+check("an old ledger without diff counts every dev run as unmeasured, total 0 and share null",
+      old == {"tasks": {}, "total": 0, "follow_up": 0, "share": None, "unmeasured": 2}, old)
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
