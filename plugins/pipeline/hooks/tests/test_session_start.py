@@ -74,6 +74,58 @@ outside = tempfile.mkdtemp(prefix="sessionstart_nogit_")
 r = run(outside, payload={"hook_event_name": "SessionStart", "source": "startup", "cwd": outside})
 check("outside a git repo: nothing and exit 0", r.returncode == 0 and r.stdout == "", r.stdout + r.stderr)
 
+# An update started by the atualizar skill leaves .superpowers/atualizar.json; the new session is reminded to finish it.
+VERSION = json.load(open(os.path.join(HOOKS, "..", ".claude-plugin", "plugin.json"), encoding="utf-8"))["version"]
+upd_dir = tempfile.mkdtemp(prefix="sessionstart_upd_")
+subprocess.run(["git", "init", "-q"], cwd=upd_dir, check=True)
+os.makedirs(os.path.join(upd_dir, ".superpowers"))
+UPD = os.path.join(upd_dir, ".superpowers", "atualizar.json")
+
+
+def write_upd(text):
+    with open(UPD, "w", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def start(cwd, source="startup"):
+    return run(cwd, payload={"hook_event_name": "SessionStart", "source": source, "cwd": cwd})
+
+
+r = start(upd_dir)
+check("atualizar: no file prints nothing", r.returncode == 0 and r.stdout == "", r.stdout + r.stderr)
+write_upd(json.dumps({"from": "0.0.1", "to": VERSION}))
+want = (f"pipeline: the plugin was updated from 0.0.1 to {VERSION}; finish the update with the atualizar skill "
+        "(kickoff and the upgrade notes).")
+for source in ("startup", "resume", "clear", "compact"):
+    r = start(upd_dir, source)
+    check(f"atualizar: `to` is the running version, on {source}", r.returncode == 0 and r.stdout.strip() == want,
+          r.stdout + r.stderr)
+sub_upd = os.path.join(upd_dir, "src")
+os.makedirs(sub_upd)
+r = start(sub_upd)
+check("atualizar: from a subfolder too", r.stdout.strip() == want, r.stdout + r.stderr)
+write_upd(json.dumps({"from": "0.0.1", "to": "99.0.0"}))
+r = start(upd_dir)
+check("atualizar: `to` differs from the running version", r.returncode == 0 and r.stdout.strip() == (
+    f"pipeline: an update to 99.0.0 was started but this session runs {VERSION}; run /reload-plugins or restart, "
+    "then the atualizar skill."), r.stdout + r.stderr)
+for bad in ("{not json", "[]", json.dumps({"from": "1"}), json.dumps({"to": VERSION}), json.dumps({"from": 1, "to": 2}),
+            ""):
+    write_upd(bad)
+    r = start(upd_dir)
+    check(f"atualizar: unusable file {bad!r} says nothing and never fails", r.returncode == 0 and r.stdout == ""
+          and r.stderr == "", r.stdout + r.stderr)
+write_upd(json.dumps({"from": "0.0.1", "to": VERSION}))
+subprocess.run(["git", "-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "base"],
+               cwd=upd_dir, check=True)
+subprocess.run([sys.executable, LEDGER, "start", "--slug", "retomada"], cwd=upd_dir, check=True, capture_output=True)
+upd_status = subprocess.run([sys.executable, LEDGER, "status"], cwd=upd_dir, capture_output=True, text=True,
+                            encoding="utf-8").stdout
+r = start(upd_dir, "compact")
+check("atualizar: with a ledger, the ledger output comes first and unchanged, then the notice",
+      r.stdout == "Delivery ledger (resumed session), `ledger.py status`:\n" + upd_status + want + "\n",
+      r.stdout + r.stderr)
+
 config = json.load(open(os.path.join(HOOKS, "hooks.json"), encoding="utf-8"))
 groups = config["hooks"]["SessionStart"]
 check("hooks.json registers session-start.py for every session start", len(groups) == 1
