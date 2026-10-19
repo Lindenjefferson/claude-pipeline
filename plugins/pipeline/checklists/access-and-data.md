@@ -1,0 +1,19 @@
+# General checklist: access and data
+
+Slice of `general.md` (its first paragraph says how an item is read and when it applies): the product stores data.
+
+## Access and data
+- **Every server entry point re-checks authentication, authorization and input** — an endpoint is public no matter which page calls it, and a shared layout or parent guard does not protect it. Verify: each entry point reads the user server-side, checks scope (tenant, role) and validates input before writing.
+- **Permissions are a matrix tested in full** — a sample of roles and actions leaves the untested cells to chance. Verify: role × resource × action × relationship to the record (owner, member, other tenant) is written down, and every cell has a test, the refused ones included.
+- **Every write has its abuse cases tested** — the paths a normal user never takes are the ones an attacker does. Verify: tests try it without permission, on another tenant's or owner's record, and by calling the server directly, and see it refused with nothing written.
+- **Privileges default to closed** — anything a new function, table or endpoint gets by default is open until someone notices. Verify: defaults are revoked, access is granted by exact identity (full signature, not a name pattern), and a test sweeps the effective privileges against that allowlist.
+- **References between tenant-owned records cannot cross tenants** — a plain reference lets one tenant's row point at another's. Verify: the data layer ties the reference to the same tenant, and a test tries the cross-tenant reference.
+- **Code that runs with elevated privileges trusts nothing from the caller's context** — names, paths or settings the caller controls can redirect it. Verify: every object it touches is fully qualified and the caller identity comes from the session, not from input.
+- **Shared, editable data has concurrent-edit control** — two people editing the same record silently overwrite each other. Verify: a version or last-modified check refuses the stale write with a specific message, and a test makes the second write stale.
+- **State transitions that touch several fields happen in one atomic write** — separate writes expose an intermediate state that checks reject or mishandle. Verify: one statement or one transaction per transition.
+- **Applied migrations are never edited** — other machines already ran them. Verify: changes come as a new migration; additive first (nullable, backfill, then tighten).
+- **A new column's default is right for the rows that already exist** — a default chosen for new rows (visible, active, a role) silently grants access or changes meaning on every old row. Verify: the migration states the value old rows get, and a test runs it over existing rows and checks that value.
+- **Export and backup return only what the requester may read** — a bulk path built for convenience skips the per-record checks of the normal reads. Verify: export, backup and download go through the same scope (tenant, role, owner) as the screens, and a test exports as a user of another tenant or a lower role and gets none of the other records.
+- **A logically deleted record stays out of every read** — a flag honored by the list but not by a lookup by id, a new reference or a restore brings the record back. Verify: lists and totals follow the Invariant on sets; a lookup by id and a new reference refuse it, only someone allowed to restore it can, and a test tries each path.
+- **Removing a member removes every access they had** — sessions, tokens, shared links, invites and cached permissions outlive the membership. Verify: after the removal, a test tries each way the member had in (an open session included) and is refused.
+- **No per-user data in a process-wide cache, and no secret in the client bundle** — one leaks across requests, the other to everyone. Verify: caches are request-scoped; client code imports no server-only module or secret value.
