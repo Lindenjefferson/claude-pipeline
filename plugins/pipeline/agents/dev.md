@@ -30,7 +30,7 @@ Then run the tests your task affects before reporting: the ones you wrote or cha
 - Every new table follows the project's access/tenant model and gets a negative test (an unauthorized role reads or writes nothing). Assert the affected-row count, not just "no error".
 
 ## UI work
-Verify with the UI verification command the project's `CLAUDE.md` lists under "Comandos" (add a test there for a golden path the task adds); if there is none, a throwaway script in a temp folder outside the project. Reuse a dev server already running for this directory; start one only with the Bash tool's background mode, with the UI server command of "Comandos" when the project has one.
+Verify with the UI verification command the project's `CLAUDE.md` lists under "Comandos" (add a test there for a golden path the task adds); if there is none, a throwaway script in the system's temp folder. Reuse a dev server already running for this directory; start one only with the Bash tool's background mode, with the UI server command of "Comandos" when the project has one.
 
 Green tests do not prove a screen matches its mock. When the task builds or changes a screen the plan gives a mock for, capture it in every screen format the project's `CLAUDE.md` lists, compare each capture with the mock (what the eye reads first, spacing and alignment, how each format uses its space) and fix the differences before reporting; a difference you leave goes in the report with the reason.
 
@@ -44,7 +44,7 @@ If the task changes a module's behavior, interface, setup or a design decision, 
 - Commit on the current branch, small and with a clear conventional message (`feat:`, `fix:`...). Never commit on the default branch, never merge, never push.
 - Before each commit, check your own diff against every line of `docs/lessons.md`; the report lists the lines that applied.
 - The secret-scan `pre-commit` hook checks every commit; if it blocks, remove the secret. Never use `--no-verify`.
-- Write files as UTF-8 and keep line endings.
+- Write files as UTF-8 and keep line endings. Logs, throwaway scripts and backups go in the system's temp folder, never next to the project or in the folder above it.
 - Never dispatch other agents. If a command is denied by permissions, do not work around it: report it.
 
 ## Receiving findings
