@@ -11,6 +11,8 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
   - Gatilho: o kickoff termina perguntando se há material de referência; se houver, a primeira entrega é grande e começa pelo `discovery`.
   - Modo projeto novo do `discovery`: além de minerar as fontes, ele levanta as restrições do produto (plataforma, dados, offline, onde roda, custo, o que o usuário já conhece), de 2 a 3 stacks candidatas com prós e contras contra essas restrições, as versões atuais conferidas na fonte e as ferramentas de verificação que cada uma pede.
   - A decisão continua sendo do usuário: as opções são insumo, nunca uma escolha. O `spec-checklist` ganha a seção de stack, e a escolhida entra em `## Product decisions`, aprovada no ✋ 1 e transformada nas linhas de "Comandos" do `CLAUDE.md`.
+  - Questionário pré-respondido: cada pergunta do `spec-checklist` (pré-mortem de cada escrita, premissas, domínio) que as fontes respondem chega preenchida, com a citação; o brainstorming só pergunta ao usuário o que ficou em aberto.
+  - Kickoff sem confirmação para o que só protege: o scan de segredos e as regras `deny` e `ask` entram por padrão, com um resumo; só as entradas `allow`, que ampliam permissões, são mostradas para confirmar. Os pedidos de permissão do próprio Claude Code continuam, porque o plugin não pode nem deve contorná-los.
 
   Esforço: M.
 
