@@ -1,20 +1,11 @@
 # Roadmap do plugin `pipeline`
 
-O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.9.0) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
+O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.9.1) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
 ## Backlog
 
 - **Guarda do Bash também na ferramenta PowerShell** (2.7.2): no Windows a sessão principal tem a ferramenta PowerShell, que o `bash-guard.py` não vê (os agentes não a têm). Entra com um leitor das aspas do PowerShell, testado. Esforço: P.
 - **VALIDAR das entregas empilhadas na faixa** (revisão da 2.8): a faixa e o `/andamento` contam só o ledger atual; os itens de uma entrega anterior empilhada (`ledger-<slug>.jsonl`) não aparecem, e um arquivo desses não diz se é entrega empilhada à espera ou já encerrada. Entra se o `start --archive` passar a registrar isso. Esforço: P.
-
-- **Começo de projeto pelo `discovery`** (pedido do usuário, para a 2.9.1). Hoje o `discovery` só roda no passo 2 de uma entrega grande, e a stack de um projeto novo é escolhida sem registro: nenhum checklist pede as alternativas nem o critério. A proposta:
-  - Gatilho: o kickoff termina perguntando se há material de referência; se houver, a primeira entrega é grande e começa pelo `discovery`.
-  - Modo projeto novo do `discovery`: além de minerar as fontes, ele levanta as restrições do produto (plataforma, dados, offline, onde roda, custo, o que o usuário já conhece), de 2 a 3 stacks candidatas com prós e contras contra essas restrições, as versões atuais conferidas na fonte e as ferramentas de verificação que cada uma pede.
-  - A decisão continua sendo do usuário: as opções são insumo, nunca uma escolha. O `spec-checklist` ganha a seção de stack, e a escolhida entra em `## Product decisions`, aprovada no ✋ 1 e transformada nas linhas de "Comandos" do `CLAUDE.md`.
-  - Questionário com bate-bola (o usuário achou esse debate muito esclarecedor e ele fica): para cada pergunta em aberto do `spec-checklist` (pré-mortem de cada escrita, premissas, domínio), o `discovery` entrega a dúvida, de 2 a 3 opções e uma sugestão com o porquê; o manager conduz o debate uma pergunta por vez, e o usuário decide. Só o que as fontes já respondem chega preenchido, com a citação, e pode ser reaberto.
-  - Kickoff sem confirmação para o que só protege: o scan de segredos e as regras `deny` e `ask` entram por padrão, com um resumo; só as entradas `allow`, que ampliam permissões, são mostradas para confirmar. Os pedidos de permissão do próprio Claude Code continuam, porque o plugin não pode nem deve contorná-los.
-
-  Esforço: M.
 
 - **Atualizar o plugin num projeto com uma skill `atualizar`** (para a 2.9.2; cada atualização da 2.8.8 à 2.8.10 pediu linhas à mão no `CLAUDE.md` ou no `CLAUDE.local.md`, que o kickoff não acrescenta dentro de uma seção que já existe): num ponto de parada da entrega, lê as notas de atualização entre as duas versões, acrescenta as linhas novas dos templates preenchidas com o que der para medir, mostra o resumo e abre a sessão nova. Esforço: M.
 - **`ledger.py capacity`** (para a 2.9.2; no CF um `qa` rodou com 0,7 GB livres, e conferir a memória antes de despachar ainda é julgamento do manager): mede a memória e o disco livres, compara com o mínimo e o pico do `CLAUDE.local.md` e responde quantas cópias cabem. Esforço: P/M.
@@ -46,6 +37,20 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 - **Chat em grupo com moderador** (Maestro): a conversa não passa pelo ledger.
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
+
+## 2.9.1 — começo de projeto pelo `discovery` e kickoff que só pergunta o que amplia (PR #34)
+
+Origem: pedido do usuário. O debate de regras de cada etapa foi muito esclarecedor no CF e fica; a ideia é chegar nele com as fontes já lidas e com sugestões. A stack de um projeto novo era escolhida sem registro: nenhum checklist pedia as alternativas nem o critério.
+
+- [x] **O `discovery` prepara o bate-bola**: percorre o `spec-checklist` contra as fontes. O que elas respondem chega pré-respondido, com a citação; o resto é pergunta em aberto, com a dúvida, de 2 a 3 opções e uma sugestão com o porquê. Ele sugere, nunca decide.
+- [x] **Modo projeto novo do `discovery`**: as restrições do produto, de 2 a 3 stacks candidatas com prós e contras contra elas, as versões atuais conferidas na fonte oficial com a data e a verificação que cada uma pede.
+- [x] **O manager conduz o debate**: mostra os itens pré-respondidos numa lista para confirmar ou reabrir e debate as perguntas em aberto uma por vez, cada uma com as opções e a sugestão; o usuário decide, a stack incluída. A primeira entrega de um projeto novo é grande e começa pelo `discovery`.
+- [x] **Seção 10 do `spec-checklist`, stack de um projeto novo**: as restrições e as candidatas consideradas, a escolhida e o porquê, com as versões, repetida em `## Product decisions` para o ✋ 1, e a verificação que a primeira tarefa transforma nas linhas de "Comandos".
+- [x] **Kickoff que só pergunta o que amplia permissão**: o scan de segredos e as entradas `deny` e `ask` entram sem perguntar, porque só protegem, e vão para o relatório; as entradas `allow`, que ampliam o que os agentes rodam sem perguntar, continuam mostradas para confirmar. No fim, o kickoff pergunta se há material de referência. Os pedidos de permissão do próprio Claude Code continuam.
+
+O prompt cresceu: o `discovery` ganhou 287 palavras (de 776 para 1063), o `spec-checklist` 104, o kickoff 73 e o manager 54 (de 3529 para 3583). O `discovery` e o `spec-checklist` só são lidos numa entrega grande, e o kickoff uma vez por projeto; no manager, entra só a forma do debate.
+
+Números que esta versão deve mudar, na primeira entrega de um projeto novo (nas notas e no relatório do `discovery`): perguntas do debate que as fontes já respondiam (o usuário respondeu de novo) passam a zero; achados de origem `design` e `assumption` por ciclo caem, comparados com os do CF; a stack fica registrada com as alternativas; confirmações do kickoff caem para uma, a das entradas `allow`.
 
 ## 2.9.0 — plugin enxuto (PR #33)
 
@@ -183,6 +188,7 @@ Números que esta versão deve mudar, que o `feedback-plugin` da próxima entreg
 
 Termine a entrega em andamento antes de atualizar o plugin. Ao pular versões, leia as notas de cada uma, da mais antiga para a mais nova.
 
+- **2.9.1**: nada muda num projeto em andamento. Num projeto novo, o kickoff instala o scan de segredos e as regras `deny` e `ask` sem perguntar e só mostra as entradas `allow` para confirmar.
 - **2.9.0**: nada muda para quem atualiza: lê os ledgers da 2.8.10 sem mudança de formato, e os caminhos novos (`skills/manager/references/`, `checklists/agents-shared.md` e as fatias do `general.md`) ficam dentro do plugin, citados por `${CLAUDE_PLUGIN_ROOT}`; nenhum arquivo do projeto os cita.
 - **2.8.10**: lê os ledgers da 2.8.9 (um `add` sem `usage` continua valendo). O `status --json` ganha `usage`, e o mod passa a gravar `.superpowers/usage.json`, já ignorado pelo `.gitignore` do kickoff. Os limites de uso são opcionais: sem as linhas novas da seção "Uso da conta" do template do `CLAUDE.local.md`, valem 60%, 85% e 95%; numa conta Pro, acrescente à mão a seção com "Sempre econômico: `sim`".
 - **2.8.9**: lê os ledgers da 2.8.8 (um `claim` sem worktree nem origem continua valendo). `ledger.py` ganha `pause --text`, `resume`, `claim --worktree --origin` e `add --agent qa --full`, e o `status --json` ganha `claims`, `paused` e `full_qa`. O gate ganha a checagem "Full suite": num projeto com "Verificação de interface" e nenhuma linha "Testes (<nome>)", a entrega precisa de um `qa` com a suíte inteira no head final, registrado com `--full`, ou de uma linha "Testes (<nome>)" com essa suíte; um projeto cuja linha "Testes" já roda a suíte de interface junto com os outros testes a divide em duas, "Testes" sem ela e "Testes (interface)" com ela, para não rodá-la duas vezes. Uma linha "Testes do <x>" passa a dar aviso: para o gate rodá-la, escreva "Testes (<x>)". O `CLAUDE.local.md` de quem já tem ganha à mão as duas linhas novas do template (memória livre mínima para despachar e cópias pesadas com o usuário na máquina), porque o kickoff não reescreve o arquivo; sem elas, o manager usa só o pico por cópia, como antes.
