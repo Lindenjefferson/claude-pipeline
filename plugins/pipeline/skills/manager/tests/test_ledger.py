@@ -399,6 +399,36 @@ add("reviewer", "FAIL", None, 1, ledger=CAP)
 check("an extend of an earlier cycle does not shorten the next one",
       not any(step["step"] == "stop" for step in status(CAP)["steps"]), status(CAP)["pending"])
 
+NEXT = ".superpowers/next.jsonl"
+run("start", "--slug", "next", ledger=NEXT)
+run("scope", "--cycle", "R", "--tasks", "TR.1", ledger=NEXT)
+run("scope", "--cycle", "3", "--tasks", "T3.1,T3.2", ledger=NEXT)
+add("dev", "DONE", "TR.1", ledger=NEXT)
+add("reviewer", "FAIL", None, 1, ledger=NEXT)
+add("qa", "PASS", ledger=NEXT)
+add("dev", "DONE", "fix-1", ledger=NEXT)
+r = run("claim", "--task", "T3.2", ledger=NEXT)
+state = status(NEXT)
+check("a task of the next plan cycle can start while the fix round of this one runs",
+      r.returncode == 0 and state["in_flight"] == ["T3.2"], r.stderr)
+check("while this cycle is open, the progress stays on its plan cycle",
+      state["scope"]["current"] == "R" and state["scope"]["cycles_left"] == 2, state["scope"])
+check("status says the next cycle's task is added once this cycle closes",
+      any("T3.2" in item and "once this cycle closes" in item for item in state["pending"]), state["pending"])
+r = add("dev", "DONE", "T3.2", ledger=NEXT)
+check("add of a task of a later plan cycle is refused while this cycle is open",
+      r.returncode != 0 and "once this cycle closes" in r.stderr, r.stdout + r.stderr)
+add("reviewer", "PASS", ledger=NEXT)
+add("qa", "PASS", ledger=NEXT)
+closing = status(NEXT)["runs"][-1]["head"]
+r = add("dev", "DONE", "T3.2", ledger=NEXT)
+state = status(NEXT)
+check("once the cycle closes, the next cycle's task opens the next cycle from the closing head",
+      r.returncode == 0 and state["cycle"] == 2 and state["from"] == closing and state["scope"]["current"] == "3",
+      (r.stderr, state["cycle"], state["scope"]))
+check("a task of the same plan cycle is still added while its cycle is open",
+      add("dev", "DONE", "T3.1", ledger=NEXT).returncode == 0)
+
 EXTEND = ".superpowers/extend.jsonl"
 run("start", "--slug", "extend", ledger=EXTEND)
 add("dev", "DONE", "T1", ledger=EXTEND)
