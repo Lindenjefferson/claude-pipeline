@@ -15,11 +15,11 @@ Cada componente tem **uma** fonte de verdade, o próprio arquivo. Os outros docu
 
 | O quê | Onde |
 |---|---|
-| Fluxo de entrega, passos, regras do manager | [`plugins/pipeline/skills/manager/SKILL.md`](plugins/pipeline/skills/manager/SKILL.md) |
+| Fluxo de entrega, passos, regras do manager | [`plugins/pipeline/skills/manager/SKILL.md`](plugins/pipeline/skills/manager/SKILL.md); o que vale só numa situação (modo autônomo, pausa e uso do plano, telas, execução em paralelo, várias sessões), em [`references/`](plugins/pipeline/skills/manager/references/), um arquivo por situação |
 | Validar as decisões tomadas em nome do usuário; pedido de feedback ao plugin | [`skills/validar/SKILL.md`](plugins/pipeline/skills/validar/SKILL.md), [`skills/feedback-plugin/SKILL.md`](plugins/pipeline/skills/feedback-plugin/SKILL.md) |
 | Preparação de um projeto, allowlist de comandos, template do `CLAUDE.md` dos projetos | [`plugins/pipeline/skills/kickoff/SKILL.md`](plugins/pipeline/skills/kickoff/SKILL.md) e [`templates/`](plugins/pipeline/skills/kickoff/templates/) |
-| Papel, escopo e relatório de cada agente | [`plugins/pipeline/agents/`](plugins/pipeline/agents/) (`dev`, `reviewer`, `qa`, `discovery`) |
-| Princípios gerais de qualidade (Invariants, acesso, testes, auth, UI, auditoria) | [`plugins/pipeline/checklists/general.md`](plugins/pipeline/checklists/general.md) |
+| Papel, escopo e relatório de cada agente | [`plugins/pipeline/agents/`](plugins/pipeline/agents/) (`dev`, `reviewer`, `qa`, `discovery`); o que eles têm em comum (grafo, servidor de dev, processos), em [`checklists/agents-shared.md`](plugins/pipeline/checklists/agents-shared.md) |
+| Princípios gerais de qualidade (Invariants, acesso, testes, auth, UI, auditoria) | [`plugins/pipeline/checklists/general.md`](plugins/pipeline/checklists/general.md), o índice, e as fatias por superfície que ele lista ([`access-and-data.md`](plugins/pipeline/checklists/access-and-data.md), [`auth-and-sessions.md`](plugins/pipeline/checklists/auth-and-sessions.md), [`web-and-ui.md`](plugins/pipeline/checklists/web-and-ui.md)) |
 | O que spec e plano respondem (pré-mortem, premissas, domínio) | [`plugins/pipeline/skills/manager/templates/spec-checklist.md`](plugins/pipeline/skills/manager/templates/spec-checklist.md) |
 | Regras exatas do ledger (ciclos, pendências, métricas) | docstring de [`ledger.py`](plugins/pipeline/skills/manager/ledger.py) |
 | Checagens do gate e relatório de qualidade | docstring de [`gate.py`](plugins/pipeline/skills/manager/gate.py) |
