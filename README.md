@@ -41,6 +41,8 @@ claude plugin install pipeline@linden-plugins --scope local
 
 Numa sessão na pasta do projeto, peça o **kickoff** para preparar a estrutura e depois uma entrega ("implementar o módulo de relatórios", "corrigir o bug do login"): o **manager** conduz do tamanho ao gate. Para desabilitar: `claude plugin uninstall pipeline@linden-plugins --scope local`.
 
+Noutro computador, num projeto que já usa o plugin (no GitHub ou em produção): clone o repositório, instale o plugin nele e peça o **kickoff**. Ele percebe que é uma máquina nova e segue a seção "Preparar uma máquina" do `CLAUDE.md` do projeto: confere e instala os pré-requisitos que o projeto declara, instala as dependências, cria os arquivos de ambiente (baixando os valores quando o projeto diz de onde), sobe os serviços e roda a prova de que está pronto, com uma confirmação sua e dizendo o que ficou com você.
+
 Para atualizar um projeto, peça "atualizar o plugin" na sessão dele (a skill `atualizar` faz os passos abaixo e o resto); à mão, é `claude plugin marketplace update linden-plugins` e `claude plugin update pipeline@linden-plugins --scope local`, e uma sessão aberta segue na versão que carregou até o `/reload-plugins` ou reiniciar. Para desenvolver o plugin, use um clone local (`claude plugin marketplace add ./claude-pipeline`), que é carregado do disco: as edições valem na próxima sessão.
 
 ## Componentes
