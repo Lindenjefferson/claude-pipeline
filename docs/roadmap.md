@@ -22,17 +22,17 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 
 ### Recusado
 
-- **Revisão externa no gate** (2.6.0): o `open-code-review` exige CLI Node e chave de um provedor de LLM e envia o diff para fora; o `reviewer` já cobre isso, e o gate é sem LLM de propósito.
-- **Tirar do scan de segredos os lock files de outros ecossistemas** (2.8.5): nenhum falso positivo achado neles, e excluí-los pelo `.gitattributes` abriria um desvio que um agente controla.
-- **Liberar `publish` local no `never_allow` do kickoff** (2.8.5, `dotnet publish`): o custo é uma pergunta ao usuário, que decide.
-- **Saídas da lista original da 2.8**: a statusline, o `/frentes` abrindo abas, o semáforo do recurso compartilhado, a linha do tempo em gráfico, a página de telas, o `/aprovar` e o aviso de decisão pendente separado, com o motivo na [proposta](proposta-2.8.md).
-- **Trocar uma lição de "suíte inteira" por uma checagem** (lição do CF depois da 2.8.7): já está coberto pelo passo 4.5 do manager ("can this be a check?") e pela 2.8.7. O CF trouxe a confirmação: uma checagem de seletor por texto exato achou 91 seletores sem `exact` em 21 specs, a suíte inteira (875 testes) rodou uma vez, em 21,9 min, e a tarefa de tela passou a rodar só os specs afetados.
-- **qa de rodada de correção só com os testes afetados** (análise de tempo do CF depois da 2.8.7): já é a regra do `qa.md` ("the full suite is not repeated"). O CF rodou a suíte inteira porque 63 de 72 specs importam o helper que as rodadas mudaram; seguir os imports no comando de afetados é do projeto (D27 do CF).
-- **Agent Teams no lugar dos subagentes** (pesquisa de ferramentas parecidas): é experimental, o `/resume` não traz os colegas de volta, a lista de tarefas duplicaria o ledger, a conversa direta entre agentes não passa pelo ledger, os painéis divididos não funcionam no Windows Terminal e cada colega é uma sessão inteira em tokens. Os dois ganhos dele estão em espera sem ele (hook `SubagentStop`, `SendMessage`).
-- **App de canvas para os agentes** (Maestri, Conductor, Orca e parecidos): é interface, não orquestração; o plugin roda sem mudança no terminal de qualquer um deles, e o andamento já está na faixa e no `/andamento`.
+- **Revisão externa no gate** (2.6.0): manda o diff para fora e exige outra CLI e uma chave de LLM; o `reviewer` já cobre, e o gate é sem LLM de propósito.
+- **Tirar do scan de segredos os lock files de outros ecossistemas** (2.8.5): nenhum falso positivo achado, e a exclusão seria um desvio que um agente controla.
+- **Liberar `publish` local no `never_allow` do kickoff** (2.8.5): o custo é uma pergunta ao usuário, que decide.
+- **Saídas da lista original da 2.8** (statusline, `/frentes` abrindo abas, semáforo do recurso, linha do tempo em gráfico, página de telas, `/aprovar`, aviso de decisão separado): motivos na [proposta](proposta-2.8.md).
+- **Trocar uma lição de "suíte inteira" por uma checagem** (CF, depois da 2.8.7): já é o "can this be a check?" do passo 4.5 do manager.
+- **qa de rodada de correção só com os testes afetados** (CF, depois da 2.8.7): já é a regra do `qa.md`; fazer o seletor de afetados seguir os imports é do projeto.
+- **Agent Teams no lugar dos subagentes** (pesquisa de ferramentas parecidas): experimental, sem `/resume` dos colegas, e a lista de tarefas e a conversa entre eles ficariam fora do ledger.
+- **App de canvas para os agentes** (Maestri, Conductor, Orca e parecidos): é interface, não orquestração; o plugin roda sem mudança no terminal de qualquer um deles.
 - **Chat em grupo com moderador** (Maestro): a conversa não passa pelo ledger.
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
-- **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o princípio "enxuto".
+- **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
 
 ## 2.8.9 — suíte inteira no fim, pausa e retomada no ledger (PR #31)
 
