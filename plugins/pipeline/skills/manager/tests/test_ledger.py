@@ -1147,4 +1147,168 @@ check("from a task worktree, the default ledger reads the main worktree's usage.
       got and got["windows"]["five_hour"]["percent"] == 90 and got["wait"] is None
       and got["economy"] == "five_hour at 90%", got)
 
+# capacity: the measure, the CLAUDE.local.md lines and the decision
+capacity_root = tempfile.mkdtemp(prefix="capacity_")
+atexit.register(shutil.rmtree, capacity_root, True)
+capacity_count = [0]
+
+
+def parallel(peak=None, floor=None, heavy=None):
+    rows = [("Quanto uma cópia ocupa no pico, com a preparação e a verificação", peak),
+            ("Memória livre mínima para despachar uma cópia ou um `qa`", floor),
+            ("Com o usuário usando a máquina", heavy)]
+    return "# Local\n\n## Execução em paralelo\n\n" + "".join(f"- {k}: {v}\n" for k, v in rows if v is not None)
+
+
+def capacity(local_text=None, memory="10", disk="500", autonomous=False, started=True, extra=()):
+    capacity_count[0] += 1
+    folder = os.path.join(capacity_root, f"p{capacity_count[0]}")
+    os.makedirs(os.path.join(folder, ".superpowers"))
+    if local_text is not None:
+        with open(os.path.join(folder, "CLAUDE.local.md"), "w", encoding="utf-8") as handle:
+            handle.write(local_text)
+    path = os.path.join(folder, ".superpowers", "ledger.jsonl")
+    if started:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps({"type": "start", "slug": "x", "base": "abc"}) + "\n")
+            if autonomous:
+                handle.write(json.dumps({"type": "mode", "mode": "autonomous"}) + "\n")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PIPELINE_CAPACITY")}
+    for key, value in (("MEMORY", memory), ("DISK", disk)):
+        if value is not None:
+            env[f"PIPELINE_CAPACITY_{key}_GB"] = value
+    return subprocess.run([sys.executable, LEDGER, "--ledger", path, "capacity", *extra], capture_output=True,
+                          text=True, encoding="utf-8", env=env)
+
+
+def capacity_json(*args, **kwargs):
+    result = capacity(*args, extra=("--json",), **kwargs)
+    return json.loads(result.stdout) if result.stdout.strip().startswith("{") else {"error": result.stderr}
+
+
+got = capacity_json(parallel(peak="`5.3`"))
+check("capacity peak in backticks", got.get("peak_gb") == 5.3, got)
+got = capacity_json(parallel(peak="~5,3 GB no pico"))
+check("capacity peak in free text with a comma and ~", got.get("peak_gb") == 5.3, got)
+got = capacity_json(parallel(peak="5.3 G"))
+check("capacity peak with G and a dot", got.get("peak_gb") == 5.3, got)
+got = capacity_json(parallel(peak="~5,3 GB; Disco: 4 GB"))
+check("capacity line with a memory peak and a disk peak", got.get("peak_gb") == 5.3 and got.get("disk_peak_gb") == 4, got)
+got = capacity_json(parallel(peak="Disco: 4 GB"))
+check("capacity line with only a disk peak leaves the memory peak unknown",
+      got.get("peak_gb") is None and got.get("disk_peak_gb") == 4, got)
+got = capacity_json(parallel(peak='_(memória e disco; ou "a medir")_'))
+check("capacity placeholder peak is unknown", got.get("peak_gb") is None and got.get("copies") is None, got)
+got = capacity_json(parallel(peak="a medir"))
+check("capacity 'a medir' peak is unknown", got.get("peak_gb") is None and got.get("copies") is None, got)
+got = capacity_json(parallel(peak="`5`", floor="`2.5`"))
+check("capacity floor in backticks", got.get("floor_gb") == 2.5, got)
+got = capacity_json(parallel(peak="`5`", floor="_(GB; abaixo disso o manager espera)_"))
+check("capacity placeholder floor is missing", got.get("floor_gb") is None, got)
+got = capacity_json(parallel(peak="`5`"))
+check("capacity missing floor is null", got.get("floor_gb") is None, got)
+for text, want in (("`2`", 2), ("uma", 1), ("Duas cópias", 2), ("three", 3), ("quatro", 4), ("2 cópias, e 1 GB livre", 2)):
+    got = capacity_json(parallel(peak="`1`", heavy=text))
+    check(f"capacity heavy limit from {text!r}", got.get("heavy_limit") == want, got)
+got = capacity_json(parallel(peak="`1`", heavy="_(quantas cópias pesadas ao mesmo tempo)_"))
+check("capacity placeholder heavy limit is missing", got.get("heavy_limit") is None, got)
+got = capacity_json(parallel(peak="`1`"))
+check("capacity missing heavy limit is null", got.get("heavy_limit") is None, got)
+
+got = capacity_json(parallel(peak="`2`", floor="`0`"), memory="6")
+check("capacity copies just fit (6 - 2n >= 2 gives 2)", got.get("copies") == 2 and got.get("dispatch") is True, got)
+got = capacity_json(parallel(peak="`2`", floor="`0`"), memory="5.99")
+check("capacity copies just do not fit", got.get("copies") == 1, got)
+got = capacity_json(parallel(peak="`2`", floor="`0`"), memory="1.9")
+check("capacity copies never negative", got.get("copies") == 0, got)
+got = capacity_json(parallel(peak="`2`", floor="`3`"), memory="7")
+check("capacity floor above the peak keeps the floor free (7 - 2n >= 3 gives 2)", got.get("copies") == 2, got)
+got = capacity_json(parallel(peak="`2`", floor="`3`"), memory="6.9")
+check("capacity floor above the peak, just short", got.get("copies") == 1, got)
+got = capacity_json(parallel(peak="`5.3`", floor="`2.5`"), memory="4.5")
+check("capacity example: no parallel copy, one dispatch fits",
+      got.get("copies") == 0 and got.get("dispatch") is True and "no parallel copy" in got.get("reason", ""), got)
+got = capacity_json(parallel(peak="`1`", floor="`2`"), memory="2")
+check("capacity free memory equal to the floor dispatches", got.get("dispatch") is True, got)
+got = capacity_json(parallel(peak="`1`", floor="`0`"), disk="7")
+check("capacity without a disk peak ignores the disk", got.get("copies") == 9, got)
+got = capacity_json(parallel(peak="`1` GB; disco 4 GB", floor="`0`"), memory="100", disk="12")
+check("capacity disk cap (12 - 4n >= 4 gives 2)", got.get("copies") == 2, got)
+got = capacity_json(parallel(peak="`1` GB; disco 4 GB", floor="`0`"), memory="100", disk="11.9")
+check("capacity disk cap, just short", got.get("copies") == 1, got)
+got = capacity_json(parallel(peak="`1`", floor="`0`", heavy="`2`"), memory="100")
+check("capacity supervised mode caps by the heavy limit", got.get("copies") == 2 and got.get("autonomous") is False, got)
+got = capacity_json(parallel(peak="`1`", floor="`0`", heavy="`2`"), memory="100", autonomous=True)
+check("capacity autonomous mode ignores the heavy limit", got.get("copies") == 99 and got.get("autonomous") is True, got)
+got = capacity_json(parallel(peak="`1`", floor="`0`", heavy="`2`"), memory="100", started=False)
+check("capacity with no ledger is supervised", got.get("autonomous") is False and got.get("copies") == 2, got)
+got = capacity_json(parallel(peak="`1`", floor="`0`", heavy="`5`"), memory="3.5")
+check("capacity heavy limit above what memory allows does not raise it", got.get("copies") == 2, got)
+
+for value in ("", "abc", "-1"):
+    got = capacity_json(parallel(peak="`1`", floor="`2`"), memory=value)
+    result = capacity(parallel(peak="`1`", floor="`2`"), memory=value)
+    check(f"capacity memory override {value!r} is unknown",
+          got.get("memory_free_gb") is None and got.get("dispatch") is None and got.get("copies") is None
+          and result.returncode == 0, (got, result.stderr))
+got = capacity_json(None, memory="8", started=False)
+check("capacity with no ledger and no CLAUDE.local.md",
+      got.get("peak_gb") is None and got.get("floor_gb") is None and got.get("heavy_limit") is None
+      and got.get("dispatch") is None and got.get("copies") is None and "floor unknown" in got.get("reason", ""), got)
+result = capacity(parallel(peak="`1`", floor="`2.5`"), memory="2.4")
+check("capacity below the floor exits 1", result.returncode == 1 and result.stdout.startswith("capacity:"), result)
+got = capacity_json(parallel(peak="`1`", floor="`2.5`"), memory="2.4")
+check("capacity below the floor: dispatch false, no copies", got.get("dispatch") is False and got.get("copies") == 0, got)
+result = capacity(parallel(peak="`1`", floor="`2.5`"), memory="2.5")
+check("capacity at the floor exits 0 with a single capacity line",
+      result.returncode == 0 and result.stdout.startswith("capacity:") and len(result.stdout.splitlines()) == 1, result)
+got = capacity_json(parallel(peak="`1`"), memory="4", disk="9")
+check("capacity JSON shape", sorted(got) == sorted(["memory_free_gb", "disk_free_gb", "peak_gb", "disk_peak_gb", "floor_gb",
+                                                    "heavy_limit", "autonomous", "dispatch", "copies", "reason"])
+      and got["memory_free_gb"] == 4 and got["disk_free_gb"] == 9 and isinstance(got["reason"], str), got)
+# the real CLAUDE.local.md of Controle Financeiro: the floor and the heavy limit live in free text
+CF_LOCAL = """# Controle Financeiro — este computador
+
+## Execução em paralelo
+
+- Quanto uma cópia ocupa no pico, com a preparação, o armazenamento de dados e a verificação (build e suíte): a suíte e2e inteira com 3 workers chegou a ~5,3 GB (node 2,1 GB, WSL/Docker 1,9 GB, Chromium headless 1,3 GB); a pilha de cópia do Supabase soma ao WSL. Disco: medir. A memória livre desta máquina oscila entre 2 e 5 GB, então um despacho novo só sai com mais de ~2 GB livres, e no máximo duas tarefas com pilha, build e Playwright ao mesmo tempo.
+- O Lenovo Vantage (`MachineFixSystemAddin`) já chegou a ocupar ~3,9 GB; com a memória baixa e nada da entrega rodando, conferir esse processo primeiro.
+- O dono usa a máquina ao mesmo tempo (Chrome, Discord e outros abertos), o que tira de 1 a 2 GB da memória livre. Com o dono presente, rodar uma cópia pesada por vez (pilha, build e Playwright) e tratar menos de ~1 GB livre como falta de recurso.
+"""
+result = capacity(CF_LOCAL, memory="0.7")
+got = capacity_json(CF_LOCAL, memory="0.7")
+check("capacity CF lines: 0.7 GB free is below the free-text floor of 2",
+      got.get("dispatch") is False and got.get("floor_gb") == 2 and result.returncode == 1, (got, result.stdout))
+got = capacity_json(CF_LOCAL, memory="12", disk="9")
+check("capacity CF lines: no bogus disk peak from the memory sentence",
+      got.get("disk_peak_gb") is None and got.get("peak_gb") == 5.3 and got.get("copies") == 1, got)
+got = capacity_json(CF_LOCAL, memory="100")
+check("capacity CF lines: heavy limit 1 from 'uma cópia pesada por vez' caps supervised copies",
+      got.get("heavy_limit") == 1 and got.get("copies") == 1, got)
+got = capacity_json(CF_LOCAL, memory="100", autonomous=True)
+check("capacity CF lines: autonomous ignores the free-text heavy limit", got.get("copies") == 17, got)
+got = capacity_json(parallel(peak="`1`", floor="`3`", heavy="`2`")
+                    + "- Um despacho só sai com mais de ~9 GB livres; uma cópia pesada por vez." + chr(10), memory="100")
+check("capacity template labels win over free text", got.get("floor_gb") == 3 and got.get("heavy_limit") == 2, got)
+result = capacity(parallel(peak="`1`"), memory="8")
+got = capacity_json(parallel(peak="`1`"), memory="8")
+check("capacity unknown floor: dispatch null, exit 0, says what to fill",
+      got.get("dispatch") is None and result.returncode == 0 and "floor 0" not in got.get("reason", "")
+      and 'floor unknown: fill the "Memória livre mínima para despachar" line of CLAUDE.local.md' in got.get("reason", ""), got)
+got = capacity_json(parallel(peak="`1`", heavy="Duas cópias, e 1 GB livre"))
+check("capacity heavy limit: the word before the digit wins", got.get("heavy_limit") == 2, got)
+got = capacity_json(parallel(peak="`1`", floor="`0`", heavy="`0`"), memory="100")
+check("capacity heavy limit 0 is unknown, no cap", got.get("heavy_limit") is None and got.get("copies") == 99, got)
+got = capacity_json(parallel(peak="`1`", floor="`0`"), memory="8")
+check("capacity reason names the memory override", "memory from PIPELINE_CAPACITY_MEMORY_GB" in got.get("reason", ""), got)
+got = capacity_json(parallel(peak="~5 GB. Disco: medir. Oscila entre 2 e 5 GB; ou 4.5 GB", floor="`1`"), memory="100")
+check("capacity disk 'medir' is unknown", got.get("disk_peak_gb") is None, got)
+got = capacity_json(parallel(peak="`1` GB; disco 4.5 GB. Outra frase 9 GB", floor="`1`"), memory="100")
+check("capacity disk peak stops at the sentence end and keeps a decimal dot", got.get("disk_peak_gb") == 4.5, got)
+
+result = subprocess.run([sys.executable, LEDGER, "--ledger", os.path.join(capacity_root, "p1", ".superpowers", "ledger.jsonl"),
+                         "capacity"], capture_output=True, text=True, encoding="utf-8")
+check("capacity measures the machine without overrides",
+      result.stdout.startswith("capacity:") and result.returncode in (0, 1), result)
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
