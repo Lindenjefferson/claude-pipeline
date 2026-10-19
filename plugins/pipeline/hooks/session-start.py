@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """SessionStart hook (every session start, see hooks.json): hands the manager its place back, and keeps the native
-secret-scan hook pointed at the running plugin.
+secret-scan hook pointed at the running plugin, and reminds a new session to finish a plugin update.
 
 After a compaction or a resumed session the manager has lost the thread of the delivery. When the project has
 .superpowers/ledger.jsonl, this prints `ledger.py status` (plain stdout from SessionStart goes into Claude's
@@ -9,7 +9,13 @@ context); a new or cleared session prints nothing.
 The native pre-commit hook finds the scanner through `git config pipeline.home`, and an installed plugin lives in a
 folder per version: in a repository whose pre-commit hook is the plugin's, each session start sets the repository's
 pipeline.home to the running plugin's folder when it names another one, so no clone of the plugin is needed and an
-update never leaves every commit blocked. Without a ledger or a git repository it does nothing; any failure exits 0,
+update never leaves every commit blocked.
+
+The atualizar skill leaves .superpowers/atualizar.json, {"from", "to"}, at the project root (the current worktree
+root, or the main worktree's). When it exists, every event adds one line after the rest of the output: the running
+version (plugin.json) equal to `to` says to finish the update with the atualizar skill; a different one says to run
+/reload-plugins or restart first. A missing or unusable file (not JSON, missing or non-string field) adds nothing.
+Without a ledger or a git repository it does nothing; any failure exits 0,
 so a session never breaks."""
 import json
 import os
@@ -41,6 +47,41 @@ def point_home(project):
         git(project, "config", "--local", "pipeline.home", root)
 
 
+def update_notice(project):
+    """The line about a started plugin update, or "" with no usable atualizar.json."""
+    roots = [project, git(project, "rev-parse", "--show-toplevel")]
+    common = git(project, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common:
+        roots.append(os.path.dirname(common))
+    for root in filter(None, roots):
+        path = os.path.join(root, ".superpowers", "atualizar.json")
+        if not os.path.isfile(path):
+            continue
+        with open(path, encoding="utf-8-sig") as handle:
+            data = json.load(handle)
+        old, new = data["from"], data["to"]
+        if not isinstance(old, str) or not isinstance(new, str) or not old or not new:
+            return ""
+        with open(os.path.join(ROOT, ".claude-plugin", "plugin.json"), encoding="utf-8") as handle:
+            running = json.load(handle)["version"]
+        if running == new:
+            return (f"pipeline: the plugin was updated from {old} to {new}; finish the update with the atualizar "
+                    "skill (kickoff and the upgrade notes).")
+        return (f"pipeline: an update to {new} was started but this session runs {running}; run /reload-plugins "
+                "or restart, then the atualizar skill.")
+    return ""
+
+
+def notice(project):
+    try:
+        text = update_notice(project)
+    except Exception:
+        return
+    if text:
+        sys.stdout.reconfigure(encoding="utf-8")
+        print(text)
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
@@ -49,6 +90,13 @@ def main():
     payload = payload if isinstance(payload, dict) else {}
     project = payload.get("cwd") or os.getcwd()
     point_home(project)
+    try:
+        ledger_status(payload, project)
+    finally:
+        notice(project)
+
+
+def ledger_status(payload, project):
     if payload.get("source") in ("startup", "clear"):
         return
     if not os.path.isfile(os.path.join(project, ".superpowers", "ledger.jsonl")):
