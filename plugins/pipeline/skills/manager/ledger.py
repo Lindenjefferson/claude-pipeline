@@ -11,6 +11,7 @@
   note    --text <text> [--validar]                           a decision taken on the user's behalf
   validate --id <id> --decision <text>                        the user's decision on a VALIDAR item (V1, V2...)
   waive   --agent reviewer|qa [--task spec|plan] --reason <text>   accepts the open findings of that agent's latest FAIL
+  extend  --reason <text>                                     the user lets the cycle's fixes go on past the round limit
   plan    --path <path>                                       the approved plan, when start ran before it existed
   scope   --cycle <name> --tasks <id,id,...>                  the tasks of one plan cycle, in plan order
   mode    autonomous|supervised                               the user turned autonomous mode on, or is back
@@ -34,7 +35,9 @@ agent's completion notification, never an estimate (a run without it goes unmeas
 item with no decision keeps the delivery from the gate. start --archive moves an existing delivery to
 ledger-<old-slug>.jsonl next to the ledger first. --check exits 1 while anything is pending, so the gate can rely on
 it. A cycle whose reviewer or qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on
-up to three, then the delivery stops. waive is refused when the dev ran after that FAIL (the fix needs its review); it
+up to three, then the delivery stops. extend, once status asks the user or stops, records the user's decision to go
+on (a note, VALIDAR in autonomous mode): the current cycle gets one more fix round, and a reviewer or qa FAIL after
+it asks or stops again; it never carries to the next cycle. waive is refused when the dev ran after that FAIL (the fix needs its review); it
 records the reason as a note and counts as that agent's PASS at the head it reviewed. Notes marked --validar (and
 waivers in autonomous mode) are listed apart, numbered V1, V2... in the order written, for the user to confirm on
 return; validate records the decision, and status lists the items still waiting apart from the decided ones. A
@@ -167,7 +170,15 @@ def cycles(entries):
     return groups
 
 
-def cycle_state(cycle, autonomous=False):
+def extension(entries, cycle):
+    marks = [index for index, entry in enumerate(entries) if entry["type"] == "extend"]
+    position = {id(entry): index for index, entry in enumerate(entries)}
+    if not marks or not cycle or marks[-1] < position[id(cycle[0])]:
+        return None
+    return sum(1 for entry in cycle if position[id(entry)] < marks[-1])
+
+
+def cycle_state(cycle, autonomous=False, extended=None):
     tasks, reviews, checks = {}, [], []
     work = last_dev = last_review = last_qa = needs_qa = -1
     for index, entry in enumerate(cycle):
@@ -210,11 +221,17 @@ def cycle_state(cycle, autonomous=False):
              "fix", agent="qa", open=checks[-1]["open"], **report_of(checks[-1]))
     elif last_qa < needs_qa:
         need("qa has not re-run the scenarios the fix touched", "qa", rerun=True)
-    rounds = FIX_ROUNDS[autonomous]
+    rounds = FIX_ROUNDS[autonomous] if extended is None else 0
     for agent, done in (("reviewer", reviews), ("qa", checks)):
-        failed = sum(1 for entry in done if entry["verdict"] == "FAIL")
+        failed = sum(1 for index, entry in enumerate(cycle) if index >= (extended or 0) and entry["agent"] == agent
+                     and entry["verdict"] == "FAIL")
         if done and done[-1]["verdict"] == "FAIL" and failed > rounds:
-            if autonomous:
+            if extended is not None:
+                need(f"{agent} still fails after the extra fix round: "
+                     + ("stop the delivery and record the open findings as note --validar" if autonomous
+                        else "ask the user"), "stop" if autonomous else "ask", agent=agent, extended=True,
+                     rounds=sum(1 for entry in done if entry["verdict"] == "FAIL") - 1)
+            elif autonomous:
                 need(f"{agent} still fails after {rounds} fix rounds: stop the delivery and record the open "
                      "findings as note --validar", "stop", agent=agent, rounds=rounds)
             else:
@@ -424,6 +441,20 @@ def waive(args):
     print(text)
 
 
+def extend(args):
+    entries = read(args.ledger)
+    if not entries:
+        sys.exit("no delivery started: run start first")
+    cycle = cycles(entries)[-1]
+    state = cycle_state(cycle, autonomous(entries), extension(entries, cycle))[0]
+    if not any(step["step"] in ("stop", "ask") for step in state["steps"]):
+        sys.exit("the cycle has not run out of fix rounds: nothing to extend")
+    text = f"extra fix round: {args.reason}"
+    write(args.ledger, {"type": "note", "text": text, **({"validar": True} if autonomous(entries) else {})})
+    write(args.ledger, {"type": "extend", "reason": args.reason})
+    print(text)
+
+
 def plan(args):
     if not read(args.ledger):
         sys.exit("no delivery started: run start first")
@@ -573,7 +604,7 @@ def status(args):
         sys.exit("no delivery started")
     groups = cycles(entries)
     auto = autonomous(entries)
-    state, pending = cycle_state(groups[-1], auto)
+    state, pending = cycle_state(groups[-1], auto, extension(entries, groups[-1]))
     closed = not pending
     items = deferred(entries)
     held = in_flight(entries)
@@ -672,6 +703,9 @@ def main():
     command.add_argument("--task", default="", choices=("",) + REVIEWS, help="the spec or plan review loop to close")
     command.add_argument("--reason", required=True)
     command.set_defaults(run=waive)
+    command = commands.add_parser("extend")
+    command.add_argument("--reason", required=True)
+    command.set_defaults(run=extend)
     command = commands.add_parser("plan")
     command.add_argument("--path", required=True)
     command.set_defaults(run=plan)
