@@ -801,7 +801,7 @@ check("pause is refused with a modified tracked file too",
 check("pause before start is refused",
       run("pause", "--text", "x", ledger=".superpowers/none.jsonl").returncode != 0)
 
-OLD = ".superpowers/oldclaim.jsonl"
+OLD = ".superpowers/nohead.jsonl"
 with open(os.path.join(repo, OLD), "w", encoding="utf-8", newline="\n") as handle:
     for entry in ({"type": "start", "slug": "old", "base": "abc", "at": "2026-10-01T10:00:00+00:00"},
                   {"type": "claim", "task": "L1", "at": "2026-10-01T10:01:00+00:00"}):
@@ -1364,6 +1364,107 @@ check("a worktree task counts only its own commits, though the main head moved",
       r.returncode == 0 and diff_of(SIZE, "W1") == {"files": 1, "added": 4, "removed": 0},
       (r.stderr, diff_of(SIZE, "W1")))
 
+def at_head(ledger, task):
+    return [entry for entry in ledger_entries(ledger) if entry["type"] == "claim" and entry["task"] == task][-1]
+
+
+SEQ = ".superpowers/seq.jsonl"
+run("start", "--slug", "seq", ledger=SEQ)
+put(repo, "plan.md", "p\n" * 200, "docs: plan")
+run("claim", "--task", "Q1", ledger=SEQ)
+check("claim stores the delivery head at dispatch", at_head(SEQ, "Q1").get("head") == git(repo, "rev-parse", "HEAD"),
+      at_head(SEQ, "Q1"))
+put(repo, "q1.txt", "one\n", "Q1 commit")
+add("dev", "DONE", "Q1", ledger=SEQ)
+check("a sequential T1 after a plan commit counts only its own lines",
+      diff_of(SEQ, "Q1") == {"files": 1, "added": 1, "removed": 0}, diff_of(SEQ, "Q1"))
+put(repo, "errata.md", "e\n" * 5, "docs: errata")
+run("claim", "--task", "Q2", ledger=SEQ)
+put(repo, "q2.txt", "a\nb\n", "Q2 commit")
+add("dev", "DONE", "Q2", ledger=SEQ)
+check("an errata commit between runs is not charged to the next task",
+      diff_of(SEQ, "Q2") == {"files": 1, "added": 2, "removed": 0}, diff_of(SEQ, "Q2"))
+
+BARE = ".superpowers/bare-claim.jsonl"
+run("start", "--slug", "bare-claim", ledger=BARE)
+put(repo, "plan2.md", "p\n" * 7, "docs: plan 2")
+with open(os.path.join(repo, BARE), "a", encoding="utf-8", newline="\n") as handle:
+    handle.write(json.dumps({"type": "claim", "task": "O1", "at": "2026-10-01T10:00:00+00:00"}) + "\n")
+put(repo, "o1.txt", "x\n", "O1 commit")
+add("dev", "DONE", "O1", ledger=BARE)
+check("a claim without head (an old ledger) falls back to the delivery base",
+      diff_of(BARE, "O1") == {"files": 2, "added": 8, "removed": 0}, diff_of(BARE, "O1"))
+put(repo, "o2.txt", "y\n", "O2 commit")
+with open(os.path.join(repo, BARE), "a", encoding="utf-8", newline="\n") as handle:
+    handle.write(json.dumps({"type": "claim", "task": "O2", "at": "2026-10-01T10:00:00+00:00"}) + "\n")
+add("dev", "DONE", "O2", ledger=BARE)
+check("a claim without head falls back to the head the previous run stored",
+      diff_of(BARE, "O2") == {"files": 1, "added": 1, "removed": 0}, diff_of(BARE, "O2"))
+
+REBASE = ".superpowers/rebase.jsonl"
+rebase_tree = os.path.join(worktrees, "rebase")
+run("start", "--slug", "rebase", ledger=REBASE)
+git(repo, "worktree", "add", "-q", "--detach", rebase_tree)
+run("claim", "--task", "R1", "--worktree", rebase_tree, "--origin", git(rebase_tree, "rev-parse", "HEAD"), ledger=REBASE)
+put(rebase_tree, "r1.txt", "1\n2\n", "R1 commit")
+put(repo, "integrated.txt", "i\n" * 50, "another task integrated")
+git(rebase_tree, "rebase", "-q", git(repo, "rev-parse", "HEAD"))
+r = add("dev", "DONE", "R1", ledger=REBASE)
+check("a rebased worktree counts only its own lines, not the integration it was rebased onto",
+      r.returncode == 0 and diff_of(REBASE, "R1") == {"files": 1, "added": 2, "removed": 0}, (r.stderr, diff_of(REBASE, "R1")))
+
+NOORIGIN = ".superpowers/noorigin.jsonl"
+noorigin_tree = os.path.join(worktrees, "noorigin")
+run("start", "--slug", "noorigin", ledger=NOORIGIN)
+git(repo, "worktree", "add", "-q", "--detach", noorigin_tree)
+run("claim", "--task", "N1", "--worktree", noorigin_tree, ledger=NOORIGIN)
+put(noorigin_tree, "n1.txt", "1\n2\n3\n", "N1 commit")
+put(repo, "integrated2.txt", "i\n" * 20, "another task integrated")
+r = add("dev", "DONE", "N1", ledger=NOORIGIN)
+check("a worktree claim made without --origin is measured from the merge-base",
+      r.returncode == 0 and diff_of(NOORIGIN, "N1") == {"files": 1, "added": 3, "removed": 0}, (r.stderr, diff_of(NOORIGIN, "N1")))
+
+WIP = ".superpowers/wip.jsonl"
+wip_tree = os.path.join(worktrees, "wip")
+run("start", "--slug", "wip", ledger=WIP)
+git(repo, "worktree", "add", "-q", "--detach", wip_tree)
+run("claim", "--task", "P1", "--worktree", wip_tree, "--origin", git(wip_tree, "rev-parse", "HEAD"), ledger=WIP)
+put(wip_tree, "p1.txt", "1\n2\n3\n", "wip: P1 first part")
+add("dev", "NEEDS_CONTEXT", "P1", ledger=WIP)
+first = [e for e in ledger_entries(WIP) if e.get("agent") == "dev"][-1]
+check("a worktree run stores the tip it was measured at",
+      first.get("tip") == git(wip_tree, "rev-parse", "HEAD") and first["diff"]["added"] == 3, first)
+run("claim", "--task", "P1", "--worktree", wip_tree, "--origin", git(wip_tree, "rev-parse", "HEAD"), ledger=WIP)
+put(wip_tree, "p1b.txt", "a\nb\n", "P1 second part")
+add("dev", "NEEDS_CONTEXT", "P1", ledger=WIP)
+check("a re-claimed task does not count its wip lines twice",
+      diff_of(WIP, "P1") == {"files": 1, "added": 2, "removed": 0}
+      and status(WIP)["metrics"]["lines"]["tasks"] == {"P1": 5}, (diff_of(WIP, "P1"), status(WIP)["metrics"]["lines"]))
+run("claim", "--task", "P1", "--worktree", wip_tree, "--origin", git(wip_tree, "rev-parse", "HEAD"), ledger=WIP)
+git(wip_tree, "reset", "-q", "--hard", first["tip"])
+put(wip_tree, "p2.txt", "q\n", "P1 redone")
+add("dev", "DONE_WITH_CONCERNS", "P1", ledger=WIP)
+check("a stored tip that is not an ancestor of the tip is ignored",
+      diff_of(WIP, "P1") == {"files": 2, "added": 4, "removed": 0}, diff_of(WIP, "P1"))
+
+SIMP = ".superpowers/simpler.jsonl"
+run("start", "--slug", "simpler", ledger=SIMP)
+for agent, verdict in (("reviewer", "PASS"), ("dev", "DONE"), ("dev", "BLOCKED")):
+    r = run("add", "--agent", agent, "--verdict", verdict, "--simpler", *(["--task", "S9"] if agent == "dev" else []),
+            ledger=SIMP)
+    check(f"--simpler is refused on {agent} {verdict}", r.returncode != 0 and "--simpler" in r.stderr, r.stderr)
+check("a refused --simpler writes nothing", ledger_lines(SIMP) == 1)
+r = run("add", "--agent", "dev", "--verdict", "NEEDS_CONTEXT", "--simpler", "--task", "S1", ledger=SIMP)
+check("--simpler on a dev NEEDS_CONTEXT is stored", r.returncode == 0 and ledger_entries(SIMP)[-1].get("simpler") is True,
+      (r.stderr, ledger_entries(SIMP)[-1]))
+add("dev", "NEEDS_CONTEXT", "S2", ledger=SIMP)
+add("dev", "BLOCKED", "S3", ledger=SIMP)
+add("dev", "NEEDS_CONTEXT", "S4", ledger=SIMP)
+add("dev", "DONE", "S5", ledger=SIMP)
+found = status(SIMP)["metrics"].get("verdicts")
+check("metrics.verdicts counts the questions, the simpler proposals and the blocks over the dev runs",
+      found == {"needs_context": 2, "simpler": 1, "blocked": 1}, found)
+
 BROKEN = ".superpowers/broken.jsonl"
 run("start", "--slug", "broken", ledger=BROKEN)
 with open(os.path.join(repo, BROKEN), encoding="utf-8") as handle:
@@ -1396,5 +1497,9 @@ check("metrics.lines gives the follow-up lines (fix-N and cleanup) and their sha
 old = status(".superpowers/legacy.jsonl")["metrics"].get("lines")
 check("an old ledger without diff counts every dev run as unmeasured, total 0 and share null",
       old == {"tasks": {}, "total": 0, "follow_up": 0, "share": None, "unmeasured": 2}, old)
+
+check("an old ledger counts 0 simpler proposals, and its needs-context runs",
+      status(LINES)["metrics"].get("verdicts") == {"needs_context": 1, "simpler": 0, "blocked": 0},
+      status(LINES)["metrics"].get("verdicts"))
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

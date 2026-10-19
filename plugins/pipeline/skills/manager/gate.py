@@ -361,6 +361,14 @@ def lines_line(metrics):
     return [f"- Lines changed: {tasks} ({detail})", ""]
 
 
+def question_line(metrics):
+    found = metrics.get("verdicts") or {}
+    if not any(found.get(key) for key in ("needs_context", "simpler", "blocked")):
+        return []
+    return [f"- Dev questions: {found.get('needs_context', 0)} needs-context, {found.get('simpler', 0)} simpler "
+            f"proposals, {found.get('blocked', 0)} blocked", ""]
+
+
 def metrics_lines(metrics):
     if not metrics:
         return []
@@ -383,7 +391,7 @@ def metrics_lines(metrics):
     lines += ["", f"Lessons: {len(metrics['lessons'])} ({automated} automated)"]
     lines += [f"- {lesson['text']}" + (f" (check: {lesson['check']})" if lesson["check"] else "")
               for lesson in metrics["lessons"]]
-    return lines + [""] + time_lines(metrics) + token_lines(metrics) + lines_line(metrics)
+    return lines + [""] + time_lines(metrics) + token_lines(metrics) + lines_line(metrics) + question_line(metrics)
 
 
 def verdict(ok, detail):

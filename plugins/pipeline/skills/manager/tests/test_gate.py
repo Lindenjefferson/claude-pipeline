@@ -237,6 +237,14 @@ lines_text = chr(10).join(gate_module.metrics_lines({**base_metrics, "lines": {
 check("a share of 0 prints as 0% and no unmeasured text",
       "- Lines changed: T1 8 (fix and cleanup 0%)" in lines_text, lines_text)
 
+lines_text = chr(10).join(gate_module.metrics_lines({**base_metrics, "verdicts": {
+    "needs_context": 2, "simpler": 1, "blocked": 0}}))
+check("the dev questions line counts needs-context, simpler proposals and blocked",
+      "- Dev questions: 2 needs-context, 1 simpler proposals, 0 blocked" in lines_text, lines_text)
+for verdicts in ({"needs_context": 0, "simpler": 0, "blocked": 0}, None):
+    lines_text = chr(10).join(gate_module.metrics_lines({**base_metrics, **({"verdicts": verdicts} if verdicts else {})}))
+    check(f"no dev questions line with {verdicts or 'no verdicts'}", "Dev questions" not in lines_text, lines_text)
+
 os.makedirs(os.path.join(repo, "e2e", "flows"), exist_ok=True)
 commit("plan.md", "# plan\n- AC-T1-1 a\n- AC-T1-2 b\n- AC-T1.3 c\n- AC-T2-1 d\n- AC-T2-2 e\n## Errata\n", "docs: plan T2")
 commit("e2e/home.spec.txt", "test('AC-T2-1 given d')\n", "test: e2e at the folder root")
