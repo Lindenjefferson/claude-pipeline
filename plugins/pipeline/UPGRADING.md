@@ -2,6 +2,7 @@
 
 Vão junto com cada versão instalada, para a skill `atualizar` lê-las no projeto. Termine a entrega em andamento, ou pause-a, antes de atualizar o plugin (a skill `atualizar` confere). Ao pular versões, leia as notas de cada uma, da mais antiga para a mais nova.
 
+- **2.9.3**: lê os ledgers da 2.9.2. O `CLAUDE.md` ganha a seção "Preparar uma máquina", que o kickoff acrescenta como placeholder; preencha-a, ou aceite o rascunho que o kickoff oferece a partir dos arquivos do projeto. Sem ela, numa máquina nova o kickoff só roda a linha "Instalar dependências".
 - **2.9.2**: lê os ledgers da 2.9.1. As notas de atualização mudaram do roadmap para este arquivo. Para atualizar um projeto, peça "atualizar o plugin" na sessão dele: a skill `atualizar` cuida do resto. O `ledger.py capacity` lê os números do `CLAUDE.local.md` nas linhas do template (entre crases) e, no texto livre de antes, o pico em GB, o "mais de N GB livres" e o "uma cópia pesada por vez"; sem o mínimo, ele não decide o despacho e pede a linha. Sem pico registrado, o manager mede a primeira cópia, como antes.
 - **2.9.1**: nada muda num projeto em andamento. Num projeto novo, o kickoff instala o scan de segredos e as regras `deny` e `ask` sem perguntar e só mostra as entradas `allow` para confirmar.
 - **2.9.0**: nada muda para quem atualiza: lê os ledgers da 2.8.10 sem mudança de formato, e os caminhos novos (`skills/manager/references/`, `checklists/agents-shared.md` e as fatias do `general.md`) ficam dentro do plugin, citados por `${CLAUDE_PLUGIN_ROOT}`; nenhum arquivo do projeto os cita.
