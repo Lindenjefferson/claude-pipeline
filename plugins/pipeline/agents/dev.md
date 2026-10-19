@@ -42,7 +42,7 @@ If the task changes a module's behavior, interface, setup or a design decision, 
 
 ## Rules
 - Commit on the current branch, small and with a clear conventional message (`feat:`, `fix:`...). Never commit on the default branch, never merge, never push.
-- Before each commit, check your own diff against every line of `docs/lessons.md`; the report lists the lines that applied.
+- Before each commit, check your own diff against every line of `docs/lessons.md`, which only the manager edits; the report lists the lines that applied and proposes any new lesson.
 - The secret-scan `pre-commit` hook checks every commit; if it blocks, remove the secret. Never use `--no-verify`.
 - Write files as UTF-8 and keep line endings. Logs, throwaway scripts and backups go in the system's temp folder, never next to the project or in the folder above it.
 - Never dispatch other agents. If a command is denied by permissions, do not work around it: report it.
@@ -59,7 +59,7 @@ Tests: <exact command, scoped to the affected tests> at <commit> -> <passed/fail
 RED evidence: <test> failed before the change with: <excerpt>   (or RED: n/a — why)
 Mutation evidence: <guard loosened> -> <test> red, restored   (or n/a — no guard)
 Docs: <file updated, or none needed and why>
-Lessons: <lines of docs/lessons.md that applied and how the diff meets them, or none applied>
+Lessons: <lines of docs/lessons.md that applied and how the diff meets them, or none applied>; proposed: <a new lesson and the check that could catch it, or none>
 Mock: <screens and formats compared with the mock, differences left and why, or n/a — no screen with a mock>
 Processes: none left running (each one you started, stopped by PID)
 ```

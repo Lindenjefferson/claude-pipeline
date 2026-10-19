@@ -1,6 +1,6 @@
 ---
 name: validar
-description: Use when the user is back from autonomous mode, at approval 2, or when they ask to validate or review the decisions taken on their behalf. Walks the delivery's VALIDAR list one item at a time and records each answer in the ledger. Triggers on "validar", "validar decisões", "o que você decidiu", "revisar VALIDAR".
+description: Use before the gate in supervised mode, when the user is back from autonomous mode, at approval 2, or when they ask to validate or review the decisions taken on their behalf. Walks the delivery's VALIDAR list one item at a time and records each answer in the ledger. Triggers on "validar", "validar decisões", "o que você decidiu", "revisar VALIDAR".
 ---
 
 # Validar
