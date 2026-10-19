@@ -1,6 +1,6 @@
 # Roadmap do plugin `pipeline`
 
-O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje a 2.8.7 e a 2.8.8) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
+O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.8.9) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
 ## Backlog
 
@@ -33,6 +33,31 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 - **Chat em grupo com moderador** (Maestro): a conversa não passa pelo ledger.
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o princípio "enxuto".
+
+## 2.8.9 — suíte inteira no fim, pausa e retomada no ledger (PR #31)
+
+Origem: a retomada da etapa 5 do controle-financeiro depois da 2.8.8. Uma análise do Fable sobre a ordem e a orquestração, conferida no código do plugin, deu seis melhorias, e o usuário mandou implementar todas na pausa da entrega (decisão do usuário).
+
+- [x] **Suíte inteira no fim da entrega** (lição do CF: a ordem combinada deixava o e2e "no gate", mas o gate só roda as linhas Build, Typecheck, Lint, Testes e Auditoria, ou "Testes (<nome>)"; no CF, o e2e (~23 min) e o pgTAP ficavam de fora, e "Testes do banco" e mais três linhas eram puladas sem aviso):
+  - o gate avisa, e o relatório lista, toda linha "Testes ..." que ele não roda;
+  - a checagem nova "Full suite": quando "Comandos" tem "Verificação de interface" e nenhuma linha "Testes (<nome>)", o gate pede um `qa` registrado com `add --full` cujo head só é seguido pelos arquivos que o "Reviewed" isenta;
+  - o `qa.md` deixa de prometer que o gate roda a suíte;
+  - a `cleanup` deixa de rodar a suíte inteira antes e depois (`dev.md`): ela roda uma vez, no fim;
+  - o template diz que outra suíte que precisa passar antes do merge vai numa linha "Testes (<nome>)".
+- [x] **Minor nos arquivos da rodada aberta** (o M13 do CF mexia em dois arquivos que a fix-17 já mudava, e a 2.8.8 o mandava desfazer e refazer num acabamento): o brief da rodada leva os Minors dos arquivos que ela já muda; o acabamento, só o resto.
+- [x] **Saída de função compartilhada nos testes afetados** (a fix-17 mudou o `formatarComSinal`, que também serve a Lançamentos, ao gráfico e à Projeção, e cinco specs afirmavam o texto antigo fora do seletor de afetados): os testes afetados do `dev` incluem os que afirmam a saída de uma função compartilhada (formatador, rótulo), achados nos chamadores dela.
+- [x] **Checagem de como os testes rodam vem antes** (o D17 do CF, feito primeiro como fix-11, economizou de 1h30 a 2h por ciclo; o D30.1, o seletor de afetados que segue os imports, tinha ido para a limpeza): uma checagem que muda como os testes são escolhidos ou rodados é uma `fix-N` própria, integrada antes da rodada que a usaria, nunca na limpeza.
+- [x] **Pausa e retomada no ledger** (as pausas do CF viraram notas "Na volta: ..." escritas à mão; a fix-17 ficou sem commit numa worktree de origem cd24f87 com o head em d46a938, a nota dizia que o `dev` parou no item 5 e o diff tinha mais, e foi preciso um arquivo de análise para retomar):
+  - `claim` guarda `--worktree` e `--origin`, e o `status` mostra os dois e avisa quando o head da entrega andou desde o despacho;
+  - `pause --text` é recusado enquanto uma worktree com claim tem trabalho sem commit (o manager commita `wip: <tarefa>` antes, nunca um patch). Enquanto pausada, o `status` pede o `resume`, e o gate espera;
+  - `resume` lista os claims para despachar de novo, cada um na sua worktree a partir do `wip:`;
+  - a linha de andamento mostra "pausada";
+  - a pausa por recurso do modo autônomo usa os mesmos comandos, no lugar das notas de pausa e de retomada, e não solta mais os claims.
+- [x] **Memória antes de todo despacho que verifica** (no CF, um `qa` do ciclo 3 rodou com 0,7 GB livres; o passo 4.1 só dimensionava as ondas, e o limite de 2,5 GB livres foi uma regra improvisada): o dimensionamento vale para onda, rodada de correção e `qa`. O template do `CLAUDE.local.md` ganha a memória livre mínima para despachar, o limite de cópias pesadas com o usuário na máquina e o pico da suíte inteira do `qa`.
+
+O prompt cresceu: o manager ganhou 179 palavras (de 4523 para 4702), o `dev` 36 e o `qa` 12. A maior parte é a pausa e a retomada, que substituem as notas escritas à mão da pausa por recurso e dão ao manager os comandos novos do ledger; o resto é uma frase por item acima. A suíte inteira e a pausa viraram checagens (gate e ledger), não só texto.
+
+Números que esta versão deve mudar: linhas "Testes ..." puladas sem aviso pelo gate (quatro no CF) passam a zero; entregas com tela que chegam ao gate sem suíte inteira no head final passam a zero; Minors desfeitos numa rodada para voltar no acabamento (um no CF, o M13) passam a zero; rodadas abertas por um teste que afirmava a saída de uma função compartilhada caem; na retomada depois de uma pausa, trabalho sem commit numa worktree (a fix-17) e arquivos de análise da retomada passam a zero; despachos com menos memória livre que o mínimo do `CLAUDE.local.md` (um `qa` com 0,7 GB no CF) passam a zero.
 
 ## 2.8.8 — instruções em dia e rodadas mais curtas (PR #29)
 
@@ -118,6 +143,7 @@ Números que esta versão deve mudar, que o `feedback-plugin` da próxima entreg
 
 Termine a entrega em andamento antes de atualizar o plugin. Ao pular versões, leia as notas de cada uma, da mais antiga para a mais nova.
 
+- **2.8.9**: lê os ledgers da 2.8.8 (um `claim` sem worktree nem origem continua valendo). `ledger.py` ganha `pause --text`, `resume`, `claim --worktree --origin` e `add --agent qa --full`, e o `status --json` ganha `claims`, `paused` e `full_qa`. O gate ganha a checagem "Full suite": num projeto com "Verificação de interface" e nenhuma linha "Testes (<nome>)", a entrega precisa de um `qa` com a suíte inteira no head final, registrado com `--full`, ou de uma linha "Testes (<nome>)" com essa suíte; um projeto cuja linha "Testes" já roda a suíte de interface a passa para uma linha "Testes (interface)". Uma linha "Testes do <x>" passa a dar aviso: para o gate rodá-la, escreva "Testes (<x>)". O `CLAUDE.local.md` de quem já tem ganha à mão as duas linhas novas do template (memória livre mínima para despachar e cópias pesadas com o usuário na máquina), porque o kickoff não reescreve o arquivo; sem elas, o manager usa só o pico por cópia, como antes.
 - **2.8.8**: lê os ledgers da 2.8.7. `ledger.py` ganha `extend --reason`, para a decisão do usuário de seguir com as correções depois do limite de rodadas. Com o `scope` gravado, o `add` de uma tarefa de um ciclo posterior do plano é recusado até o ciclo aberto fechar. Projetos que já têm a seção "Execução em paralelo" editam à mão as duas linhas dela que mudaram (conferir a cópia e derrubar o armazenamento), porque o kickoff só acrescenta seções que faltam; sem elas, o manager prepara e remove a cópia como antes.
 - **2.8.7**: lê os ledgers da 2.8.6 (uma entrada antiga com `summary` continua lida). `add --summary` saiu; `add` ganha `--report <path>` (reviewer e qa) e `--task spec|plan` (reviewer), `waive` ganha `--task`, e o `status --json` ganha `from`, `metrics.reviews` e o passo `review`. Rode o `kickoff` de novo para a linha do pico por cópia do `CLAUDE.local.md` contar a verificação (build e suíte). Um projeto com telas e sem a linha "Formatos de tela" preenchida recebe a pergunta do manager antes do primeiro ciclo. O `git config --global pipeline.home` deixa de ser necessário: a primeira sessão depois da atualização grava o `pipeline.home` do repositório na pasta da versão em uso. O `security-review` passa a rodar só quando a entrega toca um domínio sensível; no modo supervisionado, o `validar` vem antes do gate; o gate interrompe o comando que passa do "Tempo máximo" (o valor vai entre crases); saiu o ciclo seguinte em segundo plano.
 - **2.8.6**: lê os ledgers da 2.8.5. No Windows, os hooks do plugin passam a pedir o Git Bash, que a 2.8.5 já pedia para o gate; sem ele, o Claude Code roda os hooks no PowerShell, onde o lançador não roda. No Linux, o link `python-is-python3` deixa de ser necessário.
