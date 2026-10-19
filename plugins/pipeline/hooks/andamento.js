@@ -1,9 +1,9 @@
 // Mod (Claude Code v2.1.287 or later): the delivery's progress, drawn from `ledger.py status --json`, in Portuguese
 // (the user reads it; the ledger's own text stays in English for the manager). While the ledger of this worktree has
-// a delivery, one line above the prompt says the plan cycle, the tasks in flight with their time, a verdict no next
-// step covers, what comes next, the tasks and cycles left and the VALIDAR items waiting. /andamento opens a pane with
-// what is left per cycle, the current cycle's runs, the next steps, the earlier cycles and the other fronts (each
-// worktree with a ledger of its own), and answers in text where nothing draws. Every rule stays in ledger.py (its
+// a delivery, one line above the prompt says the plan cycle, whether it is paused, the tasks in flight with their
+// time, a verdict no next step covers, what comes next, the tasks and cycles left and the VALIDAR items waiting.
+// /andamento opens a pane with what is left per cycle, the current cycle's runs, the next steps, the earlier cycles
+// and the other fronts (each worktree with a ledger of its own), and answers in text where nothing draws. Every rule stays in ledger.py (its
 // steps and scope): this file only lays them out. It checks the ledger file every 5 s and runs ledger.py again only
 // when the file changed, or once a minute (every 5 minutes while there is no ledger file). It runs ledger.py with the
 // first of python and python3 that is Python 3, as hooks/python.sh does. A ledger.py failure (a broken ledger, no
@@ -58,7 +58,8 @@ function title(r) {
   const cycle = !scope ? `ciclo ${r.cycle}`
     : scope.current === String(scope.position) ? `ciclo ${scope.position} de ${scope.total}`
     : `ciclo ${scope.current} (${scope.position} de ${scope.total})`
-  return [String(r.slug).replace(/[-_]+/g, ' '), cycle, ...(r.autonomous ? ['autônomo'] : [])].join(' · ')
+  return [String(r.slug).replace(/[-_]+/g, ' '), cycle, ...(r.autonomous ? ['autônomo'] : []),
+          ...(r.paused ? ['pausada'] : [])].join(' · ')
 }
 
 function left(scope) {
@@ -78,6 +79,7 @@ function said(step) {
     case 'ask': return `falar com você (${agent} ainda reprova depois ${step.task ? `de ${step.rounds} rodadas` : 'da correção'})`
     case 'stop': return `parar e registrar como VALIDAR (${agent} ainda reprova depois de ${step.rounds} rodadas)`
     case 'decide': return `decidir ${step.id}: ${step.text}`
+    case 'resume': return `retomar a entrega (pausada: ${step.text})`
     default: return step.step
   }
 }
