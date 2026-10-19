@@ -10,11 +10,15 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 
 ### Em espera (voltam com um sinal)
 
-- **Teto de orçamento por entrega** (2.5.0, 2.6.0): volta se os tokens medidos desde a 2.8 mostrarem entregas estourando.
+- **Teto de orçamento por entrega** (2.5.0, 2.6.0; também no Omnigent): volta se os tokens medidos desde a 2.8 mostrarem entregas estourando.
 - **Verificador que tenta refutar cada achado de segurança e registro de cobertura acumulado no gate** (2.8.1): um agente a mais por achado, e uma mudança grande no gate. Voltam se uma entrega mostrar achado falso ou caminho não examinado.
 - **WSL2 para o modo multi-instância** (2.8): não resolve o gargalo medido (a suíte e2e longa, item 17 da [proposta 2.7.0](proposta-2.7.0.md)); plugins não carregam nas sessões WSL do app Desktop; custa outra instalação do Claude Code (memória, plugins e configurações à parte), integração mais difícil com o navegador do Windows e hooks e `pipeline.home` reinstalados. Volta se o próprio Windows virar o gargalo; migração só entre entregas. Esforço: P no plugin.
 - **Nome do ciclo do plano no `status`** (lição do CF depois da 2.8.7): depois do `scope --cycle "Ciclo R"`, o `status` continua dizendo "cycle 3"; a linha de andamento já mostra o nome. Volta se o número no lugar do nome causar um erro de range ou uma rodada a mais.
 - **Revisão de design sobre as capturas do `dev`, antes de integrar** (análise de tempo do CF depois da 2.8.7, decisão do usuário): o defeito visual voltaria ao `dev` na mesma tarefa, mas custa uma revisão (~190k tokens) por tarefa com tela, e a revisão só do que a rodada mudou e a matriz de capturas da 2.8.8 atacam a mesma causa. Volta se, com elas, uma revisão de design ainda abrir uma rodada por defeito que a tarefa criou.
+- **Relatório do `dev` conferido num hook `SubagentStop`** (pesquisa de ferramentas parecidas: os hooks `TeammateIdle` e `TaskCompleted` do [Agent Teams](https://code.claude.com/docs/en/agent-teams)): hoje "Check the report" (passo 4.1 do manager) é texto de prompt; o hook leria a última mensagem do `dev` e o faria continuar sem `Tests:` com o `Commit:` e as contagens, ou sem `Mutation evidence:`. Volta se uma entrega mostrar um relatório incompleto devolvido duas vezes ou integrado sem a evidência. Esforço: P.
+- **Devolver a tarefa ao mesmo `dev` com `SendMessage`** (pesquisa de ferramentas parecidas): o subagente nomeado retoma com o contexto, em vez de um `dev` novo relendo plano e código (relatório incompleto, NEEDS_CONTEXT, rebase depois de conflito, teste vermelho antes do `add`); não vale para o agente parado com `TaskStop`. Volta se, no ledger, a segunda execução do `dev` numa mesma tarefa custar perto da primeira em tempo ou tokens.
+- **Segundo revisor de outro fornecedor, opcional por projeto** (Maestri, modo de comparação do Conductor): difere da revisão externa recusada na 2.6.0 por ficar fora do gate e só onde o `CLAUDE.md` do projeto pedir, mas ainda envia o diff a outro provedor e depende de outra CLI. Volta se um achado de origem `execution` que o `reviewer` deixou passar custar uma rodada (pego pelo `qa`, pelo gate ou pelo usuário).
+- **Item da spec sem tarefa no plano barrado pelo gate** (o `/analyze` do [Spec Kit](https://github.com/github/spec-kit)): itens da spec com id, e o gate falha quando um não aparece em nenhum `Goal:`, como já faz com os `AC-` nos testes. Volta se um item da spec que nenhuma tarefa cobriu for achado depois do ✋ 1.
 
 ### Recusado
 
@@ -22,6 +26,11 @@ O que falta fazer, o que cada versão entregou e o que muda para quem atualiza. 
 - **Saídas da lista original da 2.8**: a statusline, o `/frentes` abrindo abas, o semáforo do recurso compartilhado, a linha do tempo em gráfico, a página de telas, o `/aprovar` e o aviso de decisão pendente separado, com o motivo na [proposta](proposta-2.8.md).
 - **Trocar uma lição de "suíte inteira" por uma checagem** (lição do CF depois da 2.8.7): já está coberto pelo passo 4.5 do manager ("can this be a check?") e pela 2.8.7. O CF trouxe a confirmação: uma checagem de seletor por texto exato achou 91 seletores sem `exact` em 21 specs, a suíte inteira (875 testes) rodou uma vez, em 21,9 min, e a tarefa de tela passou a rodar só os specs afetados.
 - **qa de rodada de correção só com os testes afetados** (análise de tempo do CF depois da 2.8.7): já é a regra do `qa.md` ("the full suite is not repeated"). O CF rodou a suíte inteira porque 63 de 72 specs importam o helper que as rodadas mudaram; seguir os imports no comando de afetados é do projeto (D27 do CF).
+- **Agent Teams no lugar dos subagentes** (pesquisa de ferramentas parecidas): é experimental, o `/resume` não traz os colegas de volta, a lista de tarefas duplicaria o ledger, a conversa direta entre agentes não passa pelo ledger, os painéis divididos não funcionam no Windows Terminal e cada colega é uma sessão inteira em tokens. Os dois ganhos dele estão em espera sem ele (hook `SubagentStop`, `SendMessage`).
+- **App de canvas para os agentes** (Maestri, Conductor, Orca e parecidos): é interface, não orquestração; o plugin roda sem mudança no terminal de qualquer um deles, e o andamento já está na faixa e no `/andamento`.
+- **Chat em grupo com moderador** (Maestro): a conversa não passa pelo ledger.
+- **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
+- **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o princípio "enxuto".
 
 ## 2.8.8 — instruções em dia e rodadas mais curtas (PR #29)
 
