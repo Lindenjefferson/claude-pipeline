@@ -1,6 +1,6 @@
 # Roadmap do plugin `pipeline`
 
-O que falta fazer e o que cada versão entregou; o que muda para quem atualiza está em [`plugins/pipeline/UPGRADING.md`](../plugins/pipeline/UPGRADING.md). Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.9.3) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
+O que falta fazer e o que cada versão entregou; o que muda para quem atualiza está em [`plugins/pipeline/UPGRADING.md`](../plugins/pipeline/UPGRADING.md). Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.9.4) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
 ## Backlog
 
@@ -35,6 +35,22 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 - **Chat em grupo com moderador** (Maestro): a conversa não passa pelo ledger.
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
+
+## 2.9.4 — simplicidade e confirmar o entendimento antes de codar (PR #37)
+
+Origem: ideia adaptada de outro projeto, o [andrej-karpathy-skills](https://github.com/multica-ai/andrej-karpathy-skills) (de forrestchang, inspirado num post do Karpathy; MIT declarado, sem arquivo de licença), lido sem instalar e analisado pelo Fable contra o plugin; decisão do usuário, que escolheu o "confirmar que entendeu" e pediu que o `dev` proponha o caminho mais simples em vez de decidir sozinho. Pelo filtro, nenhum excesso de simplicidade apareceu ainda como rodada no ledger do CF; a medida do diff entra para mostrar se aparece.
+
+- [x] **O ledger mede o tamanho do diff de cada tarefa**: o `add` do `dev` guarda arquivos e linhas dos commits da própria tarefa (na worktree, da origem à ponta; sem worktree, desde o head do registro anterior), e as métricas dão as linhas por tarefa e a parte que `fix-N` e `cleanup` mudaram. O relatório do gate e o `feedback-plugin` trazem o número. Só informa, nunca bloqueia.
+- [x] **O `dev` confirma o entendimento antes do primeiro teste**: lê a tarefa contra a Errata e o código como está e tenta quebrar a própria leitura; um caso que os critérios deixam em aberto com consequência, ou uma contradição entre eles, vira `NEEDS_CONTEXT`, nunca um palpite, e o que o plano já decide não vira pergunta.
+- [x] **O `dev` propõe o mais simples, o manager aprova**: um caminho que cumpre todos os critérios sem um passo, camada, opção ou dependência do plano volta como `NEEDS_CONTEXT` marcado `simpler:`; o manager o toma como linha da Errata quando não toca critério nem decisão de produto (num domínio sensível ou invariante, antes passa pelo `reviewer`) e, se tocar, leva ao usuário.
+- [x] **O manager diz o que entendeu**: no passo 0, o pedido como entendido vai junto com o tamanho, numa linha, para o usuário corrigir antes de qualquer trabalho.
+- [x] **Simplicidade no `dev`, no `reviewer` e no plano**: o `Touches:` passa a ser o limite da tarefa em todo modo, não só na worktree; nada de reformatar ou editar comentários fora da mudança, nem opção ou tratamento de erro para um caso que nenhum chamador produz; o Refactor corta o que nenhum critério pede e reescreve quando dá para fazer com metade; o `reviewer` cobra código que nenhum critério pede e mudança fora do `Touches:`, e, no modo plano, tarefa, camada ou dependência que nenhum critério pede e critério que duas leituras satisfazem; e o plano justifica cada dependência, camada, opção ou configuração nova pelo critério que precisa dela.
+
+O prompt cresceu: o `dev` ganhou 190 palavras (de 1268 para 1458), o `reviewer` 87 e o manager 105 (de 3664 para 3769). Cada regra substitui ou estende uma linha que já existia (o `Touches:` mudou de lugar no `dev`, a Simplicity do `reviewer` foi reescrita, a das dependências do plano também); o que cresce é a confirmação do entendimento e a proposta `simpler:`, que trocam uma rodada de correção por uma pergunta antes do código.
+
+Números que esta versão deve mudar (do ledger): linhas por tarefa e a parte de `fix-N` e `cleanup` caem; achados de origem `plan` e `design` por ciclo e rodadas de correção caem; `NEEDS_CONTEXT` por entrega pode subir no começo (a dúvida chega antes do código), contado à parte das propostas `simpler:`; das notas do manager, as perguntas cuja resposta já estava no plano.
+
+A revisão de fechamento (Fable) achou 6 Important e 5 Minor, todos corrigidos: a medida do diff contava as tarefas integradas antes de um rebase e, na primeira tarefa, a spec e o plano (agora parte do merge-base na worktree e do head gravado no `claim`, sem contar duas vezes os `wip:`); o `Touches:` não previa os testes, o doc do módulo nem os arquivos de uma correção; "caso impossível" deixaria cortar uma proteção que o checklist exige (agora conta a chamada direta e o item do checklist); e a proposta `simpler:` não tinha caminho no modo autônomo nem registro da recusa (agora o plano aprovado vale, com `note --validar`, e a recusa vira linha da Errata).
 
 ## 2.9.3 — preparar uma máquina nova quase sozinho (PR #36)
 

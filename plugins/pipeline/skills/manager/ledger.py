@@ -2,7 +2,7 @@
 """Delivery ledger: one JSON line per agent run, grouped in cycles, so the manager sees what is pending.
 
   start   --slug <slug> [--base <rev>] [--plan <path>] [--archive]       once per delivery
-  add     --agent dev --task <id> --verdict <v> [--seconds <duration>] [--tokens N]
+  add     --agent dev --task <id> --verdict <v> [--simpler] [--seconds <duration>] [--tokens N]
   add     --agent reviewer|qa --verdict PASS|FAIL [--critical N --important N --minor N --origin <origin>=N,...]
           [--report <path>] [--seconds <duration>] [--tokens N]
   add     --agent reviewer --task spec|plan --verdict PASS|FAIL ...       one round of the spec or plan review loop
@@ -91,6 +91,22 @@ last 5 positive deltas between consecutive usage snapshots of the runs (a negati
 none), the room the next run may use. seconds_left, from now, is null when resets_at is; the text line ends with
 "until <resets_at> (in 2h13m)". It is advice for the manager, never pending: pending, steps and ready_for_gate do not change. Every add records
 the valid windows' percent as usage.
+
+add --agent dev also stores diff {files, added, removed}, the size of the task's own commits (git diff --numstat; a
+binary file counts as one file and no line). A worktree run is measured from the merge-base of the delivery head and
+the worktree's tip (the claim's origin when that fails, as for a claim with no --origin), so a worktree rebased onto
+later integrations counts only its own commits, to the tip, which the run stores as tip; the next dev run of the
+same task starts at that stored tip when it is an ancestor of the new one and later than the merge-base, so wip
+commits count once. A run with no worktree (or one that is gone) is measured from the head its live claim stored at
+dispatch (claim stores head, the delivery head), so the spec, plan and errata commits are never charged; with no
+claim head (an older ledger, or a run with no claim) from the head the previous run of any agent stored, the
+delivery base for the first. On any git failure nothing is stored and the add goes on. add --agent dev --verdict
+NEEDS_CONTEXT --simpler marks a simpler: proposal (any other agent or verdict refuses the flag) and stores
+simpler: true. status --json gives metrics.lines: tasks {task: added+removed over its dev runs}, total, follow_up
+(fix-N and cleanup), share (follow_up/total, 2 decimals, null at 0) and unmeasured (dev runs with no diff, as every
+run of an older ledger); and metrics.verdicts: {needs_context, simpler, blocked} over the dev runs (simpler
+proposals are not counted in needs_context; 0 for an older ledger). It is advice, never pending: pending, steps and
+ready_for_gate do not change.
 
 capacity answers, before a dispatch that prepares or verifies, how many parallel copies fit: the free memory (Windows
 GlobalMemoryStatusEx, Linux MemAvailable; PIPELINE_CAPACITY_MEMORY_GB and PIPELINE_CAPACITY_DISK_GB override the
@@ -466,6 +482,46 @@ def usage_advice(windows, settings, margins=None):
     return {"windows": windows, "economy": economy, "wait": wait}
 
 
+def diff_size(old, new, cwd):
+    if not old or not new:
+        return None
+    result = subprocess.run(["git", "diff", "--numstat", old, new], capture_output=True, text=True, cwd=cwd)
+    if result.returncode != 0:
+        return None
+    size = {"files": 0, "added": 0, "removed": 0}
+    for line in result.stdout.splitlines():
+        added, removed = line.split(chr(9))[:2]
+        size["files"] += 1
+        size["added"] += int(added) if added.isdigit() else 0
+        size["removed"] += int(removed) if removed.isdigit() else 0
+    return size
+
+
+def git_ok(cwd, *args):
+    result = subprocess.run(["git", *args], capture_output=True, text=True, cwd=cwd)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def task_diff(entries, task, head, ledger):
+    """The size of the task's own commits and, for a worktree, the tip it was measured at."""
+    held = claims(entries).get(task)
+    if held and held.get("worktree") and os.path.isdir(held["worktree"]):
+        tree, end = held["worktree"], tip(held)
+        start = (git_ok(tree, "merge-base", head, end) if head and end else None) or held.get("origin")
+        stored = [entry["tip"] for entry in entries if entry["type"] == "run" and entry.get("agent") == "dev"
+                  and entry.get("task") == task and entry.get("tip")]
+        if start and end and stored and git_ok(tree, "merge-base", "--is-ancestor", stored[-1], end) is not None \
+                and git_ok(tree, "merge-base", "--is-ancestor", start, stored[-1]) is not None:
+            start = stored[-1]
+        return diff_size(start, end, tree), end
+    previous = [entry["head"] for entry in entries if entry["type"] == "run" and entry.get("head")]
+    base = [entry.get("base") for entry in entries if entry["type"] == "start"]
+    where = os.path.dirname(os.path.abspath(ledger))
+    start = (held or {}).get("head") if held and not held.get("worktree") else None
+    return diff_size(start or (previous[-1] if previous else (base[-1] if base else None)), head,
+                     where if os.path.isdir(where) else None), None
+
+
 def add(args):
     entries = read(args.ledger)
     if not entries:
@@ -480,6 +536,8 @@ def add(args):
         sys.exit("--report keeps the file of a reviewer or qa report; the dev's report is checked before integrating")
     if args.full and args.agent != "qa":
         sys.exit("--full marks a qa run of the project's full test command")
+    if args.simpler and not (args.agent == "dev" and args.verdict == "NEEDS_CONTEXT"):
+        sys.exit("--simpler marks a dev NEEDS_CONTEXT run that proposes a simpler way (a simpler: proposal)")
     blocking = args.critical + args.important
     if args.agent in ("reviewer", "qa") and (args.verdict == "FAIL") != (blocking > 0):
         sys.exit("FAIL needs open Critical/Important findings (--critical or --important > 0) and PASS none")
@@ -502,6 +560,17 @@ def add(args):
         if args.tokens == 0:
             sys.exit("--tokens 0 is no measurement: leave it out when the run went unmeasured")
         entry["tokens"] = args.tokens
+    if args.agent == "dev":
+        try:
+            size, end = task_diff(entries, args.task, entry["head"], args.ledger)
+        except (OSError, ValueError):
+            size, end = None, None
+        if size:
+            entry["diff"] = size
+            if end:
+                entry["tip"] = end
+        if args.simpler:
+            entry["simpler"] = True
     windows = usage_windows(args.ledger)[0]
     if windows:
         entry["usage"] = {name: item["percent"] for name, item in windows.items()}
@@ -561,7 +630,7 @@ def claim(args):
         where["origin"] = git_head(args.origin, args.ledger, where.get("worktree"))
         if where["origin"] is None:
             sys.exit(f"--origin is not a commit: {args.origin}")
-    write(args.ledger, {"type": "claim", "task": args.task, **where})
+    write(args.ledger, {"type": "claim", "task": args.task, **where, "head": git_head(ledger=args.ledger) or ""})
     print(f"claimed {args.task}")
 
 
@@ -836,7 +905,31 @@ def metrics(entries):
     lessons = [{"text": entry["text"], "check": entry.get("check", "")} for entry in entries
                if entry["type"] == "lesson"]
     return {"cycles": per_cycle, "reviews": loops, "origins": found, "time": totals(measured, "seconds"),
-            "tokens": totals(measured, "tokens"), "lessons": lessons}
+            "tokens": totals(measured, "tokens"), "lines": line_totals(entries), "verdicts": verdict_counts(entries),
+            "lessons": lessons}
+
+
+def verdict_counts(entries):
+    devs = [entry for entry in runs(entries) if entry["agent"] == "dev"]
+    simpler = sum(1 for entry in devs if entry.get("simpler"))
+    return {"needs_context": sum(1 for entry in devs if entry["verdict"] == "NEEDS_CONTEXT") - simpler,
+            "simpler": simpler, "blocked": sum(1 for entry in devs if entry["verdict"] == "BLOCKED")}
+
+
+def line_totals(entries):
+    tasks, unmeasured = {}, 0
+    for entry in runs(entries):
+        if entry["agent"] != "dev":
+            continue
+        size = entry.get("diff")
+        if not size:
+            unmeasured += 1
+            continue
+        tasks[entry["task"]] = tasks.get(entry["task"], 0) + size.get("added", 0) + size.get("removed", 0)
+    total = sum(tasks.values())
+    follow_up = sum(count for task, count in tasks.items() if FOLLOW_UP.fullmatch(task))
+    return {"tasks": tasks, "total": total, "follow_up": follow_up,
+            "share": round(follow_up / total, 2) if total else None, "unmeasured": unmeasured}
 
 
 def totals(entries, key):
@@ -1149,6 +1242,7 @@ def main():
     command.add_argument("--seconds", help="how long the run took, from its completion notification: 90, 12m, 1h5m or 12m30s")
     command.add_argument("--tokens", type=count, help="the tokens the run used, from its completion notification")
     command.add_argument("--full", action="store_true", help="the qa ran the project's full test command")
+    command.add_argument("--simpler", action="store_true", help="the dev's NEEDS_CONTEXT is a simpler: proposal")
     command.set_defaults(run=add)
     for name, run in (("claim", claim), ("release", release)):
         command = commands.add_parser(name)
