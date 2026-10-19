@@ -2,10 +2,10 @@
 
 Each item: the check — why — how to verify. An item applies when the product has what it is about (stored data, accounts, a server, a browser, screens); where the product has none, it is n/a, not a finding. An unmet item is a finding, with evidence like any other. Rules for the project's own stack live in its `CLAUDE.md` and `docs/lessons.md`, not here.
 
-The items are in this index and in three slices by surface, read only when the product has that surface, by the same rule:
-- [`access-and-data.md`](access-and-data.md): the product stores data.
+The items are in this index and in three slices, each read when the product has what its items are about (when unsure, read the slice); inside a slice, each item still applies by the rule above:
+- [`access-and-data.md`](access-and-data.md): the product stores data or has a server entry point.
 - [`auth-and-sessions.md`](auth-and-sessions.md): the product has accounts or sessions.
-- [`web-and-ui.md`](web-and-ui.md): the product has a browser, a server a browser talks to, or screens.
+- [`web-and-ui.md`](web-and-ui.md): the product has a server, a browser or screens, issues tokens, or ships builds.
 
 ## Invariants (every review mode: spec, plan and diff)
 - **A rule whose violation breaks reading or rendering the data is enforced in the data layer** — app validation can be bypassed (a direct API call, a script, a second client); it exists to give a good message, not the guarantee. Verify: ask "if someone calls the API directly, does it hold?"; a constraint, trigger or policy enforces it and a test writes the bad value without the app and sees it refused.

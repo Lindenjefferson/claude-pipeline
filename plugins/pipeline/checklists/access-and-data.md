@@ -1,6 +1,6 @@
 # General checklist: access and data
 
-Slice of `general.md` (its first paragraph says how an item is read and when it applies): the product stores data.
+Slice of `general.md` (its first paragraph says how an item is read and when it applies): the product stores data or has a server entry point.
 
 ## Access and data
 - **Every server entry point re-checks authentication, authorization and input** — an endpoint is public no matter which page calls it, and a shared layout or parent guard does not protect it. Verify: each entry point reads the user server-side, checks scope (tenant, role) and validates input before writing.
