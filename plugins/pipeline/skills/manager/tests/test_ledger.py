@@ -371,6 +371,45 @@ add("reviewer", "FAIL", None, 1, ledger=CAP)
 check("autonomous: still failing after three fix rounds stops the delivery",
       any("stop the delivery" in item and "note --validar" in item for item in status(CAP)["pending"]),
       status(CAP)["pending"])
+add("dev", "DONE", "fix-4", ledger=CAP)
+check("a fix the user asked for past the limit leaves the stop in place until extend",
+      any(step["step"] == "stop" for step in status(CAP)["steps"]), status(CAP)["steps"])
+r = run("extend", "--reason", "the user lets the fixes go on (V5)", ledger=CAP)
+state = status(CAP)
+check("extend records the user's decision to go on past the fix rounds: no stop, the review of the fix is next",
+      r.returncode == 0 and not any(step["step"] in ("stop", "ask") for step in state["steps"])
+      and state["pending"][0] == "reviewer has not reviewed the latest changes", (r.stderr, state["pending"]))
+check("in autonomous mode extend goes to the VALIDAR list",
+      [item["text"] for item in state["validar"]][-1:] == ["extra fix round: the user lets the fixes go on (V5)"],
+      state["validar"])
+add("reviewer", "FAIL", None, 1, ledger=CAP)
+check("extend gives one more round: still failing after it stops the delivery again, counting every fix round",
+      any(step["step"] == "stop" and step["rounds"] == 4 for step in status(CAP)["steps"]), status(CAP)["steps"])
+run("extend", "--reason", "one more", ledger=CAP)
+add("dev", "DONE", "fix-5", ledger=CAP)
+add("reviewer", "PASS", ledger=CAP)
+add("qa", "PASS", ledger=CAP)
+check("a cycle that passes after an extend closes", status(CAP)["ready_for_gate"] is True, status(CAP)["pending"])
+check("extend within the fix rounds is refused",
+      run("extend", "--reason", "x", ledger=CAP).returncode != 0)
+add("dev", "DONE", "T2", ledger=CAP)
+add("reviewer", "FAIL", None, 1, ledger=CAP)
+add("dev", "DONE", "fix-6", ledger=CAP)
+add("reviewer", "FAIL", None, 1, ledger=CAP)
+check("an extend of an earlier cycle does not shorten the next one",
+      not any(step["step"] == "stop" for step in status(CAP)["steps"]), status(CAP)["pending"])
+
+EXTEND = ".superpowers/extend.jsonl"
+run("start", "--slug", "extend", ledger=EXTEND)
+add("dev", "DONE", "T1", ledger=EXTEND)
+add("reviewer", "FAIL", None, 1, ledger=EXTEND)
+add("dev", "DONE", "fix-1", ledger=EXTEND)
+add("reviewer", "FAIL", None, 1, ledger=EXTEND)
+run("extend", "--reason", "the user asked for one more round", ledger=EXTEND)
+state = status(EXTEND)
+check("supervised: extend stops asking the user and keeps the decision as a plain note",
+      not any(step["step"] == "ask" for step in state["steps"])
+      and state["notes"][-1:] == ["extra fix round: the user asked for one more round"], state)
 
 PLAN = ".superpowers/plan.jsonl"
 check("plan before start is refused", run("plan", "--path", "x.md", ledger=PLAN).returncode != 0)
