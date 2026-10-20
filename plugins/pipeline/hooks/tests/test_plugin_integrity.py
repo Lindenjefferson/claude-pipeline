@@ -66,6 +66,12 @@ check("that write check rejects a write to anything but a usage.json literal",
       and not WRITE.match("write(`${folder}other.json`, body) // usage.json")
       and not WRITE.match("write(name + 'usage.json', body)"), "")
 
+manifest = json.load(open(os.path.join(ROOT, ".claude-plugin", "plugin.json"), encoding="utf-8"))
+kickoff = open(os.path.join(ROOT, "skills", "kickoff", "SKILL.md"), encoding="utf-8").read()
+readme = open(os.path.join(ROOT, "..", "..", "README.md"), encoding="utf-8").read()
+missing = [d["name"] for d in manifest.get("dependencies", []) if d["name"] not in kickoff or d["name"] not in readme]
+check("every declared dependency is named in the kickoff pre-flight and the README requirements", not missing, missing)
+
 settings = json.load(open(os.path.join(ROOT, "skills", "kickoff", "templates", "settings.allowlist.json"),
                           encoding="utf-8"))
 for entry in ("Bash(sudo:*)", "Bash(git push --force:*)", "Bash(git push -f:*)", "Bash(chmod 777:*)"):
