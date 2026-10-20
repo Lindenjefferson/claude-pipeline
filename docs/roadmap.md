@@ -43,7 +43,7 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
 
-## 2.9.6 — faixa de andamento legível
+## 2.9.6 — faixa de andamento legível (PR #39)
 
 Origem: pedido do usuário, a faixa da etapa 5 do CF cortava o fim ("6 decisões espera…") e dizia "ciclo Ciclo 3"; a crítica de interface veio da skill `frontend-design`.
 
