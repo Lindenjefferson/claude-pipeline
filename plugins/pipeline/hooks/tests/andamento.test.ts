@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { bandLine, paneLines } from '../andamento.js'
+import { bandRows, paneLines, rowText } from '../andamento.js'
 
 const DISPATCHED = '2026-10-17T17:32:48+00:00'
 const NOW = Date.parse(DISPATCHED) + 14 * 60000
@@ -23,6 +23,8 @@ const STATUS = {
   metrics: { cycles: [{ cycle: 1, critical: 0, important: 1, minor: 2, open: 1, fix_rounds: 1, seconds: 3600, tokens: 0 },
                       { cycle: 2, critical: 0, important: 2, minor: 0, open: 2, fix_rounds: 0, seconds: 241, tokens: 98357 }] },
 }
+// the band's rows as the user reads them
+const shown = (r) => bandRows(r, NOW).map(rowText)
 const OTHER = { ...STATUS, slug: 'etapa-6', ledger: '/other/.superpowers/ledger.jsonl', dispatched: {}, scope: null }
 const BAND = {
   plugin: 'pipeline', component: 'AbovePrompt', requestId: 'band', surface: 'terminal',
@@ -85,10 +87,10 @@ async function start($, clock) {
   await clock.settle()
 }
 
-test('the band says, in Portuguese, the plan cycle, what runs, what comes next, what is left and VALIDAR', () => {
-  expect(bandLine(STATUS, NOW)).toBe('etapa 5 · ciclo 2 de 3 · autônomo · dev na T2.1 há 14 min · ' +
-                                     'depois: correção (2 achados da revisão) · faltam 3 tarefas em 2 ciclos · ' +
-                                     '1 decisão espera você')
+test('the band says where the delivery is, what runs and comes next, and what waits for you, one row each', () => {
+  expect(shown(STATUS)).toEqual(['etapa 5, ciclo 2 de 3, modo autônomo   faltam 3 tarefas em 2 ciclos',
+                                 '● dev na T2.1 há 14 min   depois: correção (2 achados da revisão)',
+                                 '1 decisão espera você'])
 })
 
 test('the band names a cycle by its plan name, shows a verdict only when no step covers it, and joins the steps', () => {
@@ -96,28 +98,52 @@ test('the band names a cycle by its plan name, shows a verdict only when no step
                    scope: { ...STATUS.scope, current: 'R', position: 3, tasks_left: 1, cycles_left: 1 },
                    reviewer: [{ agent: 'reviewer', verdict: 'PASS', open: 0 }],
                    steps: [{ step: 'qa' }, { step: 'decide', id: 'D1', text: 'x' }, { step: 'decide', id: 'D4', text: 'y' }] }
-  expect(bandLine(review, NOW)).toBe('etapa 5 · ciclo R (3 de 3) · autônomo · revisão ok · depois: qa e decidir D1 e D4 · ' +
-                                     'falta 1 tarefa em 1 ciclo')
+  expect(shown(review)).toEqual(['etapa 5, ciclo R (3º de 3), modo autônomo   falta 1 tarefa em 1 ciclo',
+                                 '✓ revisão   depois: qa e decidir D1 e D4'])
   const rerun = { ...review, reviewer: [{ agent: 'reviewer', verdict: 'FAIL', open: 1 }],
                   steps: [{ step: 'reviewer' }, { step: 'qa', rerun: true }] }
-  expect(bandLine(rerun, NOW)).toContain('depois: revisão e qa de novo nos cenários da correção')
-  expect(bandLine(rerun, NOW)).not.toContain('reprovou')
+  expect(shown(rerun)[1]).toBe('depois: revisão e qa de novo nos cenários da correção')
   const failed = { ...review, qa: [{ agent: 'qa', verdict: 'FAIL', open: 3 }], steps: [{ step: 'reviewer' }] }
-  expect(bandLine(failed, NOW)).toContain('qa reprovou (3 abertos) · depois: revisão')
+  expect(shown(failed)[1]).toBe('✗ qa reprovou, 3 abertos   depois: revisão')
+})
+
+test('a plan cycle named "Ciclo 3" is not called "ciclo Ciclo 3", and its position reads as an ordinal', () => {
+  const named = { ...STATUS, scope: { ...STATUS.scope, current: 'Ciclo 3', position: 4, total: 4 } }
+  expect(shown(named)[0]).toMatch(/^etapa 5, ciclo 3 \(4º de 4\), /)
+  const plan = { ...STATUS, scope: { ...STATUS.scope, cycles: [{ cycle: 'Ciclo 3', tasks: ['T3.1'], left: ['T3.1'] }] } }
+  expect(paneLines(plan, [], NOW)).toContain('- ciclo 3: T3.1')
+  const same = { ...STATUS, scope: { ...STATUS.scope, current: 'ciclo 2' } }
+  expect(shown(same)[0]).toMatch(/^etapa 5, ciclo 2 de 3, /)
+})
+
+test('the cleanup and fix tasks are named in words', () => {
+  const late = { ...STATUS, steps: [], reviewer: [], dispatched: { cleanup: DISPATCHED, 'fix-2': DISPATCHED } }
+  expect(shown(late)[1]).toBe('● dev na limpeza há 14 min   ● dev na correção 2 há 14 min')
+  const back = { ...STATUS, dispatched: {}, reviewer: [], steps: [{ step: 'dev', task: 'cleanup', verdict: 'BLOCKED' }] }
+  expect(shown(back)[1]).toBe('depois: dev na limpeza (voltou BLOCKED)')
+})
+
+test('each part of the band carries its tone: running, done, failed, ready, next, and what waits for you', () => {
+  const tones = (r) => bandRows(r, NOW).map((row) => row.map((part) => part.tone))
+  expect(tones(STATUS)).toEqual([['title', 'quiet'], ['running', 'next'], ['you']])
+  const failed = { ...STATUS, dispatched: {}, validar: [], steps: [],
+                   reviewer: [{ agent: 'reviewer', verdict: 'PASS', open: 0 }], qa: [{ agent: 'qa', verdict: 'FAIL', open: 1 }] }
+  expect(tones(failed)).toEqual([['title', 'quiet'], ['done', 'failed']])
+  expect(tones({ ...failed, qa: [], ready_for_gate: true })).toEqual([['title', 'quiet'], ['done', 'ready']])
 })
 
 test('the band says when the gate is next, and with no scope shows the ledger cycle', () => {
   const ready = { ...STATUS, dispatched: {}, steps: [], pending: [], ready_for_gate: true, scope: null, validar: [],
                   reviewer: [], qa: [] }
-  expect(bandLine(ready, NOW)).toBe('etapa 5 · ciclo 2 · autônomo · pronto para o gate')
+  expect(shown(ready)).toEqual(['etapa 5, ciclo 2, modo autônomo', '✓ pronto para o gate'])
   const running = { ...STATUS, steps: [], scope: null, validar: [], autonomous: false, reviewer: [],
                     dispatched: { 'T2.1': DISPATCHED, 'T2.3': '2026-10-17T16:32:48+00:00' } }
-  expect(bandLine(running, NOW)).toBe('etapa 5 · ciclo 2 · dev na T2.1 há 14 min e na T2.3 há 1h14')
+  expect(shown(running)).toEqual(['etapa 5, ciclo 2', '● dev na T2.1 há 14 min   ● dev na T2.3 há 1h14'])
 })
 
 test('the pane lists what is left per cycle, the cycle runs, what comes next, VALIDAR, earlier cycles and fronts', () => {
   const lines = paneLines(STATUS, [{ name: 'other', report: OTHER }], NOW)
-  expect(lines[0]).toBe('etapa 5 · ciclo 2 de 3 · autônomo')
+  expect(lines[0]).toBe('etapa 5, ciclo 2 de 3, modo autônomo')
   expect(lines).toContain('Faltam 3 tarefas em 2 ciclos:')
   expect(lines).toContain('- ciclo 2: T2.1')
   expect(lines).toContain('- ciclo R: TR.1, TR.2')
@@ -132,7 +158,7 @@ test('the pane lists what is left per cycle, the cycle runs, what comes next, VA
   expect(lines.join('\n')).not.toContain('sort by date')
   expect(lines).toContain('- ciclo 1: 0 Critical, 1 Important, 2 Minor; 1 rodada de correção; 1h00 de agente')
   expect(lines).toContain('Outras frentes:')
-  expect(lines).toContain('- other: etapa 6 · ciclo 2 · 0 rodando · 1 pendente')
+  expect(lines).toContain('- other: etapa 6, ciclo 2: 0 rodando, 1 pendente')
 })
 
 test('the pane spells out each kind of step', () => {
@@ -157,26 +183,40 @@ test('the pane spells out each kind of step', () => {
 test('an old ledger without VALIDAR ids, runs, tokens, steps or scope still draws', () => {
   const old = { ...STATUS, validar: ['page size 50'], runs: undefined, dispatched: undefined, metrics: {},
                 steps: undefined, scope: undefined, reviewer: [] }
-  expect(bandLine(old, NOW)).toBe('etapa 5 · ciclo 2 · autônomo')
-  expect(paneLines(old, [], NOW)[0]).toBe('etapa 5 · ciclo 2 · autônomo')
+  expect(shown(old)).toEqual(['etapa 5, ciclo 2, modo autônomo'])
+  expect(paneLines(old, [], NOW)[0]).toBe('etapa 5, ciclo 2, modo autônomo')
 })
 
 test('a paused delivery says so in the title and spells out the resume step', () => {
   const text = 'rerun the gate after the API key is set'
   const paused = { ...STATUS, dispatched: {}, scope: null, validar: [], reviewer: [], paused: { text, at: DISPATCHED },
                    steps: [{ step: 'resume', text, at: DISPATCHED }] }
-  expect(bandLine(paused, NOW)).toBe(`etapa 5 · ciclo 2 · autônomo · pausada · depois: retomar a entrega (pausada: ${text})`)
-  expect(paneLines(paused, [], NOW)[0]).toBe('etapa 5 · ciclo 2 · autônomo · pausada')
+  expect(shown(paused)).toEqual(['etapa 5, ciclo 2, modo autônomo, pausada', `depois: retomar a entrega (pausada: ${text})`])
+  expect(paneLines(paused, [], NOW)[0]).toBe('etapa 5, ciclo 2, modo autônomo, pausada')
   expect(paneLines(paused, [], NOW)).toContain(`- retomar a entrega (pausada: ${text})`)
-  expect(bandLine({ ...paused, paused: null, steps: [] }, NOW)).toBe('etapa 5 · ciclo 2 · autônomo')
+  expect(shown({ ...paused, paused: null, steps: [] })).toEqual(['etapa 5, ciclo 2, modo autônomo'])
 })
 
 test('with a delivery open, the band is drawn above the prompt and keeps what other mods draw there', async ($, on) => {
   const clock = stubs(on, STATUS)
   await start($, clock)
   const ui = await $.ui.mount(BAND)
-  expect(await ui.find({ type: 'Text', text: /^etapa 5 · ciclo 2 de 3/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^etapa 5, ciclo 2 de 3/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'drawn by Claude Code' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the band rows wrap instead of cutting, only the title dims while Claude works, and VALIDAR is a warning', async ($, on) => {
+  const clock = stubs(on, STATUS)
+  await start($, clock)
+  const ui = await $.ui.mount({ ...BAND, props: { ...BAND.props, isWorking: true } })
+  const title = await ui.find({ type: 'Text', text: /^etapa 5, ciclo 2 de 3/ })
+  const now = await ui.find({ type: 'Text', text: /^● dev na T2\.1/ })
+  const you = await ui.find({ type: 'Text', text: /^1 decisão espera você$/ })
+  for (const row of [title, now, you]) expect(row?.props.wrap).toBe('wrap')
+  expect(title?.props.dimColor).toBe(true)
+  expect(now?.props.dimColor).toBeFalsy()
+  expect(you?.props.color).toBe('warning')
   await ui.unmount()
 })
 
@@ -202,7 +242,7 @@ test('a ledger.py failure shows in the band and in /andamento, not as "no delive
   on('ui.open', () => ({ deny: 'no pane here' }))
   await start($, clock)
   const ui = await $.ui.mount(BAND)
-  expect(await ui.find({ type: 'Text', text: /^pipeline · ledger\.py falhou: x\.jsonl:3/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^pipeline: ledger\.py falhou: x\.jsonl:3/ })).toBeDefined()
   await ui.unmount()
   const answer = await $.command.run({ command: 'andamento', args: '' })
   expect(answer.text).toContain('ledger.py falhou: x.jsonl:3')
@@ -214,7 +254,7 @@ test('with only python3 on PATH, as on Linux, ledger.py runs with python3', asyn
   await start($, clock)
   expect(log.python).toBe('python3')
   const ui = await $.ui.mount(BAND)
-  expect(await ui.find({ type: 'Text', text: /^etapa 5 · ciclo 2 de 3/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^etapa 5, ciclo 2 de 3/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -222,7 +262,7 @@ test('with no Python 3 on PATH, the band says so instead of passing for "no deli
   const clock = stubs(on, STATUS, { runs: 0, mtime: 1 }, [])
   await start($, clock)
   const ui = await $.ui.mount(BAND)
-  expect(await ui.find({ type: 'Text', text: /^pipeline · ledger\.py falhou: no Python 3 on PATH \(tried python, python3\)/ }))
+  expect(await ui.find({ type: 'Text', text: /^pipeline: ledger\.py falhou: no Python 3 on PATH \(tried python, python3\)/ }))
     .toBeDefined()
   await ui.unmount()
 })
@@ -246,7 +286,7 @@ test('/andamento answers in text where no pane can open, listing the other front
   on('ui.open', () => ({ deny: 'no pane here' }))
   await start($, clock)
   const answer = await $.command.run({ command: 'andamento', args: '' })
-  expect(answer.text).toContain('etapa 5 · ciclo 2 de 3 · autônomo')
+  expect(answer.text).toContain('etapa 5, ciclo 2 de 3, modo autônomo')
   expect(answer.text).toContain('Ciclos anteriores:')
   expect(answer.text).toContain('- other: etapa 6')
   expect(answer.text).not.toContain('- work:')
@@ -259,7 +299,7 @@ test('/andamento opens the pane and the pane draws the same table', async ($, on
   const answer = await $.command.run({ command: 'andamento', args: '' })
   expect(answer).toEqual({})
   const ui = await $.ui.mount(PANE)
-  expect(await ui.find({ type: 'Text', text: 'etapa 5 · ciclo 2 de 3 · autônomo' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'etapa 5, ciclo 2 de 3, modo autônomo' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /T2\.1\s+rodando/ })).toBeDefined()
   await ui.unmount()
 })
@@ -303,7 +343,7 @@ test('a usage.json write failure leaves the band and the next write alone', asyn
   await start($, clock)
   await $.session.measure(MEASURE)
   const ui = await $.ui.mount(BAND)
-  expect(await ui.find({ type: 'Text', text: /^etapa 5 · ciclo 2 de 3/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^etapa 5, ciclo 2 de 3/ })).toBeDefined()
   await ui.unmount()
   log.writeFails = false
   await $.session.measure(MEASURE)
@@ -312,53 +352,53 @@ test('a usage.json write failure leaves the band and the next write alone', asyn
 
 test('economy shows in the title, and a wait puts the reset first in "depois", in local time', () => {
   const saving = { ...STATUS, usage: { ...USAGE, economy: 'five_hour at 85%' } }
-  expect(bandLine(saving, NOW)).toContain('etapa 5 · ciclo 2 de 3 · autônomo · econômico · dev na T2.1')
-  expect(paneLines(saving, [], NOW)[0]).toBe('etapa 5 · ciclo 2 de 3 · autônomo · econômico')
-  expect(bandLine({ ...saving, paused: { text: 'x', at: DISPATCHED } }, NOW)).toContain('autônomo · econômico · pausada')
+  expect(shown(saving)[0]).toBe('etapa 5, ciclo 2 de 3, modo autônomo e econômico   faltam 3 tarefas em 2 ciclos')
+  expect(paneLines(saving, [], NOW)[0]).toBe('etapa 5, ciclo 2 de 3, modo autônomo e econômico')
+  expect(shown({ ...saving, paused: { text: 'x', at: DISPATCHED } }).join('\n')).toContain('modo autônomo e econômico, pausada')
   const five = { ...STATUS, usage: { ...USAGE, wait: { window: 'five_hour', percent: 85, resets_at: LOCAL.toISOString() } } }
-  expect(bandLine(five, NOW)).toContain(
+  expect(shown(five).join('\n')).toContain(
     'depois: esperar o reset da janela de 5 horas (85%, volta às 21:05) e correção (2 achados da revisão)')
   const week = { ...STATUS, usage: { ...USAGE, wait: { window: 'seven_day', percent: 97, resets_at: LOCAL.toISOString() } } }
-  expect(bandLine(week, NOW)).toContain('depois: esperar o reset da semana (97%, volta em 17/10 21:05) e correção')
+  expect(shown(week).join('\n')).toContain('depois: esperar o reset da semana (97%, volta em 17/10 21:05) e correção')
   expect(paneLines(week, [], NOW)).toContain('- esperar o reset da semana (97%, volta em 17/10 21:05)')
   const idle = { ...five, steps: [] }
-  expect(bandLine(idle, NOW)).toContain('depois: esperar o reset da janela de 5 horas (85%, volta às 21:05)')
+  expect(shown(idle).join('\n')).toContain('depois: esperar o reset da janela de 5 horas (85%, volta às 21:05)')
 })
 
 test('the pane says how much of each window the account used', () => {
   const lines = paneLines({ ...STATUS, usage: { ...USAGE, windows: { ...USAGE.windows, five_hour: { percent: 82.5, resets_at: null } } } }, [], NOW)
-  expect(lines).toContain('Uso da conta: 5 h 82% · semana 41%')
+  expect(lines).toContain('Uso da conta: 5 h 82%, semana 41%')
 })
 
 test('with no usage, or an older ledger without it, the band and the pane are unchanged', () => {
-  const plain = bandLine(STATUS, NOW)
-  expect(bandLine({ ...STATUS, usage: null }, NOW)).toBe(plain)
-  expect(bandLine({ ...STATUS, usage: { windows: {}, economy: null, wait: null } }, NOW)).toBe(plain)
+  const plain = shown(STATUS).join('\n')
+  expect(shown({ ...STATUS, usage: null }).join('\n')).toBe(plain)
+  expect(shown({ ...STATUS, usage: { windows: {}, economy: null, wait: null } }).join('\n')).toBe(plain)
   expect(paneLines({ ...STATUS, usage: null }, [], NOW)).toEqual(paneLines(STATUS, [], NOW))
   expect(paneLines(STATUS, [], NOW).join(' ')).not.toContain('Uso da conta')
 })
 
 test('a wait with no reset time says no time instead of printing the epoch', () => {
   const five = { ...STATUS, usage: { ...USAGE, wait: { window: 'five_hour', percent: 90, resets_at: null } } }
-  expect(bandLine(five, NOW)).toContain('depois: esperar o reset da janela de 5 horas (90%) e correção')
+  expect(shown(five).join('\n')).toContain('depois: esperar o reset da janela de 5 horas (90%) e correção')
   const week = { ...STATUS, usage: { ...USAGE, wait: { window: 'seven_day', percent: 97.4, resets_at: null } } }
-  expect(bandLine(week, NOW)).toContain('depois: esperar o reset da semana (97%) e correção')
+  expect(shown(week).join('\n')).toContain('depois: esperar o reset da semana (97%) e correção')
   expect(paneLines(week, [], NOW)).toContain('- esperar o reset da semana (97%)')
   expect(paneLines(week, [], NOW).join(' ')).not.toContain('1970')
   const odd = { ...STATUS, usage: { ...USAGE, wait: { window: 'five_hour', percent: 90, resets_at: 'not a date' } } }
-  expect(bandLine(odd, NOW)).toContain('esperar o reset da janela de 5 horas (90%) e correção')
+  expect(shown(odd).join('\n')).toContain('esperar o reset da janela de 5 horas (90%) e correção')
 })
 
 test('a wait adds the margin one run is expected to use, when there is one', () => {
   const wait = { window: 'five_hour', percent: 78.6, resets_at: LOCAL.toISOString(), margin: 9 }
-  expect(bandLine({ ...STATUS, usage: { ...USAGE, wait } }, NOW)).toContain(
+  expect(shown({ ...STATUS, usage: { ...USAGE, wait } }).join('\n')).toContain(
     'esperar o reset da janela de 5 horas (78% + 9% por execução, volta às 21:05) e correção')
   expect(paneLines({ ...STATUS, usage: { ...USAGE, wait: { ...wait, window: 'seven_day', margin: 4 } } }, [], NOW)).toContain(
     '- esperar o reset da semana (78% + 4% por execução, volta em 17/10 21:05)')
-  expect(bandLine({ ...STATUS, usage: { ...USAGE, wait: { ...wait, resets_at: null } } }, NOW)).toContain(
+  expect(shown({ ...STATUS, usage: { ...USAGE, wait: { ...wait, resets_at: null } } }).join('\n')).toContain(
     'esperar o reset da janela de 5 horas (78% + 9% por execução) e correção')
   for (const margin of [0, undefined, null]) {
-    expect(bandLine({ ...STATUS, usage: { ...USAGE, wait: { ...wait, margin } } }, NOW)).toContain(
+    expect(shown({ ...STATUS, usage: { ...USAGE, wait: { ...wait, margin } } }).join('\n')).toContain(
       'esperar o reset da janela de 5 horas (78%, volta às 21:05) e correção')
   }
 })
@@ -366,8 +406,8 @@ test('a wait adds the margin one run is expected to use, when there is one', () 
 test('with only the weekly window, the pane line and the title still draw', () => {
   const only = { ...STATUS, usage: { windows: { seven_day: { percent: 41.9, resets_at: null } }, economy: 'seven_day at 85%', wait: null } }
   expect(paneLines(only, [], NOW)).toContain('Uso da conta: semana 41%')
-  expect(paneLines(only, [], NOW)[0]).toBe('etapa 5 · ciclo 2 de 3 · autônomo · econômico')
-  expect(bandLine(only, NOW)).toContain('autônomo · econômico · dev na T2.1')
+  expect(paneLines(only, [], NOW)[0]).toBe('etapa 5, ciclo 2 de 3, modo autônomo e econômico')
+  expect(shown(only).join('\n')).toContain('modo autônomo e econômico   faltam 3 tarefas em 2 ciclos\n● dev na T2.1')
 })
 
 test('a rate limit with no usable reset time is not written to usage.json', async ($, on) => {

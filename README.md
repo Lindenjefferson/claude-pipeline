@@ -29,7 +29,7 @@ Com você ausente, o [modo autônomo](plugins/pipeline/skills/manager/references
 
 ## Começo rápido
 
-Requisitos: Claude Code com plugins (a linha de andamento e o `/andamento` pedem a v2.1.287 ou mais nova, testados na v2.1.302), Python 3 e git no `PATH` (o Python com o nome `python` ou `python3`; testado no Windows e no Linux, ainda não no macOS), no Windows o Git Bash, onde rodam os hooks do plugin e o `gate.py` roda os comandos do projeto, e os plugins [`superpowers`](https://github.com/obra/superpowers) (`superpowers@claude-plugins-official`), `frontend-design@claude-plugins-official` (rodada e revisão de design, só em produtos com tela) e `claude-code-setup@claude-plugins-official` (recomenda as automações do Claude Code de um projeto novo, depois de montada a stack), declarados como dependência; o `kickoff` avisa quando falta um e diz como instalar. Opcional: [graphify](https://github.com/Graphify-Labs/graphify) (`pip install graphifyy`) para o grafo de conhecimento.
+Requisitos: Claude Code com plugins (a linha de andamento e o `/andamento` pedem a v2.1.287 ou mais nova, testados na v2.1.302), Python 3 e git no `PATH` (o Python com o nome `python` ou `python3`; testado no Windows e no Linux, ainda não no macOS), no Windows o Git Bash, onde rodam os hooks do plugin e o `gate.py` roda os comandos do projeto, e os plugins [`superpowers`](https://github.com/obra/superpowers) (`superpowers@claude-plugins-official`), `frontend-design@claude-plugins-official` (rodada e revisão de design, só em produtos com tela) e `claude-code-setup@claude-plugins-official` (recomenda as automações do Claude Code de um projeto novo, depois de montada a stack), declarados como dependência; o `kickoff` avisa quando falta um e diz como instalar.
 
 ```bash
 # uma vez por máquina (repositório privado: o git da máquina precisa estar autenticado no GitHub)
@@ -51,7 +51,7 @@ Para atualizar um projeto, peça "atualizar o plugin" na sessão dele (a skill `
 
 | Componente | Função |
 |---|---|
-| [`kickoff`](plugins/pipeline/skills/kickoff/SKILL.md) | Prepara um projeto novo ou existente: `CLAUDE.md`, `CLAUDE.local.md`, `docs/`, `.gitignore`, hook de segredos, permissões dos agentes e grafo. |
+| [`kickoff`](plugins/pipeline/skills/kickoff/SKILL.md) | Prepara um projeto novo ou existente: `CLAUDE.md`, `CLAUDE.local.md`, `docs/`, `.gitignore`, hook de segredos e permissões dos agentes. |
 | [`manager`](plugins/pipeline/skills/manager/SKILL.md) | Conduz a entrega do tamanho ao merge, em ciclos, com duas aprovações suas; o que vale só numa situação (modo autônomo, pausa, telas, paralelo, várias sessões) está em [`references/`](plugins/pipeline/skills/manager/references/), lido quando ela ocorre. |
 | [`validar`](plugins/pipeline/skills/validar/SKILL.md) | Percorre com você, item a item, as decisões tomadas em seu nome (lista VALIDAR) e grava cada resposta. |
 | [`atualizar`](plugins/pipeline/skills/atualizar/SKILL.md) | Atualiza o plugin num projeto num ponto de parada da entrega e, na sessão nova, acrescenta as linhas novas dos templates e aplica as notas de cada versão pulada. |
@@ -63,12 +63,12 @@ Para atualizar um projeto, peça "atualizar o plugin" na sessão dele (a skill `
 | [`ledger.py`](plugins/pipeline/skills/manager/ledger.py) | Registro da entrega: o que cada agente concluiu, o que falta, itens adiados e métricas. |
 | [`gate.py`](plugins/pipeline/skills/manager/gate.py) | Checagem final local, sem agente: READY ou NOT READY e o relatório de qualidade. |
 | [`general.md`](plugins/pipeline/checklists/general.md) | Princípios gerais de qualidade que o `dev` e o `reviewer` aplicam: o índice e três fatias (dados e entradas do servidor; contas; servidor, navegador, telas, tokens e builds), cada uma lida quando o produto tem o que os itens dela tratam. |
-| [`agents-shared.md`](plugins/pipeline/checklists/agents-shared.md) | O que `dev` e `qa` têm em comum (grafo de conhecimento, servidor de dev, processos que iniciam); o `reviewer` usa só o grafo. |
+| [`agents-shared.md`](plugins/pipeline/checklists/agents-shared.md) | O que `dev` e `qa` têm em comum (servidor de dev, processos que iniciam). |
 | [`spec-checklist.md`](plugins/pipeline/skills/manager/templates/spec-checklist.md) | O que toda spec e todo plano respondem, com o pré-mortem de cada escrita. |
 | [Hook de segredos e UTF-8](plugins/pipeline/hooks/pre-commit-secret-scan.py) | `pre-commit` do git que bloqueia `.env`, linhas com cara de segredo e linhas adicionadas que não são UTF-8 ou têm caracteres invisíveis; o docstring explica falso positivo e a correção. |
 | [Hook de retomada](plugins/pipeline/hooks/session-start.py) | `SessionStart` (toda sessão): depois de compactação ou retomada, devolve ao manager o `status` do ledger; em toda sessão, mantém o `pipeline.home` do repositório na versão do plugin em uso. Registrado em [`hooks.json`](plugins/pipeline/hooks/hooks.json). |
 | [Guarda do Bash](plugins/pipeline/hooks/bash-guard.py) | `PreToolUse` em `Bash`: nega pular o `pre-commit` (`--no-verify`, `-n`, `core.hooksPath`), o que chega na branch principal no modo autônomo e o comando da linha "Rodar em desenvolvimento" do `CLAUDE.md` do projeto fora do modo background. |
-| [Andamento](plugins/pipeline/hooks/andamento.js) | Mod do Claude Code: com entrega aberta, uma linha em português acima do prompt com o ciclo do plano, as tarefas em andamento, o que vem depois e quantas tarefas e ciclos faltam; `/andamento` abre o painel com a tabela do ciclo e as outras frentes; grava o uso da conta ao lado do ledger, para o manager economizar ou pausar. |
+| [Andamento](plugins/pipeline/hooks/andamento.js) | Mod do Claude Code: com entrega aberta, até três linhas em português acima do prompt: o ciclo do plano e quantas tarefas e ciclos faltam; as tarefas em andamento, os vereditos e o que vem depois; e, em destaque, as decisões que esperam você; `/andamento` abre o painel com a tabela do ciclo e as outras frentes; grava o uso da conta ao lado do ledger, para o manager economizar ou pausar. |
 
 ## Atualização
 
