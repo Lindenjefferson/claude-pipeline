@@ -31,7 +31,7 @@ Gather what the choice depends on, then lay out the options; the choice stays wi
 - **2 or 3 candidate stacks**, each with its pros and cons against those constraints, and a suggestion with the reason.
 - **Current versions**, checked in each one's official source with `WebFetch` (release page, package registry), never from memory, with the date you read them.
 - **Verification each one needs**: the test runner, the linter and type check, the interface test tool when there are screens; they become the project's "Comandos" once the user chooses.
-- **Claude Code extensions that would help it**: an official plugin for its language or tests, an MCP server for its data store or services. Name each with its source, as a suggestion: it is installed only if the user agrees and it passes "Third-party extensions" in `${CLAUDE_PLUGIN_ROOT}/checklists/general.md`.
+- **Claude Code extensions that would help it**: an official plugin for its language or tests, an MCP server for its data store or services. Name each with its source, as a suggestion (the manager runs `claude-code-setup` on the real code once the stack is scaffolded): it is installed only if the user agrees and it passes "Third-party extensions" in `${CLAUDE_PLUGIN_ROOT}/checklists/general.md`.
 
 ## Build the knowledge graph from the base
 The graph is built once from the raw sources, then queried by every later step so nobody re-reads the sources from scratch.
