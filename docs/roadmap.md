@@ -1,17 +1,22 @@
 # Roadmap do plugin `pipeline`
 
-O que falta fazer e o que cada versão entregou; o que muda para quem atualiza está em [`plugins/pipeline/UPGRADING.md`](../plugins/pipeline/UPGRADING.md). Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.9.4) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
+O que falta fazer e o que cada versão entregou; o que muda para quem atualiza está em [`plugins/pipeline/UPGRADING.md`](../plugins/pipeline/UPGRADING.md). Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.9.5) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
 ## Backlog
 
 - **Guarda do Bash também na ferramenta PowerShell** (2.7.2): no Windows a sessão principal tem a ferramenta PowerShell, que o `bash-guard.py` não vê (os agentes não a têm). Entra com um leitor das aspas do PowerShell, testado. Esforço: P.
 - **VALIDAR das entregas empilhadas na faixa** (revisão da 2.8): a faixa e o `/andamento` contam só o ledger atual; os itens de uma entrega anterior empilhada (`ledger-<slug>.jsonl`) não aparecem, e um arquivo desses não diz se é entrega empilhada à espera ou já encerrada. Entra se o `start --archive` passar a registrar isso. Esforço: P.
+- **`claude-security` no lugar do `security-review` nativo** (decisão do usuário: plugin oficial da Anthropic adotado em vez de reinventar; analisado pelo Fable; traz o item que estava em espera desde a 2.8.1, o verificador que tenta refutar cada achado, e a cobertura acumulada): varredura das mudanças da branch com um painel de três verificadores por achado (sobrevive com dois votos, a severidade só desce), defeito anterior à mudança separado, relatório com cobertura, SARIF e carimbo da revisão; só lê o código, sem hook por edição nem no fim da sessão. A proposta:
+  - dependência declarada, só nas entregas de domínio sensível, no lugar do `security-review` do passo 6 (nunca os dois); o `reviewer` segue com a passada de segurança de cada ciclo;
+  - o detalhe numa referência do manager, `references/security.md`: o pedido no nível médio (baixo no modo econômico), a severidade traduzida para Critical, Important e Minor como na 2.8.1, o relatório em `--report`, o que já existia antes da mudança em `defer`, e o texto dos achados nunca copiado para o relatório de qualidade;
+  - o ledger registra a varredura com `add --agent reviewer --task security`, contada à parte, com teste primeiro;
+  - no modo autônomo ela espera o usuário voltar (o plugin só aceita a confirmação de uma pessoa) e fica como `note --validar`.
+  Bloqueios a resolver antes: ele chama `python3` pelo nome, e no Windows deste computador `python3` é o atalho da Microsoft Store (desligar o alias de execução, ou ter um `python3` de verdade no PATH; o kickoff passaria a conferir); e ele roda só pela ferramenta Workflow ("Dynamic workflows" no `/config`). Licença proprietária: depender, nunca copiar o texto. Custo alto (vários pesquisadores e três verificadores em esforço alto por achado), por isso só no domínio sensível. Número: achados Critical e Important que ele acha depois do último ciclo e as rodadas que abrem; se duas entregas sensíveis não mostrarem nada além do `reviewer`, a etapa sai. Esforço: M.
 
 ### Em espera (voltam com um sinal)
 
 - **"Comandos" propostos pelo kickoff a partir do manifesto do projeto** (pedido do usuário: deixar o técnico automático): ler o que o projeto declara (scripts do gerenciador de pacotes, Makefile ou equivalente), propor as linhas e medir o tempo de cada comando; volta com o próximo projeto novo, onde dá para medir.
 - **`feedback-plugin` gravando as lições no formato do filtro** (evidência, custo no ledger, número que deve mudar), para a sessão do plugin só triar; volta quando o volume de lições por entrega justificar.
-- **Verificador que tenta refutar cada achado de segurança, e cobertura acumulada no gate** (2.8.1): um agente a mais por achado e uma mudança grande no gate; volta se uma entrega mostrar achado falso ou caminho não examinado.
 - **Nome do ciclo do plano no `status`** (CF, depois da 2.8.7): o `status` diz "cycle 3" onde o `scope` gravou "Ciclo R" (a linha de andamento já mostra o nome); volta se o número causar um erro de range ou uma rodada a mais.
 - **Revisão de design sobre as capturas do `dev`, antes de integrar** (CF, depois da 2.8.7, decisão do usuário): custa ~190k tokens por tarefa com tela, e a 2.8.8 atacou a mesma causa; volta se uma revisão de design ainda abrir uma rodada por defeito que a própria tarefa criou.
 - **Relatório do `dev` conferido num hook `SubagentStop`** (os hooks `TeammateIdle` e `TaskCompleted` do [Agent Teams](https://code.claude.com/docs/en/agent-teams)): o "Check the report" do passo 4.1 viraria checagem; volta se um relatório incompleto for devolvido duas vezes ou integrado sem a evidência. Esforço: P.
@@ -24,6 +29,8 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 - **Revisão externa no gate** (2.6.0): manda o diff para fora e exige outra CLI e uma chave de LLM; o `reviewer` já cobre, e o gate é sem LLM de propósito.
 - **Custo da entrega com o `ccusage`** (pedido do usuário): ele estima dólares pelo preço da API; numa assinatura o que limita é o uso da janela e da semana, que o próprio Claude Code dá ao mod desde a 2.8.10.
 - **Levar a entrega em andamento para outra máquina** (exportar o ledger e os relatórios): decisão do usuário, que só troca de computador entre etapas.
+- **`code-simplifier`** (plugin oficial, analisado pelo Fable): o prompt traz regras de JavaScript e React, é um agente que edita sozinho fora do `dev`, sem testes nem commit, e repete o Refactor do `dev`, o `cleanup` e a Simplicity do `reviewer`; o Claude Code já tem o `/simplify`.
+- **`claude-md-management`** (plugin oficial, analisado pelo Fable): reescreve o `CLAUDE.md` no formato dele, que o gate, os hooks e o kickoff não leem (uma tabela em "Comandos" deixaria o gate sem testes); grava lições sem passar pela checagem do passo 4.5; procura `.claude.local.md`, nome que o Claude Code não usa.
 - **WSL2 para o modo multi-instância** (2.8): é escolha de ambiente, não do plugin, que roda no Linux desde a 2.8.6; não resolve o gargalo medido (a suíte longa e, no CF, a memória, que o WSL disputa).
 - **Tirar do scan de segredos os lock files de outros ecossistemas** (2.8.5): nenhum falso positivo achado, e a exclusão seria um desvio que um agente controla.
 - **Liberar `publish` local no `never_allow` do kickoff** (2.8.5): o custo é uma pergunta ao usuário, que decide.
@@ -35,6 +42,20 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 - **Chat em grupo com moderador** (Maestro): a conversa não passa pelo ledger.
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
+
+## 2.9.5 — extensões do Claude Code que acompanham o projeto (PR #38)
+
+Origem: pedido do usuário, sugerir o `claude-code-setup` (o plugin oficial da Anthropic que analisa o código e recomenda hooks, skills, servidores MCP, subagentes e comandos, sem escrever nada) e tê-lo como dependência, como o `superpowers` e o `frontend-design`. Na conversa apareceu uma lacuna: as extensões escolhidas no começo de um projeto ficam no escopo `local`, que não vai para o git, e o passo 9 do kickoff não as reinstalava numa máquina nova.
+
+- [x] **`claude-code-setup` como dependência declarada**: o kickoff confere que ele está habilitado num projeto novo e diz como instalar. O manager roda a skill `claude-automation-recommender` sobre o código logo que a primeira tarefa monta a stack (antes disso não há código para analisar), mostra as recomendações junto com as extensões que a spec registrou, e o usuário escolhe; cada uma passa pela checagem de terceiros antes de instalar.
+- [x] **Extensões no `CLAUDE.md` do projeto**: a seção "Preparar uma máquina" ganha a linha "Extensões do Claude Code" (cada `plugin@marketplace` e o escopo; os servidores MCP do projeto ficam no `.mcp.json`, que vem no clone), que o manager preenche ao instalar.
+- [x] **Máquina nova reinstala o que foi escolhido**: o passo 9 do kickoff instala as extensões da linha, na mesma confirmação dos outros comandos; não faz nova recomendação, que gastaria uso para repetir o que o usuário já decidiu.
+
+O prompt cresceu: o kickoff ganhou 54 palavras (de 2365 para 2419; a conferência das dependências ficou mais curta), o manager 47 (de 3769 para 3816), o template 30 e o `discovery` 13.
+
+Números que esta versão deve mudar (nas notas da preparação e do começo de projeto, decisão do usuário): extensões do Claude Code que faltam numa máquina nova depois do kickoff passam a zero; extensões instaladas no começo de um projeto e removidas depois mostram se o recomendador acerta.
+
+O `claude-code-setup` fica declarado, e não opcional como o graphify: uma dependência declarada é instalada junto pelo Claude Code, sem trabalho para o usuário, e o custo é só a descrição da skill em cada sessão (decisão do usuário, como o `frontend-design`). A revisão de fechamento (Fable) achou 3 Important e 6 Minor, todos corrigidos: o passo 9 instalaria qualquer plugin do `CLAUDE.md` clonado, de qualquer marketplace e escopo (agora só do marketplace já adicionado na máquina, no escopo do `pipeline`, listado à parte na confirmação); a linha das extensões não estava entre os arquivos que o manager edita; e a nota de atualização mandava instalar à mão o que o Claude Code instala sozinho.
 
 ## 2.9.4 — simplicidade e confirmar o entendimento antes de codar (PR #37)
 
