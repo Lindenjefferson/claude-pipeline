@@ -35,6 +35,7 @@ O que um computador novo precisa para trabalhar no projeto, depois de clonar e i
 
 - Pré-requisitos (cada ferramenta, a versão, o comando que a confere e, por sistema, o que a instala ou abre): _(ex.: a versão do runtime, o comando que a mostra e o instalador do Windows e do Linux; um serviço que precisa estar aberto e como abri-lo)_
 - Arquivos de ambiente (de qual exemplo copiar e de onde vêm os valores: o comando que grava o arquivo com eles, do serviço onde o projeto roda ou de um serviço local já de pé, ou os que o usuário preenche à mão): _(ou "nenhum")_
+- Extensões do Claude Code que o projeto usa (cada `plugin@marketplace` e o escopo; os servidores MCP do projeto ficam no `.mcp.json`, que vem no clone): _(ou "nenhuma")_
 - Serviços locais (o que subir antes de trabalhar): _(comando, ou "nenhum")_
 - Prova de que a máquina está pronta: _(comando curto, como os testes rápidos e o status dos serviços)_
 

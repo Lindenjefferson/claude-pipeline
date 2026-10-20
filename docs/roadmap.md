@@ -1,6 +1,6 @@
 # Roadmap do plugin `pipeline`
 
-O que falta fazer e o que cada versão entregou; o que muda para quem atualiza está em [`plugins/pipeline/UPGRADING.md`](../plugins/pipeline/UPGRADING.md). Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.9.4) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
+O que falta fazer e o que cada versão entregou; o que muda para quem atualiza está em [`plugins/pipeline/UPGRADING.md`](../plugins/pipeline/UPGRADING.md). Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.9.5) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
 ## Backlog
 
@@ -35,6 +35,18 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 - **Chat em grupo com moderador** (Maestro): a conversa não passa pelo ledger.
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
+
+## 2.9.5 — extensões do Claude Code que acompanham o projeto (PR #38)
+
+Origem: pedido do usuário, sugerir o `claude-code-setup` (o plugin oficial da Anthropic que analisa o código e recomenda hooks, skills, servidores MCP, subagentes e comandos, sem escrever nada) e tê-lo como dependência, como o `superpowers` e o `frontend-design`. Na conversa apareceu uma lacuna: as extensões escolhidas no começo de um projeto ficam no escopo `local`, que não vai para o git, e o passo 9 do kickoff não as reinstalava numa máquina nova.
+
+- [x] **`claude-code-setup` como dependência declarada**: o kickoff confere que ele está habilitado num projeto novo e diz como instalar. O manager roda a skill `claude-automation-recommender` sobre o código logo que a primeira tarefa monta a stack (antes disso não há código para analisar), mostra as recomendações junto com as extensões que a spec registrou, e o usuário escolhe; cada uma passa pela checagem de terceiros antes de instalar.
+- [x] **Extensões no `CLAUDE.md` do projeto**: a seção "Preparar uma máquina" ganha a linha "Extensões do Claude Code" (cada `plugin@marketplace` e o escopo; os servidores MCP do projeto ficam no `.mcp.json`, que vem no clone), que o manager preenche ao instalar.
+- [x] **Máquina nova reinstala o que foi escolhido**: o passo 9 do kickoff instala as extensões da linha, na mesma confirmação dos outros comandos; não faz nova recomendação, que gastaria uso para repetir o que o usuário já decidiu.
+
+O prompt cresceu: o kickoff ganhou 53 palavras (de 2365 para 2418), o manager 31 (de 3769 para 3800), o template 28 e o `discovery` 13.
+
+Números que esta versão deve mudar (nas notas da preparação): extensões do Claude Code que faltam numa máquina nova depois do kickoff passam a zero.
 
 ## 2.9.4 — simplicidade e confirmar o entendimento antes de codar (PR #37)
 
