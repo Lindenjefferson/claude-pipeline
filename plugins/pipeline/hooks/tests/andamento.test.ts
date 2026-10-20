@@ -110,6 +110,8 @@ test('the band names a cycle by its plan name, shows a verdict only when no step
 test('a plan cycle named "Ciclo 3" is not called "ciclo Ciclo 3", and its position reads as an ordinal', () => {
   const named = { ...STATUS, scope: { ...STATUS.scope, current: 'Ciclo 3', position: 4, total: 4 } }
   expect(shown(named)[0]).toMatch(/^etapa 5, ciclo 3 \(4º de 4\), /)
+  const plan = { ...STATUS, scope: { ...STATUS.scope, cycles: [{ cycle: 'Ciclo 3', tasks: ['T3.1'], left: ['T3.1'] }] } }
+  expect(paneLines(plan, [], NOW)).toContain('- ciclo 3: T3.1')
   const same = { ...STATUS, scope: { ...STATUS.scope, current: 'ciclo 2' } }
   expect(shown(same)[0]).toMatch(/^etapa 5, ciclo 2 de 3, /)
 })
@@ -365,7 +367,7 @@ test('economy shows in the title, and a wait puts the reset first in "depois", i
 
 test('the pane says how much of each window the account used', () => {
   const lines = paneLines({ ...STATUS, usage: { ...USAGE, windows: { ...USAGE.windows, five_hour: { percent: 82.5, resets_at: null } } } }, [], NOW)
-  expect(lines).toContain('Uso da conta: 5 h 82% · semana 41%')
+  expect(lines).toContain('Uso da conta: 5 h 82%, semana 41%')
 })
 
 test('with no usage, or an older ledger without it, the band and the pane are unchanged', () => {
