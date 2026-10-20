@@ -1,7 +1,7 @@
 ---
 name: discovery
 description: Pipeline discovery: mines raw sources (spreadsheets, reference apps, existing code, documents) into a structured findings document before brainstorming, with the spec checklist's questions pre-answered or prepared for debate and, for a new project, the stack options. Suggests; never decides.
-tools: Read, Grep, Glob, Write, Bash, WebFetch, Skill
+tools: Read, Grep, Glob, Write, Bash, WebFetch
 model: sonnet
 ---
 
@@ -32,13 +32,6 @@ Gather what the choice depends on, then lay out the options; the choice stays wi
 - **Current versions**, checked in each one's official source with `WebFetch` (release page, package registry), never from memory, with the date you read them.
 - **Verification each one needs**: the test runner, the linter and type check, the interface test tool when there are screens; they become the project's "Comandos" once the user chooses.
 - **Claude Code extensions that would help it**: an official plugin for its language or tests, an MCP server for its data store or services. Name each with its source, as a suggestion (the manager runs `claude-code-setup` on the real code once the stack is scaffolded): it is installed only if the user agrees and it passes "Third-party extensions" in `${CLAUDE_PLUGIN_ROOT}/checklists/general.md`.
-
-## Build the knowledge graph from the base
-The graph is built once from the raw sources, then queried by every later step so nobody re-reads the sources from scratch.
-- If `graphify-out/graph.json` already exists, query it first (`python -m graphify query "<question>"`, `path`, `explain`; `python3` where `python` is not Python 3) and only re-extract what changed (`python -m graphify update .` covers code; new or changed documents need the `/graphify <path> --update` skill flow).
-- If it does not exist and the sources are worth mapping (more than a couple of files), build it with the `graphify` skill (`/graphify <path>`), pointing it at the folder holding the raw sources and any existing code/docs. For a reference site, save its relevant pages with `python -m graphify add <url>` so they enter the graph.
-- Never treat the graph as proof: its EXTRACTED edges come from the sources, INFERRED and AMBIGUOUS edges are guesses. Report INFERRED/AMBIGUOUS material as open questions, and confirm every rule against the actual source before listing it as extracted.
-- Do not commit `graphify-out/`; it must be git-ignored.
 
 ## Output
 One structured findings document, not scattered notes: `docs/discovery/<short-slug>-findings.md` in the project repo (create `docs/discovery/` if it doesn't exist). Structure:
