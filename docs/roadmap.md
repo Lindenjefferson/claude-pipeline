@@ -1,6 +1,6 @@
 # Roadmap do plugin `pipeline`
 
-O que falta fazer e o que cada versão entregou; o que muda para quem atualiza está em [`plugins/pipeline/UPGRADING.md`](../plugins/pipeline/UPGRADING.md). Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.9.5) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
+O que falta fazer e o que cada versão entregou; o que muda para quem atualiza está em [`plugins/pipeline/UPGRADING.md`](../plugins/pipeline/UPGRADING.md). Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.9.6) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
 ## Backlog
 
@@ -42,6 +42,16 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 - **Chat em grupo com moderador** (Maestro): a conversa não passa pelo ledger.
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
+
+## 2.9.6 — faixa de andamento legível
+
+Origem: pedido do usuário, a faixa da etapa 5 do CF cortava o fim ("6 decisões espera…") e dizia "ciclo Ciclo 3"; a crítica de interface veio da skill `frontend-design`.
+
+- [x] **Uma linha por assunto, sem corte**: onde a entrega está e quanto falta; o que roda, os vereditos e o que vem depois; e as decisões VALIDAR que esperam o usuário, em amarelo e só quando há. Cada linha quebra em vez de cortar, e só a primeira esmaece enquanto o Claude trabalha.
+- [x] **Cor e símbolo só onde informam**: ● o que roda, ✓ e ✗ os vereditos, vermelho para reprovação, verde para "pronto para o gate"; o que está em ordem fica apagado.
+- [x] **Texto de quem lê**: "ciclo 3 (4º de 4)" para um ciclo chamado "Ciclo 3", "modo autônomo", "limpeza" e "correção N" no lugar de `cleanup` e `fix-N`; vírgulas no lugar da fila de "·".
+
+Ficou de fora: o título com acento (o ledger só tem o slug; um nome de exibição pediria uma linha a mais no prompt do manager, só por estética) e uma esteira completa de etapas (dev, revisão, qa, gate), que repetiria no mod a regra de fechar o ciclo, que mora no `ledger.py`. Nenhum prompt mudou. Número: nenhum do ledger, é apresentação; volta à mesa se o feedback de uma entrega disser que a faixa escondeu algo.
 
 ## 2.9.5 — extensões do Claude Code que acompanham o projeto (PR #38)
 
