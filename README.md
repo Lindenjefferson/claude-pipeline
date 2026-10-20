@@ -36,6 +36,8 @@ Requisitos: Claude Code com plugins (a linha de andamento e o `/andamento` pedem
 claude plugin marketplace add Lindenjefferson/claude-pipeline
 
 # em cada projeto: habilitado só nele, nunca globalmente (o escopo local não vai para o git)
+# num projeto novo, basta a pasta vazia (mkdir meu-projeto): o kickoff faz o git init e prepara o resto
+cd meu-projeto
 claude plugin install pipeline@linden-plugins --scope local
 ```
 
