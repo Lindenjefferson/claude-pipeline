@@ -65,9 +65,13 @@ function waiting(r) {
 }
 
 // A plan may name its cycles "Ciclo 3": the word is said once.
+function cycleName(name) {
+  return String(name).replace(/^ciclo\s+/i, '')
+}
+
 function title(r) {
   const scope = r.scope
-  const name = scope && String(scope.current).replace(/^ciclo\s+/i, '')
+  const name = scope && cycleName(scope.current)
   const cycle = !scope ? `ciclo ${r.cycle}`
     : name === String(scope.position) ? `ciclo ${scope.position} de ${scope.total}`
     : `ciclo ${name} (${scope.position}º de ${scope.total})`
@@ -105,7 +109,7 @@ function usageLine(usage) {
   const windows = Object.entries((usage && usage.windows) || {})
   if (!windows.length) return null
   windows.sort(([a], [b]) => (order.includes(a) ? order.indexOf(a) : 9) - (order.includes(b) ? order.indexOf(b) : 9))
-  return `Uso da conta: ${windows.map(([kind, w]) => `${(WINDOW[kind] || [kind])[0]} ${Math.floor(w.percent)}%`).join(' · ')}`
+  return `Uso da conta: ${windows.map(([kind, w]) => `${(WINDOW[kind] || [kind])[0]} ${Math.floor(w.percent)}%`).join(', ')}`
 }
 
 function left(scope) {
@@ -176,7 +180,7 @@ export function paneLines(r, fronts, now, failure = null) {
     if (r.scope && r.scope.tasks_left) {
       lines.push(`${r.scope.tasks_left === 1 ? 'Falta' : 'Faltam'} ${left(r.scope)}:`)
       for (const cycle of r.scope.cycles) {
-        if (cycle.left.length) lines.push(`- ciclo ${cycle.cycle}: ${cycle.left.join(', ')}`)
+        if (cycle.left.length) lines.push(`- ciclo ${cycleName(cycle.cycle)}: ${cycle.left.join(', ')}`)
       }
       lines.push('')
     }
