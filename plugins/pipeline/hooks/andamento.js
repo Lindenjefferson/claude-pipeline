@@ -1,7 +1,8 @@
 // Mod (Claude Code v2.1.287 or later): the delivery's progress, drawn from `ledger.py status --json`, in Portuguese
 // (the user reads it; the ledger's own text stays in English for the manager). While the ledger of this worktree has
-// a delivery, one line above the prompt says the plan cycle, whether it is paused, the tasks in flight with their
-// time, a verdict no next step covers, what comes next, the tasks and cycles left and the VALIDAR items waiting.
+// a delivery, rows above the prompt say, each wrapping instead of cutting: the plan cycle, whether it is paused and
+// the tasks and cycles left; the tasks in flight with their time, a verdict no next step covers and what comes next;
+// and the VALIDAR items waiting, in the warning color. Only the first row dims while Claude works.
 // /andamento opens a pane with what is left per cycle, the current cycle's runs, the next steps, the earlier cycles
 // and the other fronts (each worktree with a ledger of its own), and answers in text where nothing draws. Every rule
 // stays in ledger.py (its steps and scope): this file only lays them out. It checks the ledger file every 5 s and
@@ -10,13 +11,20 @@
 // the account's rate-limit windows to usage.json beside the ledger (on session.measure, only when they changed;
 // advice for ledger.py, whose `usage` it shows: econômico, the wait for a reset, the pane's usage line). A ledger.py
 // failure (a broken ledger, no Python 3) shows in the band and the pane instead of passing for "no delivery". Other
-// mods' band content is kept below the line.
+// mods' band content is kept below the rows.
 
 const PANE = 'andamento'
 const POLL_MS = 5000
 const REFRESH_MS = 60000
 const IDLE_REFRESH_MS = 300000
 const AGENT = { reviewer: 'revisão', qa: 'qa' }
+const GAP = '   '
+// How each part of the band is drawn: the quiet ones dim, color only where something runs, failed or waits for you.
+const TONE = {
+  title: { weight: 'bold' }, quiet: { dimColor: true }, next: {},
+  running: { color: 'claude', weight: 'bold' }, done: { dimColor: true }, failed: { color: 'error' },
+  ready: { color: 'success', weight: 'bold' }, you: { color: 'warning', weight: 'bold' },
+}
 
 let report = null
 let failure = null
@@ -56,13 +64,22 @@ function waiting(r) {
   return (r.validar || []).filter((item) => typeof item === 'object' && item.decision === null)
 }
 
+// A plan may name its cycles "Ciclo 3": the word is said once.
 function title(r) {
   const scope = r.scope
+  const name = scope && String(scope.current).replace(/^ciclo\s+/i, '')
   const cycle = !scope ? `ciclo ${r.cycle}`
-    : scope.current === String(scope.position) ? `ciclo ${scope.position} de ${scope.total}`
-    : `ciclo ${scope.current} (${scope.position} de ${scope.total})`
-  return [String(r.slug).replace(/[-_]+/g, ' '), cycle, ...(r.autonomous ? ['autônomo'] : []),
-          ...(r.usage && r.usage.economy ? ['econômico'] : []), ...(r.paused ? ['pausada'] : [])].join(' · ')
+    : name === String(scope.position) ? `ciclo ${scope.position} de ${scope.total}`
+    : `ciclo ${name} (${scope.position}º de ${scope.total})`
+  const modes = [...(r.autonomous ? ['autônomo'] : []), ...(r.usage && r.usage.economy ? ['econômico'] : [])]
+  return [String(r.slug).replace(/[-_]+/g, ' '), cycle, ...(modes.length ? [`modo ${listed(modes)}`] : []),
+          ...(r.paused ? ['pausada'] : [])].join(', ')
+}
+
+// The plan's task ids as they are; the two the manager names itself, in words.
+function taskName(task) {
+  const fix = /^fix-(\d+)$/.exec(task)
+  return task === 'cleanup' ? 'limpeza' : fix ? `correção ${fix[1]}` : task
 }
 
 const WINDOW = { five_hour: ['5 h', 'da janela de 5 horas'], seven_day: ['semana', 'da semana'] }
@@ -100,7 +117,7 @@ function said(step) {
   // a step with a task is a round of the spec or plan review loop, before the code
   const agent = step.task ? `revisão ${step.task === 'spec' ? 'da spec' : 'do plano'}` : AGENT[step.agent] ?? step.agent
   switch (step.step) {
-    case 'dev': return step.task ? `dev na ${step.task} (voltou ${step.verdict})` : 'primeira tarefa do dev'
+    case 'dev': return step.task ? `dev na ${taskName(step.task)} (voltou ${step.verdict})` : 'primeira tarefa do dev'
     case 'reviewer': return 'revisão'
     case 'qa': return step.rerun ? 'qa de novo nos cenários da correção' : 'qa'
     case 'fix': return `correção (${plural(step.open, 'achado', 'achados')} ${step.agent === 'qa' ? 'do qa' : 'da revisão'})`
@@ -113,28 +130,36 @@ function said(step) {
   }
 }
 
-export function bandLine(r, now) {
-  const parts = [title(r)]
-  const running = Object.entries(r.dispatched || {}).map(([task, at]) => `na ${task} há ${since(at, now)}`)
-  if (running.length) parts.push(`dev ${listed(running)}`)
+export function rowText(row) {
+  return row.map((part) => part.text).join(GAP)
+}
+
+// The band's rows, each a list of {text, tone}, a row with nothing left out: where the delivery is and what is left;
+// what runs, a verdict no step covers and what comes next; the VALIDAR items that wait for the user.
+export function bandRows(r, now) {
+  const where = [{ text: title(r), tone: 'title' }]
+  if (r.scope && r.scope.tasks_left) {
+    where.push({ text: `${r.scope.tasks_left === 1 ? 'falta' : 'faltam'} ${left(r.scope)}`, tone: 'quiet' })
+  }
+  const current = Object.entries(r.dispatched || {})
+    .map(([task, at]) => ({ text: `● dev na ${taskName(task)} há ${since(at, now)}`, tone: 'running' }))
   const steps = r.steps || []
   for (const agent of ['reviewer', 'qa']) {
     const verdict = (r[agent] || [])[0]
     if (!verdict || steps.some((step) => step.step === agent || step.agent === agent)) continue
-    parts.push(verdict.verdict === 'PASS' ? `${AGENT[agent]} ok`
-      : `${AGENT[agent]} reprovou (${plural(verdict.open, 'aberto', 'abertos')})`)
+    current.push(verdict.verdict === 'PASS' ? { text: `✓ ${AGENT[agent]}`, tone: 'done' }
+      : { text: `✗ ${AGENT[agent]} reprovou, ${plural(verdict.open, 'aberto', 'abertos')}`, tone: 'failed' })
   }
   const wait = r.usage && r.usage.wait
-  if (r.ready_for_gate) parts.push('pronto para o gate')
+  if (r.ready_for_gate) current.push({ text: '✓ pronto para o gate', tone: 'ready' })
   else if (steps.length || wait) {
     const decide = steps.filter((step) => step.step === 'decide').map((step) => step.id)
     const next = [...(wait ? [waitText(wait)] : []), ...steps.filter((step) => step.step !== 'decide').map((step) => said(step))]
-    parts.push(`depois: ${listed(decide.length ? [...next, `decidir ${listed(decide)}`] : next)}`)
+    current.push({ text: `depois: ${listed(decide.length ? [...next, `decidir ${listed(decide)}`] : next)}`, tone: 'next' })
   }
-  if (r.scope && r.scope.tasks_left) parts.push(`${r.scope.tasks_left === 1 ? 'falta' : 'faltam'} ${left(r.scope)}`)
   const items = waiting(r).length
-  if (items) parts.push(items === 1 ? '1 decisão espera você' : `${items} decisões esperam você`)
-  return parts.join(' · ')
+  const you = items ? [{ text: items === 1 ? '1 decisão espera você' : `${items} decisões esperam você`, tone: 'you' }] : []
+  return [where, current, you].filter((row) => row.length)
 }
 
 function row(cells) {
@@ -191,7 +216,7 @@ export function paneLines(r, fronts, now, failure = null) {
     lines.push('', 'Outras frentes:')
     for (const front of fronts) {
       const flying = Object.keys(front.report.dispatched || {}).length
-      lines.push(`- ${front.name}: ${title({ ...front.report, autonomous: false })} · ${flying} rodando · ` +
+      lines.push(`- ${front.name}: ${title({ ...front.report, autonomous: false })}: ${flying} rodando, ` +
                  (front.report.ready_for_gate ? 'pronto para o gate'
                    : plural((front.report.steps || []).length, 'pendente', 'pendentes')))
     }
@@ -341,15 +366,21 @@ export function register(on) {
     const { Box, Text } = $.ui.resolve(e)
     const lines = paneLines(report, fronts, await $.clock.now(), failure)
     return Box({ flexDirection: 'column', children: lines.map((line, index) =>
-      Text({ wrap: 'wrap', bold: index === 0, children: [line || ' '] })) })
+      Text({ wrap: 'wrap', ...(index === 0 ? TONE.title : {}), children: [line || ' '] })) })
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if ((!report && !failure) || e.props.hasSurvey) return next(e)
     const { Box, Text } = $.ui.resolve(e)
-    const text = report ? bandLine(report, await $.clock.now()) : `pipeline · ledger.py falhou: ${failure}`
-    const line = Text({ wrap: 'truncate-end', dimColor: e.props.isWorking, children: [text] })
+    const rows = report ? bandRows(report, await $.clock.now())
+      : [[{ text: `pipeline: ledger.py falhou: ${failure}`, tone: 'failed' }]]
+    // a row of one part takes its tone whole; a row of several sets each part apart
+    const drawn = rows.map((row, index) => Text({
+      wrap: 'wrap', ...(row.length === 1 ? TONE[row[0].tone] : {}), ...(index === 0 && e.props.isWorking ? { dimColor: true } : {}),
+      children: row.length === 1 ? [row[0].text]
+        : row.flatMap((part, at) => [...(at ? [GAP] : []), Text({ ...TONE[part.tone], children: [part.text] })]),
+    }))
     const theirs = await next(e)
-    return Box({ flexDirection: 'column', children: theirs ? [line, theirs] : [line] })
+    return Box({ flexDirection: 'column', children: theirs ? [...drawn, theirs] : drawn })
   })
 }

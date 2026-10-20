@@ -2,6 +2,7 @@
 
 Vão junto com cada versão instalada, para a skill `atualizar` lê-las no projeto. Termine a entrega em andamento, ou pause-a, antes de atualizar o plugin (a skill `atualizar` confere). Ao pular versões, leia as notas de cada uma, da mais antiga para a mais nova.
 
+- **2.9.6**: lê os ledgers da 2.9.5; nada muda nos arquivos do projeto. A faixa de andamento passa a ter até três linhas; uma sessão aberta mostra a nova depois do `/reload-plugins`.
 - **2.9.5**: lê os ledgers da 2.9.4. O plugin declara uma dependência nova, `claude-code-setup@claude-plugins-official`, que o Claude Code instala sozinho com a atualização e o `/reload-plugins`; ela só é usada num projeto novo. A seção "Preparar uma máquina" ganha a linha "Extensões do Claude Code", que o kickoff acrescenta: liste nela as extensões que o projeto usa.
 - **2.9.4**: lê os ledgers da 2.9.3 (um `add` sem `diff` conta como não medido). O `dev` pode devolver uma tarefa como `NEEDS_CONTEXT` marcado `simpler:` (o manager o registra com `add --simpler`), que o manager responde com uma linha da Errata ou leva ao usuário; o `claim` passa a gravar o head do despacho, e um `claim` antigo sem ele mede o diff como antes. Nada muda nos arquivos do projeto.
 - **2.9.3**: lê os ledgers da 2.9.2. O `CLAUDE.md` ganha a seção "Preparar uma máquina", que o kickoff acrescenta como placeholder; preencha-a, ou aceite o rascunho que o kickoff oferece a partir dos arquivos do projeto. Sem ela, numa máquina nova o kickoff só roda a linha "Instalar dependências".
