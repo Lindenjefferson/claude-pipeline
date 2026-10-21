@@ -60,7 +60,8 @@ WORKSPACE = re.compile(r"[\w./\-]*\.superpowers/[\w./\-]+")
 TEST_FILES = "arquivos de teste"
 NOT_COMMANDS = {TEST_FILES, "testes afetados"}
 INTERFACE = ("verificação de interface", "verificacao de interface")
-CRITERION = re.compile(r"(?<![\w-])AC-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*")
+CRITERION_ANY = re.compile(r"(?<![\w-])AC-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*")
+CRITERION = re.compile(CRITERION_ANY.pattern + r"(?![<{])")
 MINUTES = 15
 DAY = 24 * 60 * 60
 REPORTS = "docs/quality-reports"
@@ -245,7 +246,12 @@ def traceability(plan):
         return True, "no plan in the ledger (small work has none; otherwise record it with ledger.py plan --path)"
     if not os.path.exists(plan):
         return False, f"plan not found: {plan}"
-    ids = sorted(set(CRITERION.findall(open(plan, encoding="utf-8").read())))
+    text = open(plan, encoding="utf-8").read()
+    ids = sorted(set(CRITERION.findall(text)))
+    templates = sorted(set(CRITERION_ANY.findall(text)) - set(ids))
+    if templates:
+        print(f"warning: {plan} writes {', '.join(templates)} with a placeholder right after it, so each is an id "
+              "template, not a criterion, and the gate traces no test for it", flush=True)
     patterns = {item: re.compile(r"(?<![A-Za-z0-9-])" + "[-_.]".join(map(re.escape, re.split(r"[-.]", item)))
                                  + r"(?![A-Za-z0-9]|[-.][A-Za-z0-9]|_\d)", re.IGNORECASE) for item in ids}
     if not ids:
