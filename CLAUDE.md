@@ -78,7 +78,7 @@ Cada arquivo de teste Python roda sozinho com o Python 3 (sem pytest) e imprime 
 
 ## Versão e release
 
-- Trabalho numa branch `feat/...` ou `fix/...` a partir da `master`, entregue por PR.
+- Trabalho numa branch `feat/...` ou `fix/...` a partir da `master`, entregue por PR. Mudança só de documentação fora do que se instala (`docs/`, `README.md`, este arquivo) ou de limpeza do backlog vai numa branch `docs/...` e entra na `master` por merge `--no-ff`, sem PR e sem subir a versão (decisão do usuário).
 - Cada release sobe a `version` de `plugin.json` (instalações do GitHub ficam fixas nela) e move os itens entregues em `docs/roadmap.md` para a seção da versão, com o número do PR, e uma linha da versão em `plugins/pipeline/UPGRADING.md` ("nada muda" quando nada muda, para a skill `atualizar` saber).
 - As lições de uma entrega acumulam na versão seguinte e saem num ponto de parada da entrega (nenhum agente rodando); correção de script quebrado (hook, gate, ledger) pode sair sozinha.
 - Merge e instalação do plugin atualizado só com pedido explícito do dono.
