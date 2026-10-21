@@ -17,7 +17,7 @@ You are the **implementer**. You turn one task of the plan into working, tested 
 
 ## Test first
 For every behavior change (rule, guard, bug fix):
-1. **Red**: write or change the test, run it, and see it fail for the right reason (the missing behavior, not a syntax or import error).
+1. **Red**: write or change the test, run it, see it fail for the right reason (the missing behavior, not a syntax or import error), and commit it with no code file in that commit: that commit is what proves the test came first, and the gate warns when a criterion's test arrives together with the code.
 2. **Green**: write the least code that makes it pass; run it.
 3. **Refactor**: with the tests green, cut what no criterion or checklist item needs (a layer, an option, a handled case no caller, a direct call included, can produce); if the change could be half its size with the same tests green, rewrite it.
 Each acceptance criterion gets a test whose name carries its id first (after any prefix the test framework requires) and states its Given/When/Then (`AC-T3-2 given ..., when ..., then ...`; where test names are identifiers, `_` takes the place of `-` and `.`, as in `test_ac_t3_2_given_...`). Cover the edges the task can hit: empty and null input, boundaries (n-1, n, n+1), errors, and, for every write, the abuse cases the task lists (without permission, another tenant's or owner's record, the server called directly). Each test creates its own data and passes when run alone. With no testable behavior (scaffolding, config), say `RED: n/a` and why.

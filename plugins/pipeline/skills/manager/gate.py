@@ -23,7 +23,10 @@ Windows, and cmd.exe with a warning only when there is none; bash, else sh, else
 "Tempo máximo" line of that section (15 by default; a value that is no number of minutes up to a day is a warning;
 past the limit the command and, outside Windows, the processes it started are stopped); the commands changed no
 tracked file; and no secret or .env file is added anywhere in <base>..HEAD, the whole history that a push would send.
-A check that does not apply is SKIP with the reason; only Testes is required. When the "Comandos" section differs
+A check that does not apply is SKIP with the reason; only Testes is required. With the test files declared, the gate
+also warns when a criterion's test first appeared in a commit that also changed code, naming the criterion and that
+commit: written first, the test comes in a commit of its own (the dev commits it before the code). The warning does
+not change the verdict. When the "Comandos" section differs
 from the one at <base>, the gate prints the difference as a warning (and the report shows it) and still runs the
 branch's commands. A "Comandos" line labeled Testes, Tests or Test plus other words (not "Testes afetados") is no
 gate command: it is a warning (and the report lists it) to name it "Testes (<name>)". Prints READY or NOT READY and
@@ -241,7 +244,42 @@ def artifacts(plan):
     return True, ""
 
 
-def traceability(plan):
+def born_with_code(base, plan, ids, patterns, tests):
+    """Each criterion whose test first appeared in a commit that also changed code, with that commit: written first,
+    the test comes in a commit of its own. Needs the declared test files to tell a test from the code it covers."""
+    def is_test(name):
+        return any(regex.match(name) for regex in tests)
+
+    def counts(name):
+        return name not in (plan, LESSONS, SECRETS_ALLOW) and not name.startswith(REPORTS + "/")
+
+    commits, out = [], git("-c", "core.quotePath=false", "log", "--reverse", "--no-merges", "--format=commit %H",
+                           "--name-only", f"{base}..HEAD")[1]
+    for line in out.replace("\r", "").split("\n"):
+        if re.fullmatch(r"commit [0-9a-f]{40}", line):
+            commits.append((line.split()[1], []))
+        elif line and commits:
+            commits[-1][1].append(line)
+    found, left = [], set(ids)
+    for sha, names in commits:
+        kinds = {is_test(name) for name in names if counts(name)}
+        if not left or True not in kinds:
+            continue
+        where = ""
+        for line in git("-c", "core.quotePath=false", "show", "-U0", "--no-prefix", "--format=",
+                        sha)[1].replace("\r", "").split("\n"):
+            if line.startswith("+++ "):
+                where = line[len("+++ "):].strip()
+            elif line.startswith("+") and where and is_test(where):
+                for item in sorted(left):
+                    if patterns[item].search(line):
+                        left.discard(item)
+                        if kinds == {True, False}:
+                            found.append((item, sha[:7]))
+    return found
+
+
+def traceability(plan, base=""):
     if not plan:
         return True, "no plan in the ledger (small work has none; otherwise record it with ledger.py plan --path)"
     if not os.path.exists(plan):
@@ -258,6 +296,7 @@ def traceability(plan):
         return False, f"{plan} lists no acceptance-criterion ids (AC-...)"
     globs = next((value.split() for label, value in comandos() if label_key(label) == TEST_FILES), None)
     names = [name for name in git("ls-files", "-z")[1].split("\0") if name and os.path.isfile(name)]
+    tests = []
     if globs:
         tracked, names = names, []
         for pattern in globs:
@@ -266,6 +305,7 @@ def traceability(plan):
             except re.error:
                 print(f"warning: invalid test glob '{pattern}' (Arquivos de teste in CLAUDE.md)", flush=True)
                 continue
+            tests.append(regex)
             matched = [name for name in tracked if regex.match(name)]
             if not matched:
                 print(f"warning: test glob '{pattern}' matches no tracked file (Arquivos de teste in CLAUDE.md)",
@@ -278,6 +318,12 @@ def traceability(plan):
         if missing and os.path.getsize(name) < 2_000_000:
             text = open(name, encoding="utf-8", errors="ignore").read()
             missing = [item for item in missing if not patterns[item].search(text)]
+    if tests and base:
+        late = born_with_code(base, plan, ids, patterns, tests)
+        if late:
+            print("warning: test-first not proven for "
+                  + ", ".join(f"{item} (its test came with code in {sha})" for item, sha in late)
+                  + "; a test-first commit holds only test files", flush=True)
     return not missing, ("criteria with no test: " + ", ".join(missing)) if missing else ""
 
 
@@ -503,7 +549,7 @@ def main():
 
     commands = project_commands(args.cmd)
     if ledger:
-        checks.append(("Criteria", *traceability(ledger.get("plan"))))
+        checks.append(("Criteria", *traceability(ledger.get("plan"), base)))
         checks.append(("Artifacts", *artifacts(ledger.get("plan"))))
         checks.append(("Reviewed", *reviewed(ledger)))
         checks.append(("Full suite", *full_suite(ledger, commands)))

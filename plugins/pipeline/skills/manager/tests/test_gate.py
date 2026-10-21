@@ -198,6 +198,30 @@ check("an id truncated by a placeholder is a template, not a criterion, and the 
       r.stdout)
 commit("plan.md", IDS + "## Errata\n", "docs: plan without the template")
 
+write("tests/d.test.txt", "test('AC-T1-4 given d')\n")
+write("src/d.txt", "code of d\n")
+sh("git", "add", "tests/d.test.txt", "src/d.txt")
+sh("git", "commit", "-q", "--no-verify", "-m", "feat: d and its test in one commit")
+commit("plan.md", IDS + "- AC-T1-4 Given d.\n## Errata\n", "docs: plan with T1-4")
+r = gate("--base", "main")
+warned = r.stdout.split("test-first")[1] if "test-first" in r.stdout else ""
+check("a criterion whose test was born with the code: the gate warns naming it and the commit, and only it",
+      "Criteria:   PASS" in r.stdout and "AC-T1-4" in warned and "AC-T1-1" not in warned, r.stdout)
+check("the test-first warning names the commit, so the author sees which one it was",
+      bool(re.search(r"[0-9a-f]{7}", warned)), r.stdout)
+commit("tests/e.test.txt", "test('AC-T1-5 given e')\n", "test: e before the code")
+commit("src/e.txt", "code of e\n", "feat: e")
+commit("plan.md", IDS + "- AC-T1-5 Given e.\n## Errata\n", "docs: plan with T1-5")
+r = gate("--base", "main")
+check("a criterion whose test came in a commit of its own, before the code: no warning",
+      "test-first" not in r.stdout, r.stdout)
+sh("git", "config", "diff.noprefix", "true")
+commit("plan.md", IDS + "- AC-T1-4 Given d." + chr(10) + "## Errata" + chr(10), "docs: plan with T1-4 again")
+r = gate("--base", "main")
+check("the warning does not depend on the user's diff.noprefix setting", "AC-T1-4" in r.stdout, r.stdout)
+sh("git", "config", "--unset", "diff.noprefix")
+commit("plan.md", IDS + "## Errata\n", "docs: plan back to T1-1..3")
+
 commit("CLAUDE.md", claude_md(test_files="tests/*", audit=False), "docs: audit")
 r = gate("--base", "main")
 check("a failing audit command blocks", r.returncode == 1 and "Auditoria:  FAIL" in r.stdout, r.stdout)
