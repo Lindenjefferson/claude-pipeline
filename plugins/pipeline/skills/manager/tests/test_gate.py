@@ -190,6 +190,14 @@ r = gate("--base", "main")
 check("the plan pointing only at versioned paths: Artifacts passes",
       bool(re.search(r"Artifacts:\s+PASS", r.stdout)), r.stdout)
 
+IDS = "# plan\n- AC-T1-1 Given a, When b, Then c.\n- AC-T1-2 Given x.\n- AC-T1.3 Given y.\n"
+commit("plan.md", IDS + "Write each id as AC-T<task>-<n>.\n## Errata\n", "docs: the plan writes the id template")
+r = gate("--base", "main")
+check("an id truncated by a placeholder is a template, not a criterion, and the gate warns naming it",
+      "Criteria:   PASS" in r.stdout and "id template" in r.stdout and "warning: plan.md writes AC-T " in r.stdout,
+      r.stdout)
+commit("plan.md", IDS + "## Errata\n", "docs: plan without the template")
+
 commit("CLAUDE.md", claude_md(test_files="tests/*", audit=False), "docs: audit")
 r = gate("--base", "main")
 check("a failing audit command blocks", r.returncode == 1 and "Auditoria:  FAIL" in r.stdout, r.stdout)
