@@ -1,6 +1,7 @@
 // Mod (Claude Code v2.1.287 or later): the delivery's progress, drawn from `ledger.py status --json`, in Portuguese
 // (the user reads it; the ledger's own text stays in English for the manager). While the ledger of this worktree has
-// a delivery, rows above the prompt say, each wrapping instead of cutting: the plan cycle, whether it is paused and
+// a delivery, rows above the prompt, opened by a blank line so the first never runs into the text the terminal
+// printed above it, say, each wrapping instead of cutting: the plan cycle, whether it is paused and
 // the tasks and cycles left; the tasks in flight with their time, a verdict no next step covers and what comes next;
 // and the VALIDAR items waiting, in the warning color. Only the first row dims while Claude works.
 // /andamento opens a pane with what is left per cycle, the current cycle's runs, the next steps, the earlier cycles
@@ -462,6 +463,8 @@ export function register(on) {
         : row.flatMap((part, at) => [...(at ? [GAP] : []), Text({ ...TONE[part.tone], children: [part.text] })]),
     }))
     const theirs = await next(e)
-    return Box({ flexDirection: 'column', children: theirs ? [...drawn, theirs] : drawn })
+    // a blank line opens the band, so its first row never runs into what the terminal printed above it
+    const band = [Text({ children: [''] }), ...drawn]
+    return Box({ flexDirection: 'column', children: theirs ? [...band, theirs] : band })
   })
 }
