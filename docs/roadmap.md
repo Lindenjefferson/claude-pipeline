@@ -59,6 +59,10 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
 
+## 1.13.2 — a linha em branco da faixa volta a existir (PR #PRNUM)
+
+- **A linha em branco que abre a faixa não desenhava** (defeito; captura do usuário na entrega `0.5-launcher-civic`, com a faixa colada no texto do terminal): a 1.10.1 pôs um `Text` de string vazia como primeira linha da faixa, e um `Text` vazio é medido como nenhuma linha, então a faixa seguia abrindo colada. O painel do `/andamento`, no mesmo arquivo, já sabia disso desde sempre (`line || ' '`): a linha vazia dele vai como um espaço. A faixa passa a abrir com o mesmo espaço. O teste antigo procurava um `Text` de texto vazio na árvore — existia, e por isso passava sem a linha aparecer; agora ele cobra a primeira linha da árvore desenhada com um espaço, e que nenhum `Text` vazio tenha sobrado. Número: nenhum do ledger, é apresentação, como na 1.10.1.
+
 ## 1.13.1 — as suítes reprovam de verdade, e um CI rodando os quatro comandos (PR #54)
 
 - **Suíte com assert falso saía com código zero** (defeito; achado ao escrever o CI): só a `test_session_start.py` chamava `sys.exit`; as outras dez imprimiam "SOME FAILED" e saíam 0, então o laço de "Testar e validar" do `CLAUDE.md` terminava sem erro com teste falhando, e um CI que confiasse no código de saída não reprovaria nada. As dez passam a sair 1. Conferido nas duas direções: com um assert falso, código 1; com tudo passando, 0. Número: uma suíte vermelha reprovando o CI, que antes era impossível.
