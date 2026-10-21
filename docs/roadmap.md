@@ -1,6 +1,6 @@
 # Roadmap do plugin `pipeline`
 
-O que falta fazer e o que cada versão entregou; o que muda para quem atualiza está em [`plugins/pipeline/UPGRADING.md`](../plugins/pipeline/UPGRADING.md). Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.10.0) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
+O que falta fazer e o que cada versão entregou; o que muda para quem atualiza está em [`plugins/pipeline/UPGRADING.md`](../plugins/pipeline/UPGRADING.md). Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.10.1) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
 ## Backlog
 
@@ -53,6 +53,10 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 - **Chat em grupo com moderador** (Maestro): a conversa não passa pelo ledger.
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
+
+## 2.10.1 — a faixa não se mistura com o texto do terminal (PR #46)
+
+- **Linha em branco a abrir a faixa de andamento** (pedido do usuário): a primeira linha da faixa (`0.5-launcher-civic, ciclo 1...`) colava no que o terminal tinha acabado de imprimir, e às vezes se lia como parte da saída do comando anterior. Agora o mod desenha uma linha vazia antes da primeira, e o `index === 0` que escurece o título enquanto o Claude trabalha continua a apontar para o título, não para a linha vazia. Vale também para a linha de falha do `ledger.py`. Número: nenhum do ledger, é apresentação, como na 2.9.6.
 
 ## 2.10.0 — organização e versionamento como parte da entrega (PR #44)
 
