@@ -54,9 +54,14 @@ check("hooks.json commands make no network call, privilege change or silent fail
       commands and not any(RISKY.search(command) for command in commands), commands)
 check("hooks.json loads the progress mod", config.get("modules") == ["./andamento.js"], config.get("modules"))
 mod = open(os.path.join(ROOT, "hooks", "andamento.js"), encoding="utf-8").read()
-check("the progress mod only reads: no network, model, prompt, tool approval or store",
-      not re.search(r"\$\.(http|model|prompt|tool|store|session\.send|env\.set)\b", mod)
+check("the progress mod only reads: no network, model, tool approval or store",
+      not re.search(r"\$\.(http|model|tool|store|session\.send|env\.set)\b", mod)
       and "'tool.call'" not in mod and "'tool.check'" not in mod, "")
+# 2.9.8 narrowed that rule: the mod may submit one prompt, the resume of a delivery paused on the usage window
+prompts = re.findall(r"\$\.prompt\.(\w+)", mod)
+check("the mod's only prompt is the submit that resumes a delivery paused on the usage window",
+      set(prompts) == {"submit"} and mod.count("$.prompt.submit({") == 1
+      and "pipeline: a janela de uso renovou" in mod, prompts)
 WRITE = re.compile(r"^write\(\s*(`[^`]*usage\.json`|'[^']*usage\.json'|\"[^\"]*usage\.json\")\s*,")
 writes = re.findall(r"\$\.fs\.(?!(?:stat|read\w*|exists|list)\b)(\w+\(.*)", mod)
 check("the progress mod's one file write has a usage.json literal as its first argument",

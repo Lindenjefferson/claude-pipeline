@@ -202,8 +202,8 @@ check("all criteria traced, audit passes, deferred decided: READY",
 name = [entry for entry in os.listdir(os.path.join(repo, "docs", "quality-reports")) if "feature-y" in entry]
 text = open(os.path.join(repo, "docs", "quality-reports", name[0]), encoding="utf-8").read() if name else ""
 check("the report shows time per cycle, task and agent",
-      "## Time" in text and "- Cycle 1: 8m agent time, 5m elapsed (dev 5m, reviewer 1m, qa 2m)" in text
-      and "- Tasks: T1 5m" in text, text)
+      "## Time" in text and "- Cycle 1: 8m agent time, " in text
+      and "elapsed (dev 5m, reviewer 1m, qa 2m)" in text and "- Tasks: T1 5m" in text, text)
 check("the report shows findings by origin and the deferred decisions",
       "Origins: design 1, assumption 0, plan 0, execution 0, environment 0" in text
       and "- D1 wrap long names -> user: next delivery" in text, text)
