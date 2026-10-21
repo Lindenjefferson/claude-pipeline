@@ -12,11 +12,11 @@
 // advice for ledger.py, whose `usage` it shows: econômico, the wait for a reset, the pane's usage line). A ledger.py
 // failure (a broken ledger, no Python 3) shows in the band and the pane instead of passing for "no delivery". Other
 // mods' band content is kept below the rows.
-// On its own, after each read of the status, it does the two things the user asked never to wait through: a
-// native notification (`$.ui.notify`) the moment the delivery needs them — the gate ready, the manager asking
-// or stopping, a VALIDAR item — once per state, the line itself being the key; and, for a delivery paused
-// waiting for a usage window, one prompt (`$.prompt.submit`) asking this session to resume once the window has
-// reset, once per pause and never for a pause with no wait behind it. It writes nothing to the delivery.
+// On its own, after each read of the status, it sends a native notification (`$.ui.notify`) the moment the delivery
+// starts needing the user — the gate ready, the manager asking or stopping, a VALIDAR item — once per state, the
+// line of needs itself being the key, so the delivery does not sit waiting for the user to look at the terminal.
+// It only reads: it writes nothing to the delivery and submits no prompt (the manager resumes a delivery paused on
+// the usage window by itself, sleeping the wait in a background command, as references/pause.md tells it to).
 // The pane also gives each pipeline agent still running a button that puts its conversation in the main view
 // (`$.ui.view`, which only answers the person's own input, as a press of one is), and lists the delivery's
 // files (the plan and the reports the ledger kept) as paths for the user to open where they choose.
@@ -43,8 +43,6 @@ let fronts = []
 let python = null
 let written = null
 let notified = null
-let waited = false
-let resumed = null
 
 function clock(minutes) {
   return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}`
@@ -150,7 +148,8 @@ export function rowText(row) {
 }
 
 // One line naming everything the delivery needs from the user right now, or null: the gate ready, the manager asking
-// or stopping, and the VALIDAR items. It is also the key of the notification: a new item changes the text.
+// or stopping, and the VALIDAR items. It is also the key of the notification, and holds nothing but those needs: a
+// new need changes the text, while the delivery going economical or paused does not notify again.
 export function waitsForYou(r) {
   if (!r) return null
   const ids = waiting(r).map((item) => item.id)
@@ -158,7 +157,7 @@ export function waitsForYou(r) {
   const parts = [...(r.ready_for_gate ? ['pronto para o gate'] : []), ...asked,
                  ...(ids.length ? [`${ids.length === 1 ? '1 decisão espera' : `${ids.length} decisões esperam`} você `
                                    + `(${listed(ids)})`] : [])]
-  return parts.length ? `${title(r)}: ${listed(parts)}` : null
+  return parts.length ? listed(parts) : null
 }
 
 // The session's pipeline agents that have not finished, each with the task of the ledger its description names.
@@ -168,7 +167,8 @@ export function paneAgents(list, dispatched) {
                                         && ['pending', 'running', 'waiting'].includes(agent.status))
     .map((agent) => {
       const kind = agent.type.slice('pipeline:'.length)
-      const task = tasks.find((name) => String(agent.description || '').includes(name))
+      const task = tasks.filter((name) => String(agent.description || '').includes(name))
+        .sort((left, right) => right.length - left.length)[0]
       return { id: agent.id, label: task ? `${kind} ${taskName(task)}` : kind }
     })
 }
@@ -369,33 +369,6 @@ async function notifyWaiting($) {
   } catch {}
 }
 
-// A delivery paused waiting for the usage window: once the window has reset, ask this session to go on, so it does
-// not sit until the user comes back to the terminal. Once per pause, and never for a pause with no wait behind it.
-async function resumeAfterReset($) {
-  if (!report || !report.paused) {
-    waited = false
-    resumed = null
-    return
-  }
-  if (report.usage && report.usage.wait) {
-    waited = true
-    return
-  }
-  if (!waited || resumed === report.paused.at) return
-  resumed = report.paused.at
-  try {
-    await $.prompt.submit({ text: 'pipeline: a janela de uso renovou. Rode o `ledger.py status`, dê `resume` e '
-                                  + 'retome a entrega, despachando de novo cada claim que ele listar.' })
-  } catch {}
-}
-
-// What the mod does on its own with a fresh status: nothing that writes to the delivery, only the two waits the
-// user asked never to sit through (the notification and the resume after a usage reset).
-async function attend($) {
-  await notifyWaiting($)
-  await resumeAfterReset($)
-}
-
 async function otherFronts($) {
   let listing = ''
   try {
@@ -420,12 +393,12 @@ export function register(on) {
   on('session.start', async ($, e, next) => {
     $.clock.every(POLL_MS, async () => {
       const changed = await refresh($)
-      if (changed) await attend($)
+      if (changed) await notifyWaiting($)
       if (changed || (report && Object.keys(report.dispatched || {}).length)) $.ui.invalidate('ui.render')
     })
     $.clock.after(0, async () => {
       if (await refresh($)) $.ui.invalidate('ui.render')
-      await attend($)
+      await notifyWaiting($)
       await writeUsage($)
     })
     try {
@@ -465,7 +438,13 @@ export function register(on) {
     if (agents.length) {
       drawn.push(Text({ children: [' '] }), Text({ ...TONE.quiet, children: ['Abrir a conversa de:'] }),
                  Box({ children: agents.map((agent) => Button({
-                   key: `agente-${agent.id}`, label: agent.label, onPress: () => $.ui.view({ agentId: agent.id }),
+                   key: `agente-${agent.id}`,
+                   label: agent.label,
+                   onPress: async () => {
+                     try {
+                       await $.ui.view({ agentId: agent.id })
+                     } catch {}
+                   },
                  })) }))
     }
     return Box({ flexDirection: 'column', children: drawn })

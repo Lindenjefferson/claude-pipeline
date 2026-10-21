@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { bandRows, paneLines, rowText } from '../andamento.js'
+import { bandRows, paneAgents, paneLines, rowText } from '../andamento.js'
 
 const DISPATCHED = '2026-10-17T17:32:48+00:00'
 const NOW = Date.parse(DISPATCHED) + 14 * 60000
@@ -421,19 +421,13 @@ test('a rate limit with no usable reset time is not written to usage.json', asyn
   expect(log.writes.length).toBe(1)
 })
 
-const PAUSED = {
-  ...STATUS, dispatched: {}, steps: [{ step: 'resume', text: 'limite de uso' }], validar: [],
-  paused: { text: 'limite de uso', at: '2026-10-17T18:00:00+00:00' },
-  usage: { ...USAGE, wait: { window: 'five_hour', percent: 90, resets_at: LOCAL.toISOString() } },
-}
-
 test('a notification goes out when the delivery starts waiting for you, and not again for the same state', async ($, on) => {
   const log = { runs: 0, mtime: 1, notes: [] as string[] }
   const report = { ...STATUS, dispatched: {}, steps: [], validar: [{ id: 'V1', text: 'page size 50', decision: null }] }
   const clock = stubs(on, report, log)
   on('ui.notify', (_$, e) => { log.notes.push(e.text); return { value: { isSent: true, channel: 'kitty' } } })
   await start($, clock)
-  expect(log.notes).toEqual(['etapa 5, ciclo 2 de 3, modo autônomo: 1 decisão espera você (V1)'])
+  expect(log.notes).toEqual(['1 decisão espera você (V1)'])
   log.mtime = 2
   await clock.advance(5000)
   expect(log.notes.length).toBe(1)
@@ -441,9 +435,14 @@ test('a notification goes out when the delivery starts waiting for you, and not 
   log.mtime = 3
   await clock.advance(5000)
   expect(log.notes[1]).toContain('2 decisões esperam você (V1 e V3)')
+  report.paused = { text: 'limite de uso', at: DISPATCHED }
+  log.mtime = 4
+  await clock.advance(5000)
+  expect(log.notes.length).toBe(2)
+  report.paused = null
   report.validar = []
   report.ready_for_gate = true
-  log.mtime = 4
+  log.mtime = 5
   await clock.advance(5000)
   expect(log.notes[2]).toContain('pronto para o gate')
 })
@@ -454,34 +453,6 @@ test('a delivery with nothing waiting for you raises no notification', async ($,
   on('ui.notify', (_$, e) => { log.notes.push(e.text); return { value: { isSent: true, channel: 'kitty' } } })
   await start($, clock)
   expect(log.notes).toEqual([])
-})
-
-test('the delivery resumes itself once the usage window resets, once per pause', async ($, on) => {
-  const log = { runs: 0, mtime: 1, prompts: [] as string[] }
-  const report = JSON.parse(JSON.stringify(PAUSED))
-  const clock = stubs(on, report, log)
-  on('prompt.submit', (_$, e) => { log.prompts.push(e.text); return { text: e.text } })
-  await start($, clock)
-  expect(log.prompts).toEqual([])
-  report.usage.wait = null
-  log.mtime = 2
-  await clock.advance(5000)
-  expect(log.prompts.length).toBe(1)
-  expect(log.prompts[0]).toContain('retome a entrega')
-  log.mtime = 3
-  await clock.advance(5000)
-  expect(log.prompts.length).toBe(1)
-})
-
-test('a pause the mod never saw waiting on the usage window is not resumed on its own', async ($, on) => {
-  const log = { runs: 0, mtime: 1, prompts: [] as string[] }
-  const report = { ...PAUSED, usage: { ...USAGE, wait: null } }
-  const clock = stubs(on, report, log)
-  on('prompt.submit', (_$, e) => { log.prompts.push(e.text); return { text: e.text } })
-  await start($, clock)
-  log.mtime = 2
-  await clock.advance(5000)
-  expect(log.prompts).toEqual([])
 })
 
 test('the pane gives each running pipeline agent a button that opens its conversation', async ($, on) => {
@@ -503,6 +474,11 @@ test('the pane gives each running pipeline agent a button that opens its convers
   await ui.press({ key: 'agente-a-qa' })
   expect(log.viewed).toEqual(['a-qa'])
   await ui.unmount()
+})
+
+test('an agent on T2.1 is not read as an agent on T2: the longest task name the description holds wins', () => {
+  const list = [{ id: 'a-dev', description: 'dev na T2.1, do plano', type: 'pipeline:dev', status: 'running' }]
+  expect(paneAgents(list, { T2: {}, 'T2.1': {} })[0].label).toBe('dev T2.1')
 })
 
 test('the pane lists the files of the delivery, to open where the user chooses', () => {
