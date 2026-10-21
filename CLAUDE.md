@@ -11,13 +11,14 @@ Três princípios valem para toda mudança:
 
 ## O que rege o plugin
 
-Antes das regras de como mudá-lo, para que ele existe. Toda decisão de desenho responde a estas premissas, e o que contraria uma delas não entra:
+Antes das regras de como mudá-lo, para que ele existe. Estas premissas valem dos dois lados, para mudar o plugin e para o que ele entrega; toda decisão de desenho responde a elas, e o que contraria uma delas não entra:
 
 - **Nenhum agente parado.** Orquestrar é manter o trabalho andando: despachar o que já pode andar e nunca encerrar a vez à espera de uma notificação ou de um relógio. A vez só termina esperando o usuário numa decisão que é dele (✋ 1, ✋ 2, o passo `ask`), e depois de despachar o que já podia andar. Espera que dá para medir é defeito, não paciência.
 - **Reduzir o tempo até a entrega pronta.** O que o plugin ganha se mede no relógio da entrega, não no número de etapas que ele cumpre. Etapa que não encurta o caminho nem evita retrabalho sai.
 - **Duvidar de tudo que é proposto, inclusive do que o próprio plugin propõe.** Pedido, achado e relatório valem pelo que se confere, não por quem os trouxe — outro agente, outro modelo ou o plugin. Um pedido do dono diz por que uma ideia entra, nunca se ela é viável; o filtro de ideias abaixo diz como se confere.
 - **Não executar o que não se entendeu.** Perguntar antes custa menos que uma rodada de correção: na dúvida sobre o que foi pedido, confirmar; sobre a tarefa, devolver em vez de adivinhar.
 - **Simplificar em vez de complicar.** A menor mudança que resolve: ajuste cirúrgico no arquivo certo em vez de caminho novo, e o mecanismo que já existe em vez de um segundo para a mesma coisa.
+- **Um repositório que o dev entende, e no git só o que é fonte.** Organização é parte da entrega, não arrumação no fim: cada arquivo que uma rodada cria é decidido entre entrar no git (fonte, documento, artefato que alguém vai ler) ou ficar fora (área de trabalho de agente, material que vem de fora, saída de build e de teste), e o que entra tem nome e lugar previsíveis, no mesmo slug da entrega. Artefato que o usuário vai ler nunca mora em pasta ignorada. O que a IA escreveu se enxuga ao tocar, como qualquer arquivo do plugin; remover o que o usuário escreveu vai para a aprovação dele.
 - **Critério objetivo antes de começar.** Cada mudança diz qual é a meta de sucesso antes de entrar; sem ela não há como saber se funcionou, nem como aplicar o filtro de ideias, que cobra o número dessa meta.
 
 ## Mapa: onde cada informação mora
