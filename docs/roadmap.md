@@ -1,6 +1,6 @@
 # Roadmap do plugin `pipeline`
 
-O que falta fazer e o que cada versão entregou; o que muda para quem atualiza está em [`plugins/pipeline/UPGRADING.md`](../plugins/pipeline/UPGRADING.md). Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.9.6) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
+O que falta fazer e o que cada versão entregou; o que muda para quem atualiza está em [`plugins/pipeline/UPGRADING.md`](../plugins/pipeline/UPGRADING.md). Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.8.7 à 2.9.7) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
 ## Backlog
 
@@ -19,19 +19,25 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 - **Abrir um agente pelo painel** (pedido do usuário, ideia do app Projetos): no `/andamento`, um botão ao lado de cada `dev`, `reviewer` ou `qa` em andamento abre a conversa dele (`$.ui.view`). Esforço: P.
 - **Biblioteca da entrega** (pedido do usuário, ideia da Library do app Projetos): um painel com spec, plano, relatórios do `reviewer` e do `qa` e o relatório de qualidade, prontos para abrir. Esforço: P.
 
+- **"Execução em paralelo" oferecida quando o plano tem tarefas independentes** (feedback da entrega `0.4-launcher-civic`): o `CLAUDE.md` do projeto não tinha a seção, e a T4, a T5 e a T6, independentes, rodaram em série; o manager só lê a seção no passo 4.1, com o plano já aprovado. O passo 3 ofereceria preenchê-la no ✋ 1 quando o plano tiver tarefas independentes. Número: tarefas independentes rodadas em série por falta da seção passam a zero. Esforço: P.
+
 ### Em espera (voltam com um sinal)
 
 - **"Comandos" propostos pelo kickoff a partir do manifesto do projeto** (pedido do usuário: deixar o técnico automático): ler o que o projeto declara (scripts do gerenciador de pacotes, Makefile ou equivalente), propor as linhas e medir o tempo de cada comando; volta com o próximo projeto novo, onde dá para medir.
 - **`feedback-plugin` gravando as lições no formato do filtro** (evidência, custo no ledger, número que deve mudar), para a sessão do plugin só triar; volta quando o volume de lições por entrega justificar.
 - **Nome do ciclo do plano no `status`** (CF, depois da 2.8.7): o `status` diz "cycle 3" onde o `scope` gravou "Ciclo R" (a linha de andamento já mostra o nome); volta se o número causar um erro de range ou uma rodada a mais.
 - **Revisão de design sobre as capturas do `dev`, antes de integrar** (CF, depois da 2.8.7, decisão do usuário): custa ~190k tokens por tarefa com tela, e a 2.8.8 atacou a mesma causa; volta se uma revisão de design ainda abrir uma rodada por defeito que a própria tarefa criou.
-- **Relatório do `dev` conferido num hook `SubagentStop`** (os hooks `TeammateIdle` e `TaskCompleted` do [Agent Teams](https://code.claude.com/docs/en/agent-teams)): o "Check the report" do passo 4.1 viraria checagem; volta se um relatório incompleto for devolvido duas vezes ou integrado sem a evidência. Esforço: P.
+- **Heartbeat também no modo supervisionado** (feedback da entrega `0.4-launcher-civic`): no modo autônomo o heartbeat de 15 minutos (`references/autonomous.md`) já impede a entrega de parar quando o relatório chega sem a notificação; no supervisionado não há nenhum, e o despacho na hora do relatório da 2.9.7 é a única garantia. Volta se uma entrega supervisionada ficar parada com um relatório já entregue depois da 2.9.7.
+- **Filtro do achado antes de relatar, também no `qa`** (feedback da entrega `0.4-launcher-civic`): um `qa` afirmou que as linhas Testes do `CLAUDE.md` eram placeholder, e estavam preenchidas; o manager o descartou com uma nota, que é o caminho previsto. O `qa.md` não tem as quatro perguntas que o `reviewer.md` exige antes de escrever um achado; volta se um achado falso do `qa` abrir uma rodada ou custar uma devolução.
+- **Relatório do `dev` conferido num hook `SubagentStop`** (os hooks `TeammateIdle` e `TaskCompleted` do [Agent Teams](https://code.claude.com/docs/en/agent-teams)): o "Check the report" do passo 4.1 viraria checagem; volta se um relatório incompleto for devolvido duas vezes ou integrado sem a evidência (primeira ocorrência: a T6 da `0.4-launcher-civic`, devolvida sem as contagens de todas as suítes e com a evidência de mutação sem nomear o teste que ficou vermelho). Esforço: P.
 - **Devolver a tarefa ao mesmo `dev` com `SendMessage`** (pesquisa de ferramentas parecidas): ele retoma com o contexto, mas não depois de um `TaskStop` (a pausa da 2.8.9 redespacha um `dev` novo); volta se a segunda execução do `dev` numa tarefa custar perto da primeira.
 - **Segundo revisor de outro fornecedor, opcional por projeto** (Maestri, Conductor): fora do gate, mas ainda manda o diff a outro provedor; volta se um achado de origem `execution` que o `reviewer` deixou passar custar uma rodada.
 - **Item da spec sem tarefa barrado pelo gate** (o `/analyze` do [Spec Kit](https://github.com/github/spec-kit)): como os `AC-` nos testes, para os itens da spec nos `Goal:`; volta se um item da spec sem tarefa for achado depois do ✋ 1.
 
 ### Recusado
 
+- **Lista de origens própria no `qa.md`** (feedback da entrega `0.4-launcher-civic`): não havia divergência — o `reviewer.md` define as cinco origens, o `qa.md` aponta para ele e o `ledger.py` aceita as mesmas cinco; o `qa` relatou `spec-gap` e o `add` recusou, como deve. A 2.9.7 só nomeia as cinco no `qa.md`, para o `qa` não ter de abrir outro arquivo.
+- **`reviewer` gravando o próprio relatório** (feedback da entrega `0.4-launcher-civic`): o passo 4.2 já manda o manager gravar o relatório, e o `reviewer` não tem a ferramenta `Write`; o brief daquela entrega pedia ao agente o que ele não pode fazer.
 - **Revisão externa no gate** (2.6.0): manda o diff para fora e exige outra CLI e uma chave de LLM; o `reviewer` já cobre, e o gate é sem LLM de propósito.
 - **Custo da entrega com o `ccusage`** (pedido do usuário): ele estima dólares pelo preço da API; numa assinatura o que limita é o uso da janela e da semana, que o próprio Claude Code dá ao mod desde a 2.8.10.
 - **Levar a entrega em andamento para outra máquina** (exportar o ledger e os relatórios): decisão do usuário, que só troca de computador entre etapas.
@@ -48,6 +54,20 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 - **Chat em grupo com moderador** (Maestro): a conversa não passa pelo ledger.
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
+
+## 2.9.7 — nenhum agente parado esperando a notificação (PR #41)
+
+Origem: feedback da entrega `0.4-launcher-civic` (projeto `launcher-multimidia`, trazido pela sessão do projeto) e decisão do usuário, evitar a todo custo que os agentes e subagentes fiquem parados. Depois de cada `dev` chegavam duas coisas separadas, o relatório e, depois, a notificação de término com tempo e tokens; lendo a regra do `--seconds`/`--tokens` e a definição de "Finished", o manager encerrava a vez depois do relatório para esperar a notificação, que só vinha com a mensagem seguinte do usuário. Entre o commit do `dev` e o despacho da tarefa seguinte passaram 2h17 (T4) e 49 min (T5), para execuções reais de 64 s e 112 s; o Ciclo 2 teve 6 min de tempo de agente contra 56 min de relógio.
+
+- [x] **O relatório basta para seguir**: "Finished" passa a ser o agente cujo relatório chegou — conferir, `add` e despachar o que vem a seguir na mesma vez, sem nunca encerrar a vez à espera da notificação; o `TaskStop` continua para o agente que ainda roda. `--seconds` e `--tokens` ficam explicitamente opcionais.
+- [x] **`ledger.py measure`**: quando a notificação chega depois do `add`, ela completa aquela execução (a última daquele agente e tarefa) numa linha própria, e é recusada quando os números já estão lá. Sem o comando, a regra acima trocaria a espera pela perda da medição: 11 execuções dessa entrega ficaram sem tempo e tokens depois que o manager parou de esperar.
+- [x] **O relógio do ciclo não depende da medição**: o `elapsed` de cada ciclo passa a contar também as execuções sem `--seconds`, pelo horário delas, então o relatório de qualidade continua dando tempo de agente contra relógio — a conta que mostra a espera.
+- [x] **O `status` cobra o claim parado**: cada claim em andamento mostra `waiting_minutes` e, quando não tem worktree e o head da branch andou desde o despacho, `committed`, com "check its report, add it and go on" — o `dev` commita direto na branch, então o trabalho já pode estar lá e faltar só o registro.
+- [x] **As origens que o `qa` pode usar, no `qa.md`**: ele nomeia as cinco que o `add --origin` aceita (a definição continua no `reviewer.md`); nessa entrega um `qa` relatou `spec-gap` e o `add` recusou.
+
+O prompt do manager cresceu 34 palavras (de 3816 para 3850) e o `qa` 9 (de 657 para 666). As 26 palavras do `measure` são o preço de não esperar: sem o comando, a medição de que o filtro de ideias vive se perderia. As outras 8 são a regra do "Finished", que tira cerca de 3 h de espera de uma entrega cujo trabalho de agente somou 27 min. O resto é checagem no `ledger.py`, com teste primeiro.
+
+Números que esta versão deve mudar (do ledger e do relatório de qualidade): o relógio de cada ciclo menos o tempo de agente (56 min contra 6 min no Ciclo 2) cai para perto do tempo de agente; claims com `waiting_minutes` alto e o relatório já entregue passam a zero; execuções sem tempo e tokens (11 nessa entrega) passam a zero, agora pelo `measure`. Nas origens dessa entrega (plan 12, execution 7, design 3, assumption 1, environment 1), os 12 de `plan` vieram das três rodadas de revisão do plano, antes de qualquer código, que é onde devem aparecer.
 
 ## 2.9.6 — faixa de andamento legível (PR #39)
 
