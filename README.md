@@ -10,7 +10,7 @@ O objetivo é que nada errado saia da máquina sem que você precise acompanhar 
 - **Independente de stack.** Nada de framework, fornecedor ou linguagem. Regra de stack ou de projeto mora no `CLAUDE.md` e no `docs/lessons.md` de cada projeto.
 - **Enxuto.** Toda mudança remove o que ficou desnecessário, duplicado ou sem uso. Uma regra geral curta vale mais que várias específicas.
 
-O que rege o plugin — as premissas a que toda decisão de desenho responde — e as regras para mudá-lo estão no [`CLAUDE.md`](CLAUDE.md).
+O que rege o plugin — as premissas que valem tanto para mudá-lo como para o que ele entrega — e as regras para mudá-lo estão no [`CLAUDE.md`](CLAUDE.md).
 
 ## Como funciona
 

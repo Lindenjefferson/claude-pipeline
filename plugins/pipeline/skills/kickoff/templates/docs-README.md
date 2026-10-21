@@ -11,6 +11,11 @@ Esta pasta é a documentação viva do código: registra **o que existe e por qu
 ## Outras pastas
 
 - [`discovery/`](discovery/) — achados estruturados das fontes brutas (gerados pelo agente `discovery`).
+- `specs/` — uma spec por entrega grande (`<slug>.md`), decidida antes de codar.
+- `plans/` — um plano por entrega (`<slug>.md`), o que o `manager` executa e o `gate.py` rastreia.
+- `mockups/` — um mockup por entrega com tela (`<slug>.html`), feito na rodada de design.
+
+Os três usam o **mesmo slug da entrega**, e cada pasta aparece na primeira entrega que a tem.
 - [`quality-reports/`](quality-reports/) — um relatório por entrega aprovada (gerado pelo `gate.py`).
 - [`lessons.md`](lessons.md) — regras curtas aprendidas com erros das entregas, só as que não viraram checagem automática; o `dev` e o `reviewer` leem antes de cada tarefa.
 
