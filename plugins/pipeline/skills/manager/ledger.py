@@ -11,6 +11,7 @@
   release --task <id>                                         frees a claim whose run was lost
   pause   --text <text>                                       the delivery stops; the text says what comes on return
   resume                                                      the work restarts; lists the claims still in flight
+  measure --agent dev|reviewer|qa [--task <id>] [--seconds <duration>] [--tokens N]   numbers of a run already added
   note    --text <text> [--validar]                           a decision taken on the user's behalf
   validate --id <id> --decision <text>                        the user's decision on a VALIDAR item (V1, V2...)
   waive   --agent reviewer|qa [--task spec|plan] --reason <text>   accepts the open findings of that agent's latest FAIL
@@ -43,8 +44,13 @@ task, and qa ran again after every fix of a blocking (FAIL) finding. The next re
 A fix round (task fix-N) and the cleanup task (task cleanup) stay in the current cycle, even a closed one: they need
 a reviewer pass, and qa again only when a FAIL came before them. Every finding carries its origin (design,
 assumption, plan, execution, environment); --report keeps the path of the file the manager saved the agent's report
-in, so a FAIL still open names it; --seconds takes 90, 12m, 1h5m or 12m30s, and --seconds and --tokens come from the
-agent's completion notification, never an estimate (a run without it goes unmeasured, and 0 is refused). A deferred
+in, so a FAIL still open names it; --seconds takes 90, 12m, 1h5m or 12m30s, and --seconds and --tokens are optional, from the
+agent's completion notification when it already arrived, never an estimate (a run without them goes unmeasured, its
+span counting from its timestamp in the cycle's elapsed, and 0 is refused). measure fills the numbers
+of a run whose completion notification arrived after its add (the latest run of that agent and task), as its own line,
+and is refused when they are already there, so no dispatch ever waits for a notification. status gives each claim in
+flight its waiting_minutes and, for a claim with no worktree whose delivery head moved since, committed: the dev commits straight
+on the branch, so its work may be in and its report waiting to be added. A deferred
 item with no decision keeps the delivery from the gate. start --archive moves an existing delivery to
 ledger-<old-slug>.jsonl next to the ledger first. --check exits 1 while anything is pending, so the gate can rely on
 it. A cycle whose reviewer or qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on
@@ -188,7 +194,23 @@ def read(path):
                 entries.append(json.loads(line))
             except ValueError as error:
                 sys.exit(f"{path}:{number}: not a ledger entry ({error}); fix or remove that line by hand")
-    return entries
+    return folded(entries)
+
+
+def folded(entries):
+    """Every measure entry filled into the run it completes, so a notification that arrived late still counts."""
+    latest, kept = {}, []
+    for entry in entries:
+        if entry["type"] == "measure":
+            target = latest.get((entry["agent"], entry.get("task") or ""))
+            for key in ("seconds", "tokens"):
+                if target is not None and entry.get(key) is not None:
+                    target[key] = entry[key]
+            continue
+        if entry["type"] == "run":
+            latest[(entry["agent"], entry.get("task") or "")] = entry
+        kept.append(entry)
+    return kept
 
 
 def write(path, entry):
@@ -609,6 +631,21 @@ def moved(entry, head):
     return bool(entry.get("origin") and head and entry["origin"] != head)
 
 
+def waiting(entry, now=None):
+    """Minutes since the claim was written, or None when its timestamp is unreadable."""
+    try:
+        at = datetime.datetime.fromisoformat(entry["at"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    return max(0, int((now - at).total_seconds() // 60))
+
+
+def committed(entry, head):
+    """True when the delivery head moved since a claim with no worktree: the dev commits straight on the branch."""
+    return bool(not entry.get("worktree") and entry.get("head") and head and entry["head"] != head)
+
+
 def claim(args):
     entries = read(args.ledger)
     if not entries:
@@ -708,6 +745,36 @@ def validar(entries):
     for item in items:
         item["decision"] = decisions.get(item["id"])
     return items
+
+
+def measure(args):
+    entries = read(args.ledger)
+    if not entries:
+        sys.exit("no delivery started: run start first")
+    if args.agent == "dev" and not args.task:
+        sys.exit("dev runs need --task")
+    if args.agent != "dev" and args.task and not (args.agent == "reviewer" and args.task in REVIEWS):
+        sys.exit("--task on a reviewer run is spec or plan (one round of that review loop); qa runs take none")
+    numbers = {}
+    if args.seconds is not None:
+        numbers["seconds"] = seconds(args.seconds)
+    if args.tokens is not None:
+        numbers["tokens"] = args.tokens
+    if not numbers:
+        sys.exit("measure takes --seconds, --tokens or both, from the run's completion notification")
+    if 0 in numbers.values():
+        sys.exit("0 is no measurement: leave that number out while the run is unmeasured")
+    found = [entry for entry in entries if entry["type"] == "run" and entry["agent"] == args.agent
+             and (entry.get("task") or "") == args.task]
+    if not found:
+        sys.exit(f"no {args.agent} run{f' of {args.task}' if args.task else ''} in the ledger to complete")
+    already = [key for key in numbers if found[-1].get(key) is not None]
+    if already:
+        sys.exit(f"that {args.agent} run is already measured ({', '.join(f'{key} {found[-1][key]}' for key in already)}"
+                 "): the numbers come from one completion notification, never a second guess")
+    write(args.ledger, {"type": "measure", "agent": args.agent, "task": args.task, **numbers})
+    print(f"measured {args.agent}{' ' + args.task if args.task else ''}: "
+          + ", ".join(f"{key} {value}" for key, value in numbers.items()))
 
 
 def validate(args):
@@ -860,11 +927,12 @@ def lesson(args):
 
 
 def elapsed(cycle):
-    measured = [entry for entry in cycle if entry.get("seconds") is not None and entry.get("at")]
-    if not measured:
+    """Wall clock from the first run's start to the last one's end; an unmeasured run counts from its timestamp."""
+    timed = [entry for entry in cycle if entry.get("at")]
+    if not timed:
         return None
-    ends = [datetime.datetime.fromisoformat(entry["at"]) for entry in measured]
-    starts = [end - datetime.timedelta(seconds=entry["seconds"]) for end, entry in zip(ends, measured)]
+    ends = [datetime.datetime.fromisoformat(entry["at"]) for entry in timed]
+    starts = [end - datetime.timedelta(seconds=entry.get("seconds") or 0) for end, entry in zip(ends, timed)]
     return int((max(ends) - min(starts)).total_seconds())
 
 
@@ -960,11 +1028,15 @@ def status(args):
     kept = [(text, step) for text, step in zip(pending, state["steps"]) if step.get("task") not in held]
     pending = loops + [text for text, _ in kept]
     for task, claim in claims(entries).items():
-        at, later = claim["at"], None if closed else later_cycle(entries, groups[-1], task)
-        since = f"; the delivery head is now {head[:12]}" if moved(claim, head) else ""
-        pending.append(f"dev {task} dispatched at {at}{place(claim, ', ')}, for plan cycle {later}: integrate and add it "
+        later = None if closed else later_cycle(entries, groups[-1], task)
+        wait = waiting(claim)
+        at = f"{claim['at']}{place(claim, ', ')}" + (f", waiting {wait}m" if wait is not None else "")
+        since = (f"; the delivery head is now {head[:12]}" if moved(claim, head) else
+                 "; the branch head moved since: its work may already be committed, so check its report, add it and "
+                 "go on" if committed(claim, head) else "")
+        pending.append(f"dev {task} dispatched at {at}, for plan cycle {later}: integrate and add it "
                        f"once this cycle closes, or release --task {task}{since}" if later else
-                       f"dev {task} dispatched at {at}{place(claim, ', ')}, no report yet (add it when it reports, or "
+                       f"dev {task} dispatched at {at}, no report yet (add it as soon as it reports, or "
                        f"release --task {task}){since}")
     pending += [f"deferred {item['id']} has no decision: {item['text']}" for item in items if not item["decision"]]
     steps += [step for _, step in kept] + [{"step": "decide", "id": item["id"], "text": item["text"]}
@@ -982,7 +1054,8 @@ def status(args):
               "plan": plans[-1] if plans else entries[0].get("plan"),
               "cycle": len(groups), "from": cycle_from(entries, groups), "in_flight": list(held), "dispatched": held,
               "claims": [{"task": task, "at": claim["at"], "worktree": claim.get("worktree"),
-                          "origin": claim.get("origin"), "tip": tip(claim), "head_moved": moved(claim, head)}
+                          "origin": claim.get("origin"), "tip": tip(claim), "head_moved": moved(claim, head),
+                          "waiting_minutes": waiting(claim), "committed": committed(claim, head)}
                          for task, claim in claims(entries).items()],
               "paused": pause_state, "full_qa": full[-1] if full else None,
               "tasks": {task: entry["verdict"] for task, entry in state["tasks"].items()},
@@ -1123,7 +1196,7 @@ def heavy_count(text, copies_only=False):
     return next((HEAVY_WORDS[w] for w in re.findall(r"[a-z]+", text) if w in HEAVY_WORDS), None)
 
 
-def measure(variable, probe):
+def probed(variable, probe):
     """Free GB: the env override when set (empty or invalid means unknown), else the probe; None when unknown."""
     if variable in os.environ:
         try:
@@ -1168,8 +1241,8 @@ def fit(free, peak, reserve):
 def capacity(args):
     entries = read(args.ledger)
     root = os.path.dirname(os.path.dirname(os.path.abspath(args.ledger)))
-    memory = measure("PIPELINE_CAPACITY_MEMORY_GB", free_memory_gb)
-    disk = measure("PIPELINE_CAPACITY_DISK_GB", lambda: shutil.disk_usage(root).free / 1024 ** 3)
+    memory = probed("PIPELINE_CAPACITY_MEMORY_GB", free_memory_gb)
+    disk = probed("PIPELINE_CAPACITY_DISK_GB", lambda: shutil.disk_usage(root).free / 1024 ** 3)
     setting = capacity_settings(os.path.join(root, "CLAUDE.local.md"))
     peak, disk_peak, floor, heavy = setting["peak"], setting["disk_peak"], setting["floor"], setting["heavy"]
     free_mode = autonomous(entries)
@@ -1260,6 +1333,12 @@ def main():
     command.add_argument("--text", required=True)
     command.add_argument("--validar", action="store_true", help="the user validates this decision on return")
     command.set_defaults(run=note)
+    command = commands.add_parser("measure")
+    command.add_argument("--agent", required=True, choices=sorted(VERDICTS))
+    command.add_argument("--task", default="")
+    command.add_argument("--seconds", help="how long the run took, from a notification that arrived after its add")
+    command.add_argument("--tokens", type=count, help="the tokens the run used, from that same notification")
+    command.set_defaults(run=measure)
     command = commands.add_parser("validate")
     command.add_argument("--id", required=True)
     command.add_argument("--decision", required=True)

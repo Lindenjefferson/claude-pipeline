@@ -740,7 +740,8 @@ r = run("claim", "--task", "P2", ledger=PAUSE)
 claim2 = status(PAUSE)["claims"][1]
 check("a claim with neither option is stored without them",
       r.returncode == 0 and claim2 == {"task": "P2", "at": claim2["at"], "worktree": None, "origin": None,
-                                       "tip": None, "head_moved": False}, status(PAUSE)["claims"])
+                                       "tip": None, "head_moved": False, "waiting_minutes": 0,
+                                       "committed": False}, status(PAUSE)["claims"])
 run("release", "--task", "P2", ledger=PAUSE)
 subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "delivery moved"], cwd=repo, check=True,
                capture_output=True)
@@ -807,13 +808,16 @@ with open(os.path.join(repo, OLD), "w", encoding="utf-8", newline="\n") as handl
                   {"type": "claim", "task": "L1", "at": "2026-10-01T10:01:00+00:00"}):
         handle.write(json.dumps(entry) + "\n")
 state = status(OLD)
-check("a claim written in the old shape still works: no worktree, no origin, head not moved",
-      state["in_flight"] == ["L1"] and state["claims"] == [{"task": "L1", "at": "2026-10-01T10:01:00+00:00",
-                                                           "worktree": None, "origin": None, "tip": None,
-                                                           "head_moved": False}]
+check("a claim written in the old shape still works: no worktree, no origin, head not moved, nothing committed",
+      state["in_flight"] == ["L1"] and len(state["claims"]) == 1
+      and {key: value for key, value in state["claims"][0].items() if key != "waiting_minutes"}
+      == {"task": "L1", "at": "2026-10-01T10:01:00+00:00", "worktree": None, "origin": None, "tip": None,
+          "head_moved": False, "committed": False}
+      and state["claims"][0]["waiting_minutes"] > 0
       and state["paused"] is None and state["full_qa"] is None, state)
-check("the old claim's text line has no place suffix",
-      "dev L1 dispatched at 2026-10-01T10:01:00+00:00, no report yet" in run("status", ledger=OLD).stdout)
+check("the old claim's text line has no place suffix, and says how long it has been waiting",
+      re.search(r"dev L1 dispatched at 2026-10-01T10:01:00\+00:00, waiting \d+m, no report yet",
+                run("status", ledger=OLD).stdout) is not None, run("status", ledger=OLD).stdout)
 run("pause", "--text", "stop here", ledger=OLD)
 r = run("resume", ledger=OLD)
 check("pause and resume work on a claim with no worktree: the line is just the task",
@@ -1498,8 +1502,69 @@ old = status(".superpowers/legacy.jsonl")["metrics"].get("lines")
 check("an old ledger without diff counts every dev run as unmeasured, total 0 and share null",
       old == {"tasks": {}, "total": 0, "follow_up": 0, "share": None, "unmeasured": 2}, old)
 
+IDLE = ".superpowers/idle.jsonl"
+run("start", "--slug", "idle", ledger=IDLE)
+run("claim", "--task", "I1", ledger=IDLE)
+state = status(IDLE)
+check("a claim in flight says how long it has been waiting, and that nothing is committed yet",
+      state["claims"][0]["waiting_minutes"] == 0 and state["claims"][0]["committed"] is False, state["claims"])
+check("the claim's text line names the waiting time and does not tell the manager to wait for a notification",
+      "waiting 0m" in run("status", ledger=IDLE).stdout
+      and "notification" not in run("status", ledger=IDLE).stdout, run("status", ledger=IDLE).stdout)
+subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "dev work"], cwd=repo, check=True, capture_output=True)
+state = status(IDLE)
+check("a claim with no worktree whose branch head moved is flagged: the dev's work may already be committed",
+      state["claims"][0]["committed"] is True, state["claims"])
+check("status then tells the manager to add it and go on, instead of leaving the claim open",
+      "add it and go on" in run("status", ledger=IDLE).stdout, run("status", ledger=IDLE).stdout)
+r = run("claim", "--task", "I2", "--worktree", repo, "--origin", "HEAD", ledger=IDLE)
+state = status(IDLE)
+by_task = {claim["task"]: claim for claim in state["claims"]}
+check("a claim in a worktree is never flagged as committed: the delivery head moves with every integration",
+      r.returncode == 0 and by_task["I2"]["committed"] is False, state["claims"])
+
+UNMEASURED = ".superpowers/unmeasured.jsonl"
+at = ["2026-10-01T10:00:00+00:00", "2026-10-01T10:05:00+00:00", "2026-10-01T11:05:00+00:00"]
+with open(os.path.join(repo, UNMEASURED), "w", encoding="utf-8", newline="\n") as handle:
+    handle.write(json.dumps({"type": "start", "slug": "unmeasured", "base": "abc", "at": at[0]}) + "\n")
+    for task, when in (("T1", at[1]), ("T2", at[2])):
+        handle.write(json.dumps({"type": "run", "agent": "dev", "task": task, "verdict": "DONE", "open": 0,
+                                 "head": "", "at": when}) + "\n")
+cycle = status(UNMEASURED)["metrics"]["cycles"][0]
+check("a cycle whose runs carry no --seconds still reports its wall-clock elapsed, from the run timestamps",
+      cycle["seconds"] == 0 and cycle["elapsed"] == 3600, cycle)
+
 check("an old ledger counts 0 simpler proposals, and its needs-context runs",
       status(LINES)["metrics"].get("verdicts") == {"needs_context": 1, "simpler": 0, "blocked": 0},
       status(LINES)["metrics"].get("verdicts"))
+
+MEASURE = ".superpowers/measure.jsonl"
+run("start", "--slug", "measure", ledger=MEASURE)
+add("dev", "DONE", "M1", ledger=MEASURE)
+add("reviewer", "PASS", ledger=MEASURE)
+check("a run added before its completion notification arrived counts as unmeasured",
+      status(MEASURE)["metrics"]["time"]["unmeasured"] == 2, status(MEASURE)["metrics"]["time"])
+r = run("measure", "--agent", "dev", "--task", "M1", "--seconds", "2m", "--tokens", "50000", ledger=MEASURE)
+time, tokens = status(MEASURE)["metrics"]["time"], status(MEASURE)["metrics"]["tokens"]
+check("measure fills the numbers of a run already added, so a late notification is never waited for",
+      r.returncode == 0 and time["agents"] == {"dev": 120} and time["tasks"] == {"M1": 120}
+      and tokens["agents"] == {"dev": 50000} and time["unmeasured"] == 1, (r.stderr, time, tokens))
+check("the measure is a line of its own: the ledger stays append-only",
+      [entry["type"] for entry in ledger_entries(MEASURE)] == ["start", "run", "run", "measure"],
+      [entry["type"] for entry in ledger_entries(MEASURE)])
+r = run("measure", "--agent", "dev", "--task", "M1", "--seconds", "3m", ledger=MEASURE)
+check("measuring the same number twice is refused: it comes from the notification, never an estimate",
+      r.returncode != 0 and "already measured" in r.stderr, r.stderr)
+r = run("measure", "--agent", "reviewer", "--tokens", "9000", ledger=MEASURE)
+check("measure takes one number alone, for a notification that gives only that one",
+      r.returncode == 0 and status(MEASURE)["metrics"]["tokens"]["agents"] == {"dev": 50000, "reviewer": 9000},
+      (r.stderr, status(MEASURE)["metrics"]["tokens"]))
+r = run("measure", "--agent", "qa", "--seconds", "60", ledger=MEASURE)
+check("measure is refused when that agent has no run to complete", r.returncode != 0 and "no qa run" in r.stderr,
+      r.stderr)
+r = run("measure", "--agent", "dev", "--task", "M1", ledger=MEASURE)
+check("measure with neither number is refused", r.returncode != 0, r.stderr)
+r = run("measure", "--agent", "dev", "--task", "M1", "--seconds", "0", ledger=MEASURE)
+check("measure keeps the rule that 0 is no measurement", r.returncode != 0, r.stderr)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
