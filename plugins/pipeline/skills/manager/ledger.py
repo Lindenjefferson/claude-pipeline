@@ -216,7 +216,7 @@ def folded(entries):
 
 
 def completes(runs, entry):
-    """The run a measure entry completes: the one its at_run names, or, in an entry written before 2.9.9 (which named
+    """The run a measure entry completes: the one its at_run names, or, in an entry written before 1.9.9 (which named
     none), the latest of them, as that version filled it — so a ledger of those versions reads as it did."""
     if entry.get("at_run"):
         return next((run for run in runs if run.get("at") == entry["at_run"]), None)
