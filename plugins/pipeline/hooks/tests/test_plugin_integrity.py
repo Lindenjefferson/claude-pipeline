@@ -1,4 +1,4 @@
-import importlib.util, json, os, re
+import importlib.util, json, os, re, sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 spec = importlib.util.spec_from_file_location("scan", os.path.join(ROOT, "hooks", "pre-commit-secret-scan.py"))
@@ -98,3 +98,4 @@ for term in ("sudo", "--force", "chmod 777", "| sh", "| bash"):
           settings["never_allow"])
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
+sys.exit(0 if all(results) else 1)

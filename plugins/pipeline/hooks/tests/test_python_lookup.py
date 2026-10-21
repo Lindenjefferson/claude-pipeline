@@ -108,3 +108,4 @@ for event, payload in (("PreToolUse", SKIP), ("SessionStart", RESUME)):
           r.stdout + r.stderr)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
+sys.exit(0 if all(results) else 1)
