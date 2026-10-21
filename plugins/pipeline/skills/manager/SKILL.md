@@ -80,7 +80,7 @@ When a task or a fix creates, redesigns or changes a screen, read `${CLAUDE_PLUG
 
 ## Rules
 - Pass agents file paths and ranges (plan, spec, `<from>..<head>`, ledger, the report files in `.superpowers/reports/`), not pasted content.
-- Never fix code yourself; send it to the dev. The spec, the plan before approval, the plan's `## Errata`, `docs/lessons.md`, the quality report, the report files in `.superpowers/reports/`, the screen formats and "Extensões do Claude Code" lines of `CLAUDE.md` and a module doc while merging a conflict only in module docs (`references/parallel.md`) are the only files you edit.
+- Never fix code yourself; send it to the dev. The spec, the plan before approval, the plan's `## Errata`, the design round's mock (`docs/mockups/<slug>.html`), `docs/lessons.md`, the quality report, the report files in `.superpowers/reports/`, the screen formats and "Extensões do Claude Code" lines of `CLAUDE.md` and a module doc while merging a conflict only in module docs (`references/parallel.md`) are the only files you edit.
 - Screen formats are those the project's `CLAUDE.md` lists. A delivery with screens and none listed: ask the user before the design round (or the first cycle) and write them on that line.
 - Before telling the user the code already does or has something, find it in the code and give its path.
 - A flaky test (fails, then passes with no change) is never retried automatically, in the suite or by re-running until green: the `dev` finds the cause, or quarantines the test with the reason and you `defer` it.

@@ -1,7 +1,8 @@
 // Mod (Claude Code v2.1.287 or later): the delivery's progress, drawn from `ledger.py status --json`, in Portuguese
 // (the user reads it; the ledger's own text stays in English for the manager). While the ledger of this worktree has
 // a delivery, rows above the prompt, opened by a blank line so the first never runs into the text the terminal
-// printed above it, say, each wrapping instead of cutting: the plan cycle, whether it is paused and
+// printed above it, say, nothing cut and a row wider than the terminal giving each of its parts a line: the plan
+// cycle, whether it is paused and
 // the tasks and cycles left; the tasks in flight with their time, a verdict no next step covers and what comes next;
 // and the VALIDAR items waiting, in the warning color. Only the first row dims while Claude works.
 // /andamento opens a pane with what is left per cycle, the current cycle's runs, the next steps, the earlier cycles
@@ -182,7 +183,7 @@ export function deliveryFiles(r) {
 
 // The band's rows, each a list of {text, tone}, a row with nothing left out: where the delivery is and what is left;
 // what runs, a verdict no step covers and what comes next; the VALIDAR items that wait for the user.
-export function bandRows(r, now) {
+export function bandRows(r, now, columns = Infinity) {
   const where = [{ text: title(r), tone: 'title' }]
   if (r.scope && r.scope.tasks_left) {
     where.push({ text: `${r.scope.tasks_left === 1 ? 'falta' : 'faltam'} ${left(r.scope)}`, tone: 'quiet' })
@@ -205,7 +206,10 @@ export function bandRows(r, now) {
   }
   const items = waiting(r).length
   const you = items ? [{ text: items === 1 ? '1 decisão espera você' : `${items} decisões esperam você`, tone: 'you' }] : []
+  // a row wider than the terminal gives each part its own line: wrapped, the part after the gap would start a line
+  // of its own anyway and read as another row
   return [where, current, you].filter((row) => row.length)
+    .flatMap((row) => rowText(row).length <= columns ? [row] : row.map((part) => [part]))
 }
 
 function row(cells) {
@@ -454,7 +458,7 @@ export function register(on) {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if ((!report && !failure) || e.props.hasSurvey) return next(e)
     const { Box, Text } = $.ui.resolve(e)
-    const rows = report ? bandRows(report, await $.clock.now())
+    const rows = report ? bandRows(report, await $.clock.now(), e.props.bodyColumns)
       : [[{ text: `pipeline: ledger.py falhou: ${failure}`, tone: 'failed' }]]
     // a row of one part takes its tone whole; a row of several sets each part apart
     const drawn = rows.map((row, index) => Text({
