@@ -22,7 +22,7 @@ tamanho → (spec) → plano ✋ → ciclos: dev por tarefa (as independentes em
 1. O `manager` classifica o pedido (pequeno, padrão, grande); isso decide quantas etapas rodam.
 2. Nos pedidos grandes há uma spec; nos padrões e grandes, um plano revisado pelo `reviewer` que você aprova (✋ 1).
 3. Cada ciclo tem até ~6 tarefas: o `dev` implementa cada uma com o teste primeiro; o `reviewer` e o `qa` conferem o ciclo inteiro ao mesmo tempo; o `dev` corrige tudo numa rodada só.
-4. O `gate.py` confere localmente o ledger, os critérios de aceite com teste, build, tipos, lint, testes (a suíte inteira no head final, rodada por ele ou por um `qa`), auditoria de dependências e segredos, e grava um relatório de qualidade com as métricas da entrega.
+4. O `gate.py` confere localmente o ledger, os critérios de aceite com teste (e avisa quando o teste não veio antes do código), build, tipos, lint, testes (a suíte inteira no head final, rodada por ele ou por um `qa`), auditoria de dependências e segredos, e grava um relatório de qualidade com as métricas da entrega.
 5. Você decide o merge e o push (✋ 2). Nada sai da máquina sem esse pedido.
 
 Com você ausente, o [modo autônomo](plugins/pipeline/skills/manager/references/autonomous.md) do manager troca as aprovações por uma lista VALIDAR e não faz merge nem push.
