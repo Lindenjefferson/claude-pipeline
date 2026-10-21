@@ -24,9 +24,11 @@ Windows, and cmd.exe with a warning only when there is none; bash, else sh, else
 past the limit the command and, outside Windows, the processes it started are stopped); the commands changed no
 tracked file; and no secret or .env file is added anywhere in <base>..HEAD, the whole history that a push would send.
 A check that does not apply is SKIP with the reason; only Testes is required. With the test files declared, the gate
-also warns when a criterion's test first appeared in a commit that also changed code, naming the criterion and that
-commit: written first, the test comes in a commit of its own (the dev commits it before the code). The warning does
-not change the verdict. When the "Comandos" section differs
+also warns when a criterion's test arrived in the same commit as code, naming the criterion and that commit: a test
+written first has a commit of its own. Test material is not code arriving (the declared test files and anything
+under a folder they name, the plan, the lessons, the allowlist, the quality reports, and a rename with no content).
+The warning does not change the verdict, and no warning does not prove the order: code written first and committed
+after its test leaves the same history. When the "Comandos" section differs
 from the one at <base>, the gate prints the difference as a warning (and the report shows it) and still runs the
 branch's commands. A "Comandos" line labeled Testes, Tests or Test plus other words (not "Testes afetados") is no
 gate command: it is a warning (and the report lists it) to name it "Testes (<name>)". Prints READY or NOT READY and
@@ -244,39 +246,64 @@ def artifacts(plan):
     return True, ""
 
 
-def born_with_code(base, plan, ids, patterns, tests):
-    """Each criterion whose test first appeared in a commit that also changed code, with that commit: written first,
-    the test comes in a commit of its own. Needs the declared test files to tell a test from the code it covers."""
+def repo_path(path):
+    """A path from the ledger as git names it: relative to the repository root, with forward slashes."""
+    if os.path.isabs(path):
+        path = os.path.relpath(path, git("rev-parse", "--show-toplevel")[1].strip())
+    return path.replace("\\", "/").removeprefix("./")
+
+
+def test_folders(globs):
+    """The folder each declared test glob names before its first wildcard (tests/ for tests/**/*.spec.ts), so what
+    a test needs to run and lives beside it counts as test material. A glob opening with a wildcard names none."""
+    found = []
+    for pattern in globs:
+        keep = []
+        for part in pattern.replace("\\", "/").split("/")[:-1]:
+            if set(part) & set("*?["):
+                break
+            keep.append(part)
+        if keep:
+            found.append("/".join(keep) + "/")
+    return found
+
+
+def born_with_code(base, plan, ids, patterns, tests, folders):
+    """Each criterion whose test arrived in the same commit as code, with that commit. It reads one git log of the
+    delivery's own commits (first parent, so a branch a merge brought in is not read): a commit's added lines in a
+    test file give the criteria born there, and whatever else it changed says whether code came along. Test
+    material is not code arriving, and neither is a rename with no content. Needs the declared test files to tell
+    a test from the code it covers.
+
+    It finds test and code arriving together, which a test written first never does; it cannot prove the opposite,
+    since code written first and committed after its test leaves the same history."""
     def is_test(name):
         return any(regex.match(name) for regex in tests)
 
-    def counts(name):
-        return name not in (plan, LESSONS, SECRETS_ALLOW) and not name.startswith(REPORTS + "/")
+    def material(name):
+        return (is_test(name) or (folders and name.startswith(folders))
+                or name in (plan, LESSONS, SECRETS_ALLOW) or name.startswith(REPORTS + "/"))
 
-    commits, out = [], git("-c", "core.quotePath=false", "log", "--reverse", "--no-merges", "--format=commit %H",
-                           "--name-only", f"{base}..HEAD")[1]
+    found, left, sha, where, born, code, header = [], set(ids), "", "", [], False, False
+    out = git("-c", "core.quotePath=false", "log", "--reverse", "--first-parent", "--no-merges", "--format=%x00%h",
+              "-p", "-U0", "--no-prefix", f"{base}..HEAD")[1]
     for line in out.replace("\r", "").split("\n"):
-        if re.fullmatch(r"commit [0-9a-f]{40}", line):
-            commits.append((line.split()[1], []))
-        elif line and commits:
-            commits[-1][1].append(line)
-    found, left = [], set(ids)
-    for sha, names in commits:
-        kinds = {is_test(name) for name in names if counts(name)}
-        if not left or True not in kinds:
+        if line.startswith("--- "):
+            header = True
             continue
-        where = ""
-        for line in git("-c", "core.quotePath=false", "show", "-U0", "--no-prefix", "--format=",
-                        sha)[1].replace("\r", "").split("\n"):
-            if line.startswith("+++ "):
-                where = line[len("+++ "):].strip()
-            elif line.startswith("+") and where and is_test(where):
-                for item in sorted(left):
-                    if patterns[item].search(line):
-                        left.discard(item)
-                        if kinds == {True, False}:
-                            found.append((item, sha[:7]))
-    return found
+        if line.startswith("\0"):
+            found += [(item, sha) for item in born] if code else []
+            sha, where, born, code = line[1:].strip(), "", [], False
+        elif header and line.startswith("+++ "):
+            where = line[len("+++ "):].strip()
+            code = code or (where != "/dev/null" and not material(where))
+        elif line.startswith("+") and where and is_test(where):
+            for item in sorted(left):
+                if patterns[item].search(line):
+                    left.discard(item)
+                    born.append(item)
+        header = False
+    return found + ([(item, sha) for item in born] if code else [])
 
 
 def traceability(plan, base=""):
@@ -295,6 +322,7 @@ def traceability(plan, base=""):
     if not ids:
         return False, f"{plan} lists no acceptance-criterion ids (AC-...)"
     globs = next((value.split() for label, value in comandos() if label_key(label) == TEST_FILES), None)
+    folders = tuple(test_folders(globs)) if globs else ()
     names = [name for name in git("ls-files", "-z")[1].split("\0") if name and os.path.isfile(name)]
     tests = []
     if globs:
@@ -319,11 +347,12 @@ def traceability(plan, base=""):
             text = open(name, encoding="utf-8", errors="ignore").read()
             missing = [item for item in missing if not patterns[item].search(text)]
     if tests and base:
-        late = born_with_code(base, plan, ids, patterns, tests)
+        late = born_with_code(base, repo_path(plan), ids, patterns, tests, folders)
         if late:
-            print("warning: test-first not proven for "
-                  + ", ".join(f"{item} (its test came with code in {sha})" for item, sha in late)
-                  + "; a test-first commit holds only test files", flush=True)
+            print("warning: test and code in the same commit for "
+                  + ", ".join(f"{item} ({sha})" for item, sha in late)
+                  + "; a test written first has a commit of its own, and no warning does not prove that order",
+                  flush=True)
     return not missing, ("criteria with no test: " + ", ".join(missing)) if missing else ""
 
 
@@ -332,10 +361,7 @@ def changed_after(ledger, head, tree=False):
     when tree), or None when <head> is no ancestor."""
     if git("merge-base", "--is-ancestor", head, "HEAD")[0] != 0:
         return None, []
-    plan = ledger.get("plan") or ""
-    if os.path.isabs(plan):
-        plan = os.path.relpath(plan, git("rev-parse", "--show-toplevel")[1].strip())
-    plan = plan.replace("\\", "/").removeprefix("./")
+    plan = repo_path(ledger.get("plan") or "")
     out = (git("diff", "-z", "--name-only", head, "HEAD") if tree else
            git("log", "--first-parent", "--no-merges", "-z", "--name-only", "--format=", f"{head}..HEAD"))[1]
     changed = sorted({name.strip("\n") for name in out.split("\0")} - {"", plan, LESSONS, SECRETS_ALLOW})
