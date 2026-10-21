@@ -635,3 +635,4 @@ check("Full suite FAILs when the full qa head is not in this history",
       and f"the full qa head {full_head[:7]} is not in this history" in r.stdout, r.stdout)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
+sys.exit(0 if all(results) else 1)
