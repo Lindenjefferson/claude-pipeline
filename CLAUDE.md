@@ -78,7 +78,7 @@ claude plugin validate .
 
 Cada arquivo de teste Python roda sozinho com o Python 3 (sem pytest) e imprime `ALL PASS`; o `claude plugin test` roda os testes `.test.ts` do mod. Cada um sai com código diferente de zero quando um assert falha, e o CI roda esses mesmos quatro comandos a cada push e PR, no Linux e no Windows ([`.github/workflows/testes.yml`](.github/workflows/testes.yml)).
 
-Num clone novo, instale aqui o mesmo `pre-commit` que o `kickoff` instala em qualquer projeto (a premissa "o plugin não entrega o que não cumpre"), porque um hook mora em `.git/hooks` e não viaja no clone: `python plugins/pipeline/hooks/pre-commit-secret-scan.py --install-pre-commit`. Ele lê só linhas adicionadas, então os fixtures de teste já commitados não barram nada; um commit que adicione linha parecida com segredo é barrado com o fingerprint, e só o dono assina o `.pipeline-secrets-allow`.
+Num clone novo, instale aqui o mesmo `pre-commit` que o `kickoff` instala em qualquer projeto (a premissa "o plugin não entrega o que não cumpre"), porque um hook mora em `.git/hooks` e não viaja no clone: `python plugins/pipeline/hooks/pre-commit-secret-scan.py --install-pre-commit`. Ele lê só linhas adicionadas, então os fixtures de teste já commitados não barram nada; um commit que adicione linha parecida com segredo é barrado com o fingerprint, e só o dono assina o `.pipeline-secrets-allow`. As regras de permissão que o kickoff escreve em qualquer projeto valem aqui também, em `.claude/settings.json`: o `deny` do `--no-verify`, do `core.hooksPath`, do `sudo`, do force push e da edição da allowlist, e o `ask` de todo `git push`.
 
 ## Versão e release
 
