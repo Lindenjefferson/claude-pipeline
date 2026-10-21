@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""PreToolUse hook (matcher Bash, see hooks.json): denies skipping the secret-scan pre-commit hook, anything that
-reaches the default branch while the delivery is in autonomous mode, and the project's dev server outside background
-mode.
+"""PreToolUse hook (matcher Bash|PowerShell, see hooks.json): denies skipping the secret-scan pre-commit hook,
+anything that reaches the default branch while the delivery is in autonomous mode, and the project's dev server
+outside background mode.
 
 In autonomous mode (the latest mode entry of the ledger ledger.py finds from the session's directory), denied in the
 foreground or background: a git push of the default branch (named by origin/HEAD, else init.defaultBranch, main or
@@ -22,12 +22,18 @@ env, command, time, nohup, xargs, `!`, `{` and if/then are looked through; a com
 not read. Permission rules match the command as plain text and cannot tell a flag from a message, which is why this
 check lives here. A command that does not parse (an unbalanced quote) passes, since the shell refuses it too.
 
+A PowerShell call goes through the same checks, read with PowerShell's own rules: single quotes literal ('' an
+escaped quote), double quotes with a backtick escape, a here-string body (@'...'@) data the command only passes
+along, `;` `|` `(` `)` a newline and `&&` `||` as separators, the call operator `&` a wrapper, -Command (any
+unambiguous prefix) and Invoke-Expression or iex read like a shell's -c and eval, a `#` that opens a word a comment
+to the end of its line, and `$env:NAME = value` read as the assignment it is. `--%` is git's argument either way, so a flag behind it still counts.
+
 A dev server run in the foreground never returns: the call hangs, and the process is orphaned when it times out.
 The command comes from the project's CLAUDE.md, the line `- Rodar em desenvolvimento: `<command>`` under
 "Comandos" (the same lines gate.py reads); the plugin knows no stack. Without a CLAUDE.md found from the session's
 directory upwards, or without that line holding a command in backticks, it does nothing.
 
-Denied: a Bash call without run_in_background whose command contains the dev command at the start of a shell
+Denied: a call without run_in_background whose command contains the dev command at the start of a shell
 segment (after &&, ||, ;, |, a newline, an opening parenthesis or env assignments), alone or followed by arguments;
 `npm run dev &` counts too, because the shell leaves the same orphan. Text the shell only passes along is not
 read: quoted strings (a commit message) and heredoc bodies (a file being written), unless a shell reads the
@@ -78,15 +84,29 @@ def executed(command):
     return QUOTED.sub("''", HEREDOC.sub(heredoc, command))
 
 
-def runs_it(command, dev):
-    words = r"\s+".join(re.escape(word) for word in dev.split())
-    return re.search(r"(?:^|&&|\|\||[;|\n(])\s*(?:[A-Za-z_]\w*=\S*\s+)*" + words + r"(?=\s|$|[;&|)])",
+def program_name(word):
+    """The command's name without its path, its case or a .exe suffix."""
+    return re.split(r"[\\/]", word)[-1].lower().removesuffix(".exe")
+
+
+def runs_it(command, dev, powershell=False):
+    """True when the command runs the dev command: in PowerShell, as a simple command of its own, since its
+    quoting is resolved word by word; in Bash, at the start of a shell segment of the text the shell executes."""
+    words = dev.split()
+    if powershell:
+        return any(program == program_name(words[0]) and list(arguments[:len(words) - 1]) == words[1:]
+                   for program, arguments, _ in simple_commands(command, powershell=True))
+    pattern = r"\s+".join(re.escape(word) for word in words)
+    return re.search(r"(?:^|&&|\|\||[;|\n(])\s*(?:[A-Za-z_]\w*=\S*\s+)*" + pattern + r"(?=\s|$|[;&|)])",
                      executed(command)) is not None
 
 
 SHELLS = {"sh", "bash", "zsh", "dash"}
-WRAPPERS = {"env", "command", "time", "nohup", "exec", "xargs", "!", "{", "if", "then", "else", "elif", "do", "while",
-            "until"}
+PS_SHELLS = {"powershell", "pwsh"}
+EVALS = {"eval"}
+PS_EVALS = {"invoke-expression", "iex"}
+WRAPPERS = {"env", "command", "time", "nohup", "exec", "xargs", "!", "{", "&", "if", "then", "else", "elif", "do",
+            "while", "until"}
 CONFIG_READS = {"--get", "--get-all", "--get-regexp", "--list", "-l", "get", "list"}
 CONFIG_UNSETS = {"--unset", "--unset-all", "unset"}
 COMMIT_VALUE = set("mFCct")
@@ -113,18 +133,98 @@ def segments(command, commenters=""):
     return found + [words] if words else found
 
 
+PS_HERESTRING = re.compile(r"@(['\"])[ \t]*\n.*?\n\1@", re.S)
+PS_SEPARATORS = ";\n|()"
+
+
+def ps_quoted(text, index, quote):
+    """The text of the quoted string that opens at index, and the index after it. Inside single quotes '' is an
+    escaped quote and nothing else is special; inside double quotes a backtick escapes the next character."""
+    word, index = "", index + 1
+    while index < len(text):
+        char = text[index]
+        if char == quote:
+            if text[index + 1:index + 2] != quote:
+                return word, index + 1
+            index += 1
+        elif char == "`" and quote == '"':
+            index += 1
+            if index >= len(text):
+                break
+        word += text[index]
+        index += 1
+    raise ValueError(f"unbalanced {quote} in the PowerShell command")
+
+
+def ps_assignments(words):
+    """`$env:NAME = value` and `$env:NAME=value` as `export NAME=value`: it does change the process environment of
+    what follows, and that is the shape the checks already read. A `$env:NAME` read as a value is left as it is, so
+    it stays one argument of the command."""
+    found, index = [], 0
+    while index < len(words):
+        word, assignment = words[index], ""
+        if word.lower().startswith("$env:"):
+            assignment = word[len("$env:"):]
+            if "=" not in assignment and words[index + 1:index + 2] == ["="]:
+                assignment += "=" + (words[index + 2] if index + 2 < len(words) else "")
+                index += 2
+        found += ["export", assignment] if "=" in assignment else [word]
+        index += 1
+    return found
+
+
+def ps_segments(command):
+    """Each simple command of a PowerShell command line as its words, quotes resolved, with the here-string bodies
+    the command only passes along removed. Raises ValueError on an unbalanced quote, which PowerShell refuses too."""
+    text = PS_HERESTRING.sub("''", command)
+    found, words, word, open_word, index = [], [], "", False, 0
+    while index < len(text):
+        char, pair = text[index], text[index:index + 2]
+        if char in "'\"":
+            quoted, index = ps_quoted(text, index, char)
+            word, open_word = word + quoted, True
+            continue
+        if open_word and (char in " \t\r" or char in PS_SEPARATORS or pair in ("&&", "||")):
+            words.append(word)
+            word, open_word = "", False
+        if char == "#" and not open_word:
+            index = text.find("\n", index)
+            if index < 0:
+                break
+            continue
+        if char in PS_SEPARATORS or pair in ("&&", "||"):
+            if words:
+                found.append(words)
+                words = []
+            index += 2 if pair in ("&&", "||") else 1
+        elif char in " \t\r":
+            index += 1
+        else:
+            if char == "`":
+                index += 1
+                if index >= len(text):
+                    break
+            word, open_word = word + text[index], True
+            index += 1
+    if open_word:
+        words.append(word)
+    return [ps_assignments(segment) for segment in (found + [words] if words else found)]
+
+
 def hooks_path(key):
     return key.split("=", 1)[0].lower() == "core.hookspath"
 
 
-def simple_commands(command):
+def simple_commands(command, powershell=False):
     """Each simple command the shell runs, as (program, its arguments, the segment's words), looking through
-    wrappers and into a shell's -c and eval. A '#' is read as text first (it starts a comment only at the start of a
-    word, which shlex cannot tell); a command that does not parse that way is read again with '#' as a comment, and
-    one that parses neither way yields nothing."""
+    wrappers and into a shell's -c (PowerShell's -Command) and eval (Invoke-Expression). In Bash a '#' is read as
+    text first (it starts a comment only at the start of a word, which shlex cannot tell); a command that does not
+    parse that way is read again with '#' as a comment, and one that parses neither way yields nothing."""
     try:
-        parsed = segments(command)
+        parsed = ps_segments(command) if powershell else segments(command)
     except ValueError:
+        if powershell:
+            return
         try:
             parsed = segments(command, "#")
         except ValueError:
@@ -136,18 +236,19 @@ def simple_commands(command):
             words = words[1:]
         if not words:
             continue
-        program = re.split(r"[\\/]", words[0])[-1].lower()
-        if program in SHELLS:
+        program = program_name(words[0])
+        if program in (PS_SHELLS if powershell else SHELLS):
             for position, word in enumerate(words[1:-1], 1):
                 if not word.startswith("-"):
                     break
-                if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", word):
-                    yield from simple_commands(words[position + 1])
+                if ("-command".startswith(word.lower()) and len(word) > 1) if powershell \
+                        else re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", word):
+                    yield from simple_commands(words[position + 1], powershell)
                     break
-        elif program == "eval":
-            yield from simple_commands(" ".join(words[1:]))
+        elif program in (PS_EVALS if powershell else EVALS):
+            yield from simple_commands(" ".join(words[1:]), powershell)
         else:
-            yield program.removesuffix(".exe"), words[1:], segment
+            yield program, words[1:], segment
 
 
 def git_command(arguments):
@@ -165,9 +266,9 @@ def git_command(arguments):
     return (rest[0] if rest else ""), rest[1:], override
 
 
-def skips_hook(command):
+def skips_hook(command, powershell=False):
     """True when the command skips the pre-commit hook."""
-    for program, arguments, segment in simple_commands(command):
+    for program, arguments, segment in simple_commands(command, powershell):
         if any(re.fullmatch(r"GIT_CONFIG\w*=.*", word) and "core.hookspath" in word.lower() for word in segment):
             return True
         if program != "git":
@@ -248,11 +349,11 @@ def merges_pull_request(arguments):
         and any(re.search(r"(pulls|merge_requests)/\d+/merge\b", word) for word in arguments))
 
 
-def reaches_main(command, cwd):
+def reaches_main(command, cwd, powershell=False):
     """True in autonomous mode when the command merges into or pushes the default branch, or merges a pull request.
     A git checkout or switch earlier in the same command counts as the branch checked out for what follows it."""
     calls = []
-    for program, arguments, _ in simple_commands(command):
+    for program, arguments, _ in simple_commands(command, powershell):
         if program == "git":
             name, rest, _ = git_command(arguments)
             if name in ("push", "merge", "checkout", "switch"):
@@ -302,16 +403,17 @@ def commit_skips(arguments):
 
 def main():
     payload = json.load(sys.stdin)
-    if payload.get("tool_name") != "Bash":
+    if payload.get("tool_name") not in ("Bash", "PowerShell"):
         return
+    powershell = payload["tool_name"] == "PowerShell"
     tool_input = payload.get("tool_input") or {}
     command = tool_input.get("command") or ""
     cwd = payload.get("cwd") or os.getcwd()
-    if skips_hook(command):
+    if skips_hook(command, powershell):
         reason = ("This skips the secret-scan pre-commit hook (--no-verify, -n or a core.hooksPath override), and a "
                   "secret committed stays in the history. Commit without it; if the hook blocks, fix what it reports "
                   "(a false positive is allowlisted by the user, as its message explains).")
-    elif reaches_main(command, cwd):
+    elif reaches_main(command, cwd, powershell):
         reason = ("The delivery is in autonomous mode (the ledger says so), and nothing reaches the default branch "
                   "without the user: no push to it, no merge into it, no pull request merge. Leave the merge and the "
                   "push for approval 2, when the user returns.")
@@ -319,10 +421,10 @@ def main():
         return
     else:
         dev = dev_command(cwd)
-        if not dev or not runs_it(command, dev):
+        if not dev or not runs_it(command, dev, powershell):
             return
         reason = (f"`{dev}` is this project's dev server and never returns, so in the foreground it hangs the call and "
-                  "leaves an orphan process. Run the same command with the Bash tool's run_in_background set to true "
+                  "leaves an orphan process. Run the same command with the tool's run_in_background set to true "
                   "(and stop it before you finish), or reuse a server already running for this directory.")
     json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                       "permissionDecisionReason": reason}}, sys.stdout)
