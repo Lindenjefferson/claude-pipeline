@@ -1,0 +1,59 @@
+name: testes
+
+# Os quatro comandos de "Testar e validar" do CLAUDE.md, nos dois sistemas que o plugin diz suportar.
+# A premissa "o plugin não entrega o que não cumpre": o kickoff exige build, tipos, lint e testes de qualquer
+# projeto, então este repositório também roda o que exige.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  scripts:
+    name: suítes do Python (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: identidade do git, que as suítes usam para criar repositórios
+        shell: bash
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "pipeline CI"
+          git config --global init.defaultBranch main
+      - name: cada suíte pelo python.sh que os hooks usam
+        shell: bash
+        run: |
+          status=0
+          for t in plugins/pipeline/hooks/tests/test_*.py plugins/pipeline/skills/manager/tests/test_*.py; do
+            if sh plugins/pipeline/hooks/python.sh "$t" > "$RUNNER_TEMP/saida.txt" 2>&1; then
+              printf '%-58s %s\n' "$t" "$(tail -1 "$RUNNER_TEMP/saida.txt")"
+            else
+              status=1
+              printf '%-58s FALHOU\n' "$t"
+              cat "$RUNNER_TEMP/saida.txt"
+            fi
+          done
+          exit $status
+
+  plugin:
+    name: mod e manifesto pelo CLI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: claude plugin validate plugins/pipeline
+      - run: claude plugin validate .
+      - name: testes .test.ts do mod
+        working-directory: plugins/pipeline
+        run: claude plugin test
