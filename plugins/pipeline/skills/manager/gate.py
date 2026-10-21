@@ -6,7 +6,8 @@
 Checks, in order: nothing is pending in the ledger (the current cycle is closed and every deferred item has a final
 decision); the tree is clean; every acceptance-criterion id of the plan recorded in the ledger (tokens like AC-T3-2)
 appears in a tracked test file, as written or, for a test named by an identifier, in any case with _ for - and .
-(ac_t3_2, test_AC_T3_2; a longer id such as AC-T3-21, AC-T3-2.1 or ac_t3_2_1 is another id) (the globs on the
+(ac_t3_2, test_AC_T3_2; a longer id such as AC-T3-21, AC-T3-2.1 or ac_t3_2_1 is another id); the plan names no path inside .superpowers/, the agent workspace the kickoff
+ignores, since no clone would have it (the globs on the
 "Arquivos de teste" line of the CLAUDE.md "Comandos" section, space-separated globs where * and ? stay within one
 folder, **/ matches zero or more folders and {a,b} is either; an invalid glob, or one that matches no tracked file,
 prints a warning; without that line, every tracked file that is not Markdown); no commit after the head of the
@@ -55,6 +56,7 @@ SCANNER = os.path.join(HERE, "..", "..", "hooks", "pre-commit-secret-scan.py")
 COMMANDS = {"build": "Build", "typecheck": "Typecheck", "tipos": "Typecheck", "lint": "Lint", "testes": "Testes",
             "tests": "Testes", "test": "Testes", "auditoria": "Auditoria", "audit": "Auditoria"}
 ORDER = ["Build", "Typecheck", "Lint", "Testes", "Auditoria"]
+WORKSPACE = re.compile(r"[\w./\-]*\.superpowers/[\w./\-]+")
 TEST_FILES = "arquivos de teste"
 NOT_COMMANDS = {TEST_FILES, "testes afetados"}
 INTERFACE = ("verificação de interface", "verificacao de interface")
@@ -223,6 +225,19 @@ def glob_regex(pattern):
             out.append(re.escape(char))
         index += 1
     return re.compile("".join(out) + r"\Z")
+
+
+def artifacts(plan):
+    if not plan:
+        return True, "no plan in the ledger (small work has none)"
+    if not os.path.exists(plan):
+        return False, f"plan not found: {plan}"
+    named = sorted(set(WORKSPACE.findall(open(plan, encoding="utf-8").read())))
+    if named:
+        return False, (f"{plan} points inside .superpowers/, the agent workspace the kickoff ignores, so no clone has "
+                       "these, and an artifact anyone reads (a mock above all) lives in a versioned path: "
+                       + ", ".join(named))
+    return True, ""
 
 
 def traceability(plan):
@@ -483,6 +498,7 @@ def main():
     commands = project_commands(args.cmd)
     if ledger:
         checks.append(("Criteria", *traceability(ledger.get("plan"))))
+        checks.append(("Artifacts", *artifacts(ledger.get("plan"))))
         checks.append(("Reviewed", *reviewed(ledger)))
         checks.append(("Full suite", *full_suite(ledger, commands)))
 

@@ -179,6 +179,16 @@ r = gate("--base", "main")
 check("declared test files limit the search: an id only in source code is missing",
       r.returncode == 1 and "AC-T1-2" in r.stdout, r.stdout)
 commit("tests/c.test.txt", "test('AC-T1-2 given x')\n", "test: c")
+PLAN = "# plan\n- AC-T1-1 Given a, When b, Then c.\n- AC-T1-2 Given x.\n- AC-T1.3 Given y.\n## Errata\n"
+commit("plan.md", PLAN + "\nMock: .superpowers/design/y/index.html\n", "docs: the plan names the mock")
+r = gate("--base", "main")
+check("the plan pointing inside the ignored agent workspace: NOT READY, naming the path",
+      r.returncode == 1 and re.search(r"Artifacts:\s+FAIL", r.stdout)
+      and ".superpowers/design/y/index.html" in r.stdout, r.stdout)
+commit("plan.md", PLAN + "\nMock: docs/mockups/y.html\n", "docs: the mock in a versioned path")
+r = gate("--base", "main")
+check("the plan pointing only at versioned paths: Artifacts passes",
+      bool(re.search(r"Artifacts:\s+PASS", r.stdout)), r.stdout)
 
 commit("CLAUDE.md", claude_md(test_files="tests/*", audit=False), "docs: audit")
 r = gate("--base", "main")
