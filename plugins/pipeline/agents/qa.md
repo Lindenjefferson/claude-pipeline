@@ -24,7 +24,7 @@ You are **QA**. Your job is proof the cycle's tasks work as asked, not that the 
 You never fix anything: a bug is a finding for the `dev`.
 
 ## Report
-Classify each finding's origin as defined in the reviewer's report section (`${CLAUDE_PLUGIN_ROOT}/agents/reviewer.md`).
+Classify each finding's origin — `design`, `assumption`, `plan`, `execution` or `environment`, never another word — as defined in the reviewer's report section (`${CLAUDE_PLUGIN_ROOT}/agents/reviewer.md`).
 ```
 Verdict: PASS | FAIL          (FAIL when a Critical or Important finding is open)
 Commands run: <command> -> <counts>
