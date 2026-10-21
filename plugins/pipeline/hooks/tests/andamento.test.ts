@@ -206,6 +206,22 @@ test('with a delivery open, the band is drawn above the prompt and keeps what ot
   await ui.unmount()
 })
 
+test('a row too wide for the terminal becomes one line per part, so no part reads as a row of its own', () => {
+  expect(bandRows(STATUS, NOW, 40).map(rowText)).toEqual(['etapa 5, ciclo 2 de 3, modo autônomo',
+                                                          'faltam 3 tarefas em 2 ciclos',
+                                                          '● dev na T2.1 há 14 min',
+                                                          'depois: correção (2 achados da revisão)',
+                                                          '1 decisão espera você'])
+})
+
+test('the band opens with a blank line, so its first row never runs into the text above it', async ($, on) => {
+  const clock = stubs(on, STATUS)
+  await start($, clock)
+  const ui = await $.ui.mount(BAND)
+  expect(await ui.find({ type: 'Text', text: /^$/ })).toBeDefined()
+  await ui.unmount()
+})
+
 test('the band rows wrap instead of cutting, only the title dims while Claude works, and VALIDAR is a warning', async ($, on) => {
   const clock = stubs(on, STATUS)
   await start($, clock)
