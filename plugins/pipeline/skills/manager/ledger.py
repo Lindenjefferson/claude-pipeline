@@ -11,7 +11,7 @@
   release --task <id>                                         frees a claim whose run was lost
   pause   --text <text>                                       the delivery stops; the text says what comes on return
   resume                                                      the work restarts; lists the claims still in flight
-  measure --agent dev|reviewer|qa [--task <id>] [--seconds <duration>] [--tokens N]   numbers of a run already added
+  measure --agent dev|reviewer|qa [--task <id>] [--at <at>] [--seconds <duration>] [--tokens N]  numbers of a run added
   note    --text <text> [--validar]                           a decision taken on the user's behalf
   validate --id <id> --decision <text>                        the user's decision on a VALIDAR item (V1, V2...)
   waive   --agent reviewer|qa [--task spec|plan] --reason <text>   accepts the open findings of that agent's latest FAIL
@@ -46,12 +46,13 @@ a reviewer pass, and qa again only when a FAIL came before them. Every finding c
 assumption, plan, execution, environment); --report keeps the path of the file the manager saved the agent's report
 in, so a FAIL still open names it; --seconds takes 90, 12m, 1h5m or 12m30s, and --seconds and --tokens are optional, from the
 agent's completion notification when it already arrived, never an estimate (a run without them goes unmeasured, its
-span counting from its timestamp in the cycle's elapsed, and 0 is refused). measure fills the numbers
-of a run whose completion notification arrived after its add (the latest run of that agent and task), as its own line,
-and is refused when they are already there, so no dispatch ever waits for a notification. status gives each claim in
-flight its waiting_minutes and, for a claim with no worktree whose delivery head moved since, committed: the dev commits straight
-on the branch, so its work may be in and its report waiting to be added. A deferred
-item with no decision keeps the delivery from the gate. start --archive moves an existing delivery to
+span counting from its timestamp in the cycle's elapsed, which is null when that span comes to zero, and 0 is refused). measure fills the numbers
+of a run whose completion notification arrived after its add, as its own line naming that run: with one run of that
+agent and task still unmeasured it takes them by itself, and with more than one it refuses and lists their at, which
+--at then names (a waived run takes none, and a run already measured is refused) - guessing would move the numbers of
+every later notification by one run, for the whole delivery. No dispatch ever waits for a notification. status gives each claim in flight its waiting_minutes and, for a claim with no worktree whose delivery
+head moved since, committed: the dev commits straight on the branch, so its work may be in and its report waiting to
+be added. A deferred item with no decision keeps the delivery from the gate. start --archive moves an existing delivery to
 ledger-<old-slug>.jsonl next to the ledger first. --check exits 1 while anything is pending, so the gate can rely on
 it. A cycle whose reviewer or qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on
 up to three, then the delivery stops. extend, once status asks the user or stops, records the user's decision to go
@@ -198,19 +199,28 @@ def read(path):
 
 
 def folded(entries):
-    """Every measure entry filled into the run it completes, so a notification that arrived late still counts."""
-    latest, kept = {}, []
+    """Every measure entry filled into the one run it names, so a batch of notifications arriving after several runs
+    lands one number per run, whichever order they arrive in and even when a run was never measured at all."""
+    held, kept = {}, []
     for entry in entries:
         if entry["type"] == "measure":
-            target = latest.get((entry["agent"], entry.get("task") or ""))
+            target = completes(held.get((entry["agent"], entry.get("task") or ""), []), entry)
             for key in ("seconds", "tokens"):
                 if target is not None and entry.get(key) is not None:
                     target[key] = entry[key]
             continue
         if entry["type"] == "run":
-            latest[(entry["agent"], entry.get("task") or "")] = entry
+            held.setdefault((entry["agent"], entry.get("task") or ""), []).append(entry)
         kept.append(entry)
     return kept
+
+
+def completes(runs, entry):
+    """The run a measure entry completes: the one its at_run names, or, in an entry written before 2.9.9 (which named
+    none), the latest of them, as that version filled it — so a ledger of those versions reads as it did."""
+    if entry.get("at_run"):
+        return next((run for run in runs if run.get("at") == entry["at_run"]), None)
+    return runs[-1] if runs else None
 
 
 def write(path, entry):
@@ -764,15 +774,38 @@ def measure(args):
         sys.exit("measure takes --seconds, --tokens or both, from the run's completion notification")
     if 0 in numbers.values():
         sys.exit("0 is no measurement: leave that number out while the run is unmeasured")
+    which = f" of {args.task}" if args.task else ""
+    # read() already folded the earlier measures in, so a run still missing a number is one no notification filled.
     found = [entry for entry in entries if entry["type"] == "run" and entry["agent"] == args.agent
-             and (entry.get("task") or "") == args.task]
+             and (entry.get("task") or "") == args.task and entry.get("waived") is None]
     if not found:
-        sys.exit(f"no {args.agent} run{f' of {args.task}' if args.task else ''} in the ledger to complete")
-    already = [key for key in numbers if found[-1].get(key) is not None]
+        sys.exit(f"no {args.agent} run{which} in the ledger to complete")
+    if args.at:
+        named = [entry for entry in found if entry.get("at") == args.at]
+        if not named:
+            sys.exit(f"no {args.agent} run at {args.at}: status --json gives the at of each run, and a run the waive "
+                     "dispensed takes no numbers")
+        if len(named) > 1:
+            # at is stamped to the second: runs that share one are indistinguishable here and to whoever reads it.
+            sys.exit(f"{len(named)} {args.agent} runs share the at {args.at}: nothing here tells them apart, so leave "
+                     "them unmeasured rather than put the numbers on a guess")
+        target = named[0]
+    else:
+        open_runs = [entry for entry in found if any(entry.get(key) is None for key in numbers)]
+        if not open_runs:
+            sys.exit(f"every {args.agent} run{which} is already measured for {', '.join(numbers)}: the numbers come "
+                     "from one completion notification, never a second guess")
+        if len(open_runs) > 1:
+            # Guessing moves the numbers of every later notification by one run, silently, for the whole delivery.
+            sys.exit(f"{len(open_runs)} {args.agent} runs{which} are still missing {', '.join(numbers)}: pass --at "
+                     "<timestamp> to name the one this notification completes "
+                     f"({', '.join(entry['at'] for entry in open_runs)})")
+        target = open_runs[0]
+    already = [key for key in numbers if target.get(key) is not None]
     if already:
-        sys.exit(f"that {args.agent} run is already measured ({', '.join(f'{key} {found[-1][key]}' for key in already)}"
+        sys.exit(f"that {args.agent} run is already measured ({', '.join(f'{key} {target[key]}' for key in already)}"
                  "): the numbers come from one completion notification, never a second guess")
-    write(args.ledger, {"type": "measure", "agent": args.agent, "task": args.task, **numbers})
+    write(args.ledger, {"type": "measure", "agent": args.agent, "task": args.task, "at_run": target["at"], **numbers})
     print(f"measured {args.agent}{' ' + args.task if args.task else ''}: "
           + ", ".join(f"{key} {value}" for key, value in numbers.items()))
 
@@ -933,7 +966,8 @@ def elapsed(cycle):
         return None
     ends = [datetime.datetime.fromisoformat(entry["at"]) for entry in timed]
     starts = [end - datetime.timedelta(seconds=entry.get("seconds") or 0) for end, entry in zip(ends, timed)]
-    return int((max(ends) - min(starts)).total_seconds())
+    # A zero span is no measurement (one unmeasured run, or runs stamped in the same second): the cycle has no clock.
+    return int((max(ends) - min(starts)).total_seconds()) or None
 
 
 def classify(entry, found):
@@ -1338,6 +1372,8 @@ def main():
     command.add_argument("--task", default="")
     command.add_argument("--seconds", help="how long the run took, from a notification that arrived after its add")
     command.add_argument("--tokens", type=count, help="the tokens the run used, from that same notification")
+    command.add_argument("--at", default="", help="the at of the run it completes, as status --json gives it; needed "
+                                                  "only when more than one run of that agent is still unmeasured")
     command.set_defaults(run=measure)
     command = commands.add_parser("validate")
     command.add_argument("--id", required=True)

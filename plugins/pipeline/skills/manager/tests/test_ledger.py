@@ -202,10 +202,10 @@ check("metrics count findings and fix rounds per cycle",
 check("metrics classify findings by origin",
       metrics["origins"] == {"design": 3, "assumption": 1, "plan": 1, "execution": 2, "environment": 1,
                              "unclassified": 0}, metrics["origins"])
-time = metrics["time"]
+clocked = metrics["time"]
 check("metrics add up measured time per agent, task and cycle",
-      time["agents"] == {"reviewer": 300, "dev": 630} and time["tasks"] == {"fix-1": 630}
-      and metrics["cycles"][0]["seconds"] == 930 and time["unmeasured"] == 8, time)
+      clocked["agents"] == {"reviewer": 300, "dev": 630} and clocked["tasks"] == {"fix-1": 630}
+      and metrics["cycles"][0]["seconds"] == 930 and clocked["unmeasured"] == 8, clocked)
 r = add("dev", "DONE", "T9", ledger=METRICS, seconds="soon")
 check("an unreadable duration is refused", r.returncode != 0, r.stderr)
 check("metrics list lessons, automated or written",
@@ -1545,10 +1545,10 @@ add("reviewer", "PASS", ledger=MEASURE)
 check("a run added before its completion notification arrived counts as unmeasured",
       status(MEASURE)["metrics"]["time"]["unmeasured"] == 2, status(MEASURE)["metrics"]["time"])
 r = run("measure", "--agent", "dev", "--task", "M1", "--seconds", "2m", "--tokens", "50000", ledger=MEASURE)
-time, tokens = status(MEASURE)["metrics"]["time"], status(MEASURE)["metrics"]["tokens"]
+clocked, tokens = status(MEASURE)["metrics"]["time"], status(MEASURE)["metrics"]["tokens"]
 check("measure fills the numbers of a run already added, so a late notification is never waited for",
-      r.returncode == 0 and time["agents"] == {"dev": 120} and time["tasks"] == {"M1": 120}
-      and tokens["agents"] == {"dev": 50000} and time["unmeasured"] == 1, (r.stderr, time, tokens))
+      r.returncode == 0 and clocked["agents"] == {"dev": 120} and clocked["tasks"] == {"M1": 120}
+      and tokens["agents"] == {"dev": 50000} and clocked["unmeasured"] == 1, (r.stderr, clocked, tokens))
 check("the measure is a line of its own: the ledger stays append-only",
       [entry["type"] for entry in ledger_entries(MEASURE)] == ["start", "run", "run", "measure"],
       [entry["type"] for entry in ledger_entries(MEASURE)])
@@ -1566,5 +1566,101 @@ r = run("measure", "--agent", "dev", "--task", "M1", ledger=MEASURE)
 check("measure with neither number is refused", r.returncode != 0, r.stderr)
 r = run("measure", "--agent", "dev", "--task", "M1", "--seconds", "0", ledger=MEASURE)
 check("measure keeps the rule that 0 is no measurement", r.returncode != 0, r.stderr)
+
+SPAN = ".superpowers/span.jsonl"
+run("start", "--slug", "span", ledger=SPAN)
+add("dev", "DONE", "S1", ledger=SPAN)
+check("a cycle of one unmeasured run has no elapsed: a zero span is not a measurement",
+      status(SPAN)["metrics"]["cycles"][0]["elapsed"] is None, status(SPAN)["metrics"]["cycles"][0])
+
+BATCH = ".superpowers/batch.jsonl"
+run("start", "--slug", "batch", ledger=BATCH)
+add("reviewer", "FAIL", open_count=2, ledger=BATCH)
+add("dev", "DONE", "fix-1", ledger=BATCH)
+time.sleep(1)  # at is stamped to the second, and these two reviewer runs have to be told apart
+add("reviewer", "PASS", ledger=BATCH)
+rounds = [entry for entry in ledger_entries(BATCH) if entry["type"] == "run" and entry["agent"] == "reviewer"]
+r = run("measure", "--agent", "reviewer", "--seconds", "300", ledger=BATCH)
+check("with two runs of that agent unmeasured, measure refuses to guess which one the notification completes",
+      r.returncode != 0 and "--at" in r.stderr and all(entry["at"] in r.stderr for entry in rounds), r.stderr)
+r = run("measure", "--agent", "reviewer", "--at", rounds[1]["at"], "--seconds", "300", "--tokens", "9000", ledger=BATCH)
+check("--at names the run the notification completes, and nothing else is touched",
+      r.returncode == 0 and status(BATCH)["metrics"]["time"]["agents"]["reviewer"] == 300
+      and status(BATCH)["metrics"]["time"]["unmeasured"] == 2, (r.stderr, status(BATCH)["metrics"]["time"]))
+r = run("measure", "--agent", "reviewer", "--at", rounds[0]["at"], "--seconds", "60", "--tokens", "1000", ledger=BATCH)
+check("the notification of the earlier run fills that run: a batch of them lands one per run",
+      r.returncode == 0 and status(BATCH)["metrics"]["time"]["agents"]["reviewer"] == 360,
+      (r.stderr, status(BATCH)["metrics"]["time"]))
+r = run("measure", "--agent", "reviewer", "--at", "2020-01-01T00:00:00+00:00", "--seconds", "60", ledger=BATCH)
+check("--at that names no run of that agent is refused instead of landing somewhere",
+      r.returncode != 0 and "no reviewer run at" in r.stderr, r.stderr)
+r = run("measure", "--agent", "reviewer", "--at", rounds[1]["at"], "--seconds", "90", ledger=BATCH)
+check("a run already measured is refused even when --at names it",
+      r.returncode != 0 and "already measured" in r.stderr, r.stderr)
+
+LOST = ".superpowers/lost.jsonl"
+run("start", "--slug", "lost", ledger=LOST)
+add("dev", "DONE", "L1", ledger=LOST)
+add("qa", "FAIL", open_count=1, ledger=LOST)
+add("dev", "DONE", "fix-1", ledger=LOST)
+time.sleep(1)
+add("qa", "PASS", ledger=LOST)
+lost = [entry for entry in ledger_entries(LOST) if entry["type"] == "run" and entry["agent"] == "qa"]
+r = run("measure", "--agent", "qa", "--at", lost[1]["at"], "--seconds", "120", ledger=LOST)
+qa_runs = [entry for entry in status(LOST)["runs"] if entry["agent"] == "qa"]
+check("a notification that never arrived for an earlier run does not shift the later ones",
+      r.returncode == 0 and qa_runs[1].get("seconds") == 120 and qa_runs[0].get("seconds") is None,
+      [(entry["verdict"], entry.get("seconds")) for entry in qa_runs])
+
+OLD = ".superpowers/old.jsonl"
+run("start", "--slug", "old", ledger=OLD)
+add("reviewer", "FAIL", open_count=1, ledger=OLD)
+add("dev", "DONE", "fix-1", ledger=OLD)
+add("reviewer", "PASS", ledger=OLD)
+with open(os.path.join(repo, OLD), "a", encoding="utf-8", newline="\n") as handle:
+    handle.write(json.dumps({"type": "measure", "agent": "reviewer", "task": "", "seconds": 240,
+                             "at": "2026-10-18T12:00:00+00:00"}) + "\n")
+old_rounds = [entry for entry in status(OLD)["runs"] if entry["agent"] == "reviewer"]
+check("a measure line of 2.9.8, which names no run, still fills the latest one, so those ledgers read the same",
+      old_rounds[-1].get("seconds") == 240 and old_rounds[0].get("seconds") is None,
+      [(entry["verdict"], entry.get("seconds")) for entry in old_rounds])
+
+TIE = ".superpowers/tie.jsonl"
+run("start", "--slug", "tie", ledger=TIE)
+SAME = "2026-10-18T12:00:00+00:00"
+with open(os.path.join(repo, TIE), "a", encoding="utf-8", newline="\n") as handle:
+    for _ in range(2):
+        handle.write(json.dumps({"type": "run", "agent": "reviewer", "task": "", "verdict": "PASS", "open": 0,
+                                 "critical": 0, "important": 0, "minor": 0, "origin": {}, "head": "",
+                                 "at": SAME}) + "\n")
+r = run("measure", "--agent", "reviewer", "--at", SAME, "--seconds", "60", ledger=TIE)
+check("two runs stamped in the same second are left unmeasured, not measured on a guess",
+      r.returncode != 0 and "tells them apart" in r.stderr, r.stderr)
+
+SPLIT = ".superpowers/split.jsonl"
+run("start", "--slug", "split", ledger=SPLIT)
+add("reviewer", "FAIL", open_count=1, seconds=60, ledger=SPLIT)
+add("dev", "DONE", "fix-1", ledger=SPLIT)
+time.sleep(1)
+add("reviewer", "PASS", ledger=SPLIT)
+split = [entry for entry in ledger_entries(SPLIT) if entry["type"] == "run" and entry["agent"] == "reviewer"]
+run("measure", "--agent", "reviewer", "--at", split[1]["at"], "--seconds", "100", "--tokens", "5000", ledger=SPLIT)
+rounds = [entry for entry in status(SPLIT)["runs"] if entry["agent"] == "reviewer"]
+check("one notification fills one run: its two numbers never split between two runs",
+      rounds[0].get("tokens") is None and rounds[1].get("seconds") == 100 and rounds[1].get("tokens") == 5000,
+      [(entry.get("seconds"), entry.get("tokens")) for entry in rounds])
+
+WAIVED = ".superpowers/waived.jsonl"
+run("start", "--slug", "waived", ledger=WAIVED)
+add("dev", "DONE", "W1", ledger=WAIVED)
+add("qa", "FAIL", open_count=1, ledger=WAIVED)
+run("waive", "--agent", "qa", "--reason", "the user accepted it", ledger=WAIVED)
+r = run("measure", "--agent", "qa", "--seconds", "120", ledger=WAIVED)
+check("the number lands on the run that really ran, never on the waiver the metrics leave out",
+      r.returncode == 0 and status(WAIVED)["metrics"]["time"]["agents"].get("qa") == 120,
+      (r.stderr, status(WAIVED)["metrics"]["time"]))
+r = run("measure", "--agent", "qa", "--seconds", "90", ledger=WAIVED)
+check("with the real run measured and only the waiver left, another measure is refused",
+      r.returncode != 0 and "already measured" in r.stderr, r.stderr)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
