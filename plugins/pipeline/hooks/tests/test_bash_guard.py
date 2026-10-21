@@ -158,9 +158,48 @@ os.makedirs(sub)
 check("autonomous: the ledger is found from a subfolder", run(repo, "git push origin main", cwd=sub)[1] is not None)
 check("no ledger: a push to the main branch is left to the ask rule", run(bare, "git push origin main")[1] is None)
 
+def ps(folder, command, background=False):
+    return run(folder, command, background=background, tool="PowerShell")[1]
+
+
+check("PowerShell: the dev server in the foreground is denied", ps(configured, "npm run dev") is not None)
+check("PowerShell: the same command in background passes", ps(configured, "npm run dev", background=True) is None)
+for command in ("cd app; npm run dev", "& npm run dev", "npm run dev | Tee-Object log.txt",
+                "$env:PORT = 3001; npm run dev", "npm run dev -- --port 3001", "npm run dev\nnpm test",
+                "powershell -Command 'npm run dev'", "Invoke-Expression 'npm run dev'"):
+    check(f"PowerShell: the dev server is denied: {command!r}", ps(configured, command) is not None)
+for command in ("npm test", "npm run dev:docs", "Write-Output 'npm run dev'", 'Write-Output "npm run dev"',
+                "git commit -m @'\nnpm run dev no texto\n'@"):
+    check(f"PowerShell: not a run of the dev server, passes: {command!r}", ps(configured, command) is None)
+
+
+def ps_skips(command):
+    reason = run(bare, command, tool="PowerShell")[1]
+    return reason is not None and reason[0] == "deny" and "pre-commit" in reason[1]
+
+
+for command in ('git commit --no-verify -m "x"', "git commit -nm 'x'", "Write-Output ok; git commit -n -m x",
+                "git config core.hooksPath C:/none", "$env:GIT_CONFIG_KEY_0 = 'core.hooksPath'; git commit -m x",
+                "$env:GIT_CONFIG_KEY_0='core.hooksPath'; git commit -m x", "powershell -Command 'git commit -n -m x'",
+                "iex 'git commit -n -m x'", "& git commit --no-verify -m x", "git commit --% --no-verify -m x",
+                "git -C $env:TEMP commit -n -m x",
+                "git -c core.hooksPath=C:/none commit -m x"):
+    check(f"PowerShell: skipping the pre-commit hook is denied: {command!r}", ps_skips(command), command)
+for command in ('git commit -m "docs: never use --no-verify"', "git commit -m 'fix: -n nao entra'",
+                "git commit -m @'\nfix: explica --no-verify e git commit -n\n'@",
+                'git commit -m @"\nfix: --no-verify no here-string\n"@', "git commit -m 'it''s -n'",
+                'git commit -m "fix: `"-n`" no texto"', "git log -n 3", "Write-Output 'git commit -n'",
+                "git commit -m x # -n", "Write-Output ok" + chr(10) + "# git commit -n -m x", "git commit -m 'x#y'",
+                "git commit --no-verbose -m x", "git config --get core.hooksPath", "git commit -m 'unbalanced"):
+    check(f"PowerShell: a commit that keeps the hook passes: {command!r}",
+          run(bare, command, tool="PowerShell")[1] is None, command)
+check("PowerShell: the autonomous-mode guard reads it too",
+      run(repo, "git switch main; git merge feat/x", tool="PowerShell")[1] is not None)
+
 config = json.load(open(os.path.join(HOOKS, "hooks.json"), encoding="utf-8"))
 pre = config["hooks"]["PreToolUse"]
-check("hooks.json registers bash-guard.py for Bash", len(pre) == 1 and pre[0]["matcher"] == "Bash"
+check("hooks.json registers bash-guard.py for Bash and PowerShell",
+      len(pre) == 1 and pre[0]["matcher"] == "Bash|PowerShell"
       and "${CLAUDE_PLUGIN_ROOT}/hooks/bash-guard.py" in pre[0]["hooks"][0]["command"], json.dumps(config))
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")

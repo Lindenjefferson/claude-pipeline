@@ -87,6 +87,10 @@ check("the kickoff template guards the scan allowlist with an Edit rule and has 
 check("the kickoff template denies skipping the pre-commit hook right after git commit (bash-guard.py covers the rest)",
       {"Bash(git commit --no-v*)", "Bash(git commit -n*)", "Bash(git -c core.hooksPath*)"} <= set(settings["deny"]),
       settings["deny"])
+twins = [rule for rule in settings["deny"] + settings.get("ask", [])
+         if rule.startswith("Bash(") and "PowerShell(" + rule[len("Bash("):] not in settings["deny"] + settings.get("ask", [])]
+check("every Bash rule of the kickoff template has its PowerShell twin (the main session has both tools)",
+      not twins, twins)
 check("no deny rule has a wildcard before a flag (it would also match the flag quoted in a commit message)",
       not any(re.match(r"Bash\(git commit \*", rule) for rule in settings["deny"]), settings["deny"])
 for term in ("sudo", "--force", "chmod 777", "| sh", "| bash"):
