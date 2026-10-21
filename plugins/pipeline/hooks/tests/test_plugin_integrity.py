@@ -54,7 +54,7 @@ check("hooks.json commands make no network call, privilege change or silent fail
       commands and not any(RISKY.search(command) for command in commands), commands)
 check("hooks.json loads the progress mod", config.get("modules") == ["./andamento.js"], config.get("modules"))
 mod = open(os.path.join(ROOT, "hooks", "andamento.js"), encoding="utf-8").read()
-# The mod only reads. 2.9.8 let it submit the prompt that resumed a delivery paused on the usage window; 2.9.9
+# The mod only reads. 1.9.8 let it submit the prompt that resumed a delivery paused on the usage window; 1.9.9
 # took that back: references/pause.md already has the manager sleep the wait and resume the delivery by itself.
 ONLY_READS = re.compile(r"\$\.(http|model|tool|store|prompt|session\.send|env\.set)\b")
 check("the progress mod only reads: no network, model, prompt, tool approval or store",

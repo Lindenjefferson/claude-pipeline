@@ -243,7 +243,7 @@ with open(LEGACY, "w", encoding="utf-8", newline="\n") as handle:
                   {"type": "run", "agent": "qa", "task": "", "verdict": "PASS", "open": 0}):
         handle.write(json.dumps({**entry, "head": "", "summary": "", "at": "2026-10-01T10:00:00+00:00"}) + "\n")
 state = status(".superpowers/legacy.jsonl")
-check("a 2.2 ledger is still read: closed cycle, findings unclassified, time unmeasured",
+check("a 1.2 ledger is still read: closed cycle, findings unclassified, time unmeasured",
       state["ready_for_gate"] is True and state["metrics"]["origins"]["unclassified"] == 3
       and state["metrics"]["time"]["unmeasured"] == 5 and state["plan"] is None and state["deferred"] == []
       and state["autonomous"] is False and state["validar"] == [], state)
@@ -1621,7 +1621,7 @@ with open(os.path.join(repo, OLD), "a", encoding="utf-8", newline="\n") as handl
     handle.write(json.dumps({"type": "measure", "agent": "reviewer", "task": "", "seconds": 240,
                              "at": "2026-10-18T12:00:00+00:00"}) + "\n")
 old_rounds = [entry for entry in status(OLD)["runs"] if entry["agent"] == "reviewer"]
-check("a measure line of 2.9.8, which names no run, still fills the latest one, so those ledgers read the same",
+check("a measure line of 1.9.8, which names no run, still fills the latest one, so those ledgers read the same",
       old_rounds[-1].get("seconds") == 240 and old_rounds[0].get("seconds") is None,
       [(entry["verdict"], entry.get("seconds")) for entry in old_rounds])
 
