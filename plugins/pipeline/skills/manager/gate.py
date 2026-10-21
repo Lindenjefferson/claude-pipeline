@@ -247,9 +247,12 @@ def artifacts(plan):
 
 
 def repo_path(path):
-    """A path from the ledger as git names it: relative to the repository root, with forward slashes."""
+    """A path from the ledger as git names it: relative to the repository root, with forward slashes. Both sides are
+    resolved first, so the same file reached by another route (a symbolic link, or a short 8.3 name on Windows, which
+    is what a Temp folder gives) is still recognized as the one git names."""
     if os.path.isabs(path):
-        path = os.path.relpath(path, git("rev-parse", "--show-toplevel")[1].strip())
+        root = git("rev-parse", "--show-toplevel")[1].strip()
+        path = os.path.relpath(os.path.realpath(path), os.path.realpath(root) if root else root)
     return path.replace("\\", "/").removeprefix("./")
 
 
