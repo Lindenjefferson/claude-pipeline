@@ -77,6 +77,8 @@ claude plugin validate .
 
 Cada arquivo de teste Python roda sozinho com o Python 3 (sem pytest) e imprime `ALL PASS`; o `claude plugin test` roda os testes `.test.ts` do mod.
 
+Num clone novo, instale aqui o mesmo `pre-commit` que o `kickoff` instala em qualquer projeto (a premissa "o plugin não entrega o que não cumpre"), porque um hook mora em `.git/hooks` e não viaja no clone: `python plugins/pipeline/hooks/pre-commit-secret-scan.py --install-pre-commit`. Ele lê só linhas adicionadas, então os fixtures de teste já commitados não barram nada; um commit que adicione linha parecida com segredo é barrado com o fingerprint, e só o dono assina o `.pipeline-secrets-allow`.
+
 ## Versão e release
 
 - Trabalho numa branch `feat/...` ou `fix/...` a partir da `master`, entregue por PR. Mudança só de documentação fora do que se instala (`docs/`, `README.md`, este arquivo) ou de limpeza do backlog vai numa branch `docs/...` e entra na `master` por merge `--no-ff`, sem PR e sem subir a versão (decisão do usuário).
