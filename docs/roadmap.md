@@ -1,17 +1,15 @@
 # Roadmap do plugin `pipeline`
 
-O que falta fazer e o que cada versão entregou; o que muda para quem atualiza está em [`plugins/pipeline/UPGRADING.md`](../plugins/pipeline/UPGRADING.md). Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G). Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.9.6 à 2.10.1) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
+O que falta fazer e o que cada versão entregou; o que muda para quem atualiza está em [`plugins/pipeline/UPGRADING.md`](../plugins/pipeline/UPGRADING.md). Cada item diz de onde veio (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o esforço estimado (P, M, G); no backlog ele diz antes disso se é **defeito** (o plugin não faz o que o arquivo dele diz) ou **melhoria**, porque defeito conferido não espera na fila ([`CLAUDE.md`](../CLAUDE.md)). Em "Em espera" não há tipo: nada ali foi conferido ainda. Ao entregar um item, ele sai do backlog e vai para a seção da versão, com o PR. Só as versões cujos números o `feedback-plugin` das próximas entregas ainda confere (hoje da 2.9.7 à 2.11.0) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR e nas propostas. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta.
 
 ## Backlog
 
-- **Guarda do Bash também na ferramenta PowerShell** (2.7.2): no Windows a sessão principal tem a ferramenta PowerShell, que o `bash-guard.py` não vê (os agentes não a têm). Entra com um leitor das aspas do PowerShell, testado. Número: comandos que chegam à ferramenta PowerShell da sessão principal sem passar pelas checagens do guard passam a zero, provado por teste como no `bash-guard.py`, e não pelo ledger: é proteção, não custo de entrega. Esforço: P.
-- **`claude-security` no lugar do `security-review` nativo** (decisão do usuário: plugin oficial da Anthropic adotado em vez de reinventar; analisado pelo Fable; traz o item que estava em espera desde a 2.8.1, o verificador que tenta refutar cada achado, e a cobertura acumulada): varredura das mudanças da branch com um painel de três verificadores por achado (sobrevive com dois votos, a severidade só desce), defeito anterior à mudança separado, relatório com cobertura, SARIF e carimbo da revisão; só lê o código, sem hook por edição nem no fim da sessão. A proposta:
+- **`claude-security` no lugar do `security-review` nativo** (melhoria; decisão do usuário: plugin oficial da Anthropic adotado em vez de reinventar; analisado pelo Fable; traz o item que estava em espera desde a 2.8.1, o verificador que tenta refutar cada achado, e a cobertura acumulada): varredura das mudanças da branch com um painel de três verificadores por achado (sobrevive com dois votos, a severidade só desce), defeito anterior à mudança separado, relatório com cobertura, SARIF e carimbo da revisão; só lê o código, sem hook por edição nem no fim da sessão. A proposta:
   - dependência declarada, só nas entregas de domínio sensível, no lugar do `security-review` do passo 6 (nunca os dois); o `reviewer` segue com a passada de segurança de cada ciclo;
   - o detalhe numa referência do manager, `references/security.md`: o pedido no nível médio (baixo no modo econômico), a severidade traduzida para Critical, Important e Minor como na 2.8.1, o relatório em `--report`, o que já existia antes da mudança em `defer`, e o texto dos achados nunca copiado para o relatório de qualidade;
   - o ledger registra a varredura com `add --agent reviewer --task security`, contada à parte, com teste primeiro;
   - no modo autônomo ela espera o usuário voltar (o plugin só aceita a confirmação de uma pessoa) e fica como `note --validar`.
   Bloqueios a resolver antes: ele chama `python3` pelo nome, e no Windows deste computador `python3` é o atalho da Microsoft Store (desligar o alias de execução, ou ter um `python3` de verdade no PATH; o kickoff passaria a conferir); e ele roda só pela ferramenta Workflow ("Dynamic workflows" no `/config`). Licença proprietária: depender, nunca copiar o texto. Custo alto (vários pesquisadores e três verificadores em esforço alto por achado), por isso só no domínio sensível. Número: achados Critical e Important que ele acha depois do último ciclo e as rodadas que abrem; se duas entregas sensíveis não mostrarem nada além do `reviewer`, a etapa sai. Esforço: M.
-- **"Execução em paralelo" oferecida quando o plano tem tarefas independentes** (feedback da entrega `0.4-launcher-civic`): o `CLAUDE.md` do projeto não tinha a seção, e a T4, a T5 e a T6, independentes, rodaram em série; o manager só lê a seção no passo 4.1, com o plano já aprovado. O passo 3 ofereceria preenchê-la no ✋ 1 quando o plano tiver tarefas independentes. Número: tarefas independentes rodadas em série por falta da seção passam a zero. Esforço: P.
 
 ### Em espera (voltam com um sinal)
 
@@ -57,6 +55,12 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 - **Chat em grupo com moderador** (Maestro): a conversa não passa pelo ledger.
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
+
+## 2.11.0 — o guard também na ferramenta PowerShell, e paralelismo oferecido no plano (PR #TBD)
+
+- **Guarda do Bash também na ferramenta PowerShell** (defeito; 2.7.2): o `bash-guard.py` passa a valer para a ferramenta PowerShell da sessão principal (matcher `Bash|PowerShell`), com um leitor das aspas do PowerShell: aspas simples literais (`''` escapa a aspa), aspas duplas com escape de crase, corpo de here-string (`@'...'@`) como dado, `;` `|` `(` `)` nova linha e `&&` `||` como separadores, o operador de chamada `&` como wrapper, `-Command` e `Invoke-Expression`/`iex` lidos como `-c` e `eval`, `#` que abre uma palavra como comentário (um flag dentro dele não é flag) e `$env:NOME = valor` lido como a atribuição que é. As três checagens (pre-commit, modo autônomo, servidor de dev) são as mesmas. As regras de permissão que o kickoff instala, que nomeiam a ferramenta, ganham a gêmea de `PowerShell` de cada regra de `Bash` (o buraco era o mesmo). 41 asserts novos, escritos antes.
+- **"Execução em paralelo" oferecida quando o plano tem tarefas independentes** (defeito; feedback da entrega `0.4-launcher-civic`): o passo 3 oferece preencher a seção no ✋ 1 quando o plano tem duas tarefas ou mais que poderiam rodar juntas e o `CLAUDE.md` do projeto não a tem preenchida, nomeando as tarefas e as linhas que faltam; sem pausa nova, e a seção entra na lista de arquivos que o `manager` edita.
+- **Backlog separa defeito de melhoria** (pedido do usuário): cada item do backlog diz o tipo, e defeito conferido não espera na fila — sai no próximo ponto de parada, sozinho quando é script quebrado.
 
 ## 2.10.1 — a faixa não se mistura com o texto do terminal (PR #46)
 
@@ -124,19 +128,9 @@ Números que esta versão deve mudar (do ledger e do relatório de qualidade): o
 
 A revisão de fechamento desta versão saiu junto com a da 2.9.8, no diff das duas, e está na seção dela.
 
-## 2.9.6 — faixa de andamento legível (PR #39)
-
-Origem: pedido do usuário, a faixa da etapa 5 do CF cortava o fim ("6 decisões espera…") e dizia "ciclo Ciclo 3"; a crítica de interface veio da skill `frontend-design`.
-
-- [x] **Uma linha por assunto, sem corte**: onde a entrega está e quanto falta; o que roda, os vereditos e o que vem depois; e as decisões VALIDAR que esperam o usuário, em amarelo e só quando há. Cada linha quebra em vez de cortar, e só a primeira esmaece enquanto o Claude trabalha.
-- [x] **Cor e símbolo só onde informam**: ● o que roda, ✓ e ✗ os vereditos, vermelho para reprovação, verde para "pronto para o gate"; o que está em ordem fica apagado.
-- [x] **Texto de quem lê**: "ciclo 3 (4º de 4)" para um ciclo chamado "Ciclo 3", na faixa e no `/andamento`; "modo autônomo", "limpeza" e "correção N" no lugar de `cleanup` e `fix-N`; vírgulas no lugar da fila de "·".
-- [x] **Kickoff com 10 passos**: os passos 9 a 11 viram 8 a 10, e o `discovery` fica sem a ferramenta `Skill`.
-
-Ficou de fora: o título com acento (o ledger só tem o slug; um nome de exibição pediria uma linha a mais no prompt do manager, só por estética) e uma esteira completa de etapas (dev, revisão, qa, gate), que repetiria no mod a regra de fechar o ciclo, que mora no `ledger.py`. Nenhum prompt cresceu. Número: nenhum do ledger, é apresentação; volta à mesa se o feedback de uma entrega disser que a faixa escondeu algo.
-
 ## Versões anteriores
 
+- **2.9.6** (PR #39): faixa de andamento legível — uma linha por assunto, que quebra em vez de cortar, cor e símbolo só onde informam, e o texto escrito para quem lê ("ciclo 3 (4º de 4)", "modo autônomo").
 - **2.9.5** (PR #38): `claude-code-setup` como dependência declarada, com a skill de recomendação rodada quando a stack existe; extensões do Claude Code na linha do `CLAUDE.md` e reinstaladas numa máquina nova.
 - **2.9.4** (PR #37): simplicidade e entendimento antes de codar. O ledger mede o diff de cada tarefa; o `dev` confirma o que entendeu e propõe o caminho mais simples (`simpler:`); o manager diz o que entendeu no passo 0; `Touches:` como limite da tarefa em todo modo.
 - **2.9.3** (PR #36): seção "Preparar uma máquina" no template e o kickoff deixando um clone pronto num computador novo, só com os comandos que o projeto declara; o `discovery` sugerindo extensões por stack.
