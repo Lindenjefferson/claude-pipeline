@@ -58,7 +58,7 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
 
-## 1.12.1 — a nota da renumeração estava errada (PR #TBD)
+## 1.12.1 — a nota da renumeração estava errada (PR #51)
 
 - **Atualizar de 2.x para 1.x funciona pelo caminho normal** (defeito; conferido na prática): a nota que a renumeração (PR #50) pôs no `UPGRADING.md` afirmava que o instalador não trata 1 como posterior a 2 e mandava remover e instalar de novo. Ele compara com o que o marketplace oferece, não a ordem dos números: `claude plugin update` levou a cópia do `launcher-multimidia` de 2.12.0 para 1.12.0 sem reinstalar. Patch porque a nota é arquivo instalado e é o que a skill `atualizar` lê.
 
