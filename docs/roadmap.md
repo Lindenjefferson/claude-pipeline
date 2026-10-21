@@ -58,6 +58,10 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
 
+## 1.12.1 — a nota da renumeração estava errada (PR #TBD)
+
+- **Atualizar de 2.x para 1.x funciona pelo caminho normal** (defeito; conferido na prática): a nota que a renumeração (PR #50) pôs no `UPGRADING.md` afirmava que o instalador não trata 1 como posterior a 2 e mandava remover e instalar de novo. Ele compara com o que o marketplace oferece, não a ordem dos números: `claude plugin update` levou a cópia do `launcher-multimidia` de 2.12.0 para 1.12.0 sem reinstalar. Patch porque a nota é arquivo instalado e é o que a skill `atualizar` lê.
+
 ## 1.12.0 — TDD deixa de ser promessa e passa a ser conferido (PR #49)
 
 - **Test-first provado pelo histórico** (defeito; auditoria dos padrões de mercado, a pedido do usuário): o `dev` se chama "test-first (red, green, refactor)" e o único sinal disso era o `RED evidence:` do relatório dele, texto que ninguém confere — escrever o código antes e o teste depois dava relatório idêntico e gate aprovado. Agora o passo Red commita o teste sem nenhum arquivo de código no commit, e o `gate.py` confere, para cada id `AC-`, se o commit que **introduziu** aquele teste mudou código junto; se mudou, o teste não nasceu antes. Entra como **aviso** (nomeando o critério e o commit), e vira falha na versão seguinte depois de duas entregas sem falso positivo — aí passa a ser linha de checagem no relatório de qualidade, que hoje não traz aviso nenhum (o de id-modelo também só sai no stdout). Só vale com a linha "Arquivos de teste" preenchida, que é o que separa teste de código. Número: critérios sem test-first provado por entrega, que deve ser zero; se duas entregas derem falso positivo, a checagem sai em vez de virar falha.
