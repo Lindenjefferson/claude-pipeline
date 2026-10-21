@@ -115,3 +115,4 @@ r = commit("append")
 check("a legacy line already committed is not re-flagged", r.returncode == 0, r.stderr)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
+sys.exit(0 if all(results) else 1)

@@ -128,3 +128,4 @@ check("the lines of an allowed .env-style file are still scanned", decision == "
 check("another .env-style file still blocks", ".env.local (fingerprint" in reason, reason)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
+sys.exit(0 if all(results) else 1)

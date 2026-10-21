@@ -40,6 +40,7 @@ Cada componente tem **uma** fonte de verdade, o próprio arquivo. Os outros docu
 | Hooks de sessão e de ferramenta (retomada após compactação, `pipeline.home` na versão em uso, atualização pela metade, pular o `pre-commit`, branch principal no modo autônomo, servidor de dev solto) | docstrings de [`hooks/session-start.py`](plugins/pipeline/hooks/session-start.py) e [`hooks/bash-guard.py`](plugins/pipeline/hooks/bash-guard.py), registrados em [`hooks/hooks.json`](plugins/pipeline/hooks/hooks.json); a escolha entre `python` e `python3`, no topo de [`hooks/python.sh`](plugins/pipeline/hooks/python.sh) |
 | Linha de andamento, painel `/andamento` e o uso da conta em `usage.json` (mod) | comentário do topo de [`hooks/andamento.js`](plugins/pipeline/hooks/andamento.js), listado em `modules` no `hooks.json` |
 | Testes dos scripts | `plugins/pipeline/skills/manager/tests/`, `plugins/pipeline/hooks/tests/` (o do mod é `andamento.test.ts`) |
+| O que o CI roda a cada push e PR | [`.github/workflows/testes.yml`](.github/workflows/testes.yml) |
 | Versões entregues, backlog | [`docs/roadmap.md`](docs/roadmap.md) |
 | Notas de atualização (vão com a versão instalada) e como atualizar um projeto | [`plugins/pipeline/UPGRADING.md`](plugins/pipeline/UPGRADING.md), aplicadas pela skill [`atualizar`](plugins/pipeline/skills/atualizar/SKILL.md) |
 | Apresentação, começo rápido, componentes em uma linha | [`README.md`](README.md) |
@@ -75,7 +76,7 @@ claude plugin validate plugins/pipeline
 claude plugin validate .
 ```
 
-Cada arquivo de teste Python roda sozinho com o Python 3 (sem pytest) e imprime `ALL PASS`; o `claude plugin test` roda os testes `.test.ts` do mod.
+Cada arquivo de teste Python roda sozinho com o Python 3 (sem pytest) e imprime `ALL PASS`; o `claude plugin test` roda os testes `.test.ts` do mod. Cada um sai com código diferente de zero quando um assert falha, e o CI roda esses mesmos quatro comandos a cada push e PR, no Linux e no Windows ([`.github/workflows/testes.yml`](.github/workflows/testes.yml)).
 
 Num clone novo, instale aqui o mesmo `pre-commit` que o `kickoff` instala em qualquer projeto (a premissa "o plugin não entrega o que não cumpre"), porque um hook mora em `.git/hooks` e não viaja no clone: `python plugins/pipeline/hooks/pre-commit-secret-scan.py --install-pre-commit`. Ele lê só linhas adicionadas, então os fixtures de teste já commitados não barram nada; um commit que adicione linha parecida com segredo é barrado com o fingerprint, e só o dono assina o `.pipeline-secrets-allow`.
 

@@ -1,4 +1,4 @@
-import importlib.util, os
+import importlib.util, os, sys
 
 spec = importlib.util.spec_from_file_location("scan", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "pre-commit-secret-scan.py"))
 m = importlib.util.module_from_spec(spec)
@@ -122,3 +122,4 @@ ok = len(findings) == 1
 results.append(ok)
 print("PASS" if ok else "FAIL", "a UTF-16 line (a NUL after every character) is scanned", findings)
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
+sys.exit(0 if all(results) else 1)

@@ -1,4 +1,4 @@
-import base64, importlib.util, json, os
+import base64, importlib.util, json, os, sys
 
 spec = importlib.util.spec_from_file_location("scan", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "pre-commit-secret-scan.py"))
 m = importlib.util.module_from_spec(spec)
@@ -63,3 +63,4 @@ for name, line in must_pass.items():
     results.append(ok)
     print("PASS" if ok else "FAIL", "allows:", name)
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
+sys.exit(0 if all(results) else 1)

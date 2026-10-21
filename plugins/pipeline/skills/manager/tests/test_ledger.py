@@ -1664,3 +1664,4 @@ check("with the real run measured and only the waiver left, another measure is r
       r.returncode != 0 and "already measured" in r.stderr, r.stderr)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
+sys.exit(0 if all(results) else 1)
