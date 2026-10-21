@@ -193,6 +193,36 @@ for command in ('git commit -m "docs: never use --no-verify"', "git commit -m 'f
                 "git commit --no-verbose -m x", "git config --get core.hooksPath", "git commit -m 'unbalanced"):
     check(f"PowerShell: a commit that keeps the hook passes: {command!r}",
           run(bare, command, tool="PowerShell")[1] is None, command)
+# Expressao e bloco: o que o PowerShell trata como argumento ou bloco nao e um comando novo sem o git
+for command in ("$out = git commit -n -m x", "$null = git commit -n -m x 2>&1", "$out=git commit -n -m x",
+                "if ($true) {git commit -n -m x}", "try {git commit -n -m x} catch {}",
+                "1 | % { git commit -n -m x }", "Invoke-Command -ScriptBlock {git commit -n -m x}",
+                "if ($true) { git commit -m x --no-verify}", "git commit ('-n') -m x", "git commit @('-n') -m x",
+                "cmd /c git commit -n -m x", 'cmd /c "git commit -n -m x"',
+                "Start-Process -Wait -NoNewWindow git -ArgumentList 'commit','-n','-m','x'",
+                'powershell "git commit -n -m x"', 'powershell -NoProfile "git commit -n -m x"',
+                "powershell -EncodedCommand ZwBpAHQAIABjAG8AbQBtAGkAdAAgAC0AbgAgAC0AbQAgAHgA",
+                "${env:GIT_CONFIG_KEY_0}='core.hooksPath'; git commit -m x",
+                "$env:GIT_CONFIG_KEY_0 ='core.hooksPath'; git commit -m x",
+                "$env:GIT_CONFIG_KEY_0= 'core.hooksPath'; git commit -m x",
+                "Set-Item env:GIT_CONFIG_KEY_0 core.hooksPath; git commit -m x",
+                "New-Item -Path env:GIT_CONFIG_KEY_0 -Value core.hooksPath; git commit -m x",
+                "&git commit -n -m x", "git commit `" + chr(10) + "-n -m x",
+                "<# don" + chr(39) + "t #> git commit -n -m x",
+                "git commit " + chr(8216) + "-n" + chr(8217) + " -m x"):
+    check(f"PowerShell: skipping the hook behind an expression is denied: {command!r}", ps_skips(command), command)
+for command in ("git commit -m " + chr(8220) + "docs: use -n never" + chr(8221),
+                "git commit -m x <# never use -n #>",
+                "git commit -m @'" + chr(13) + chr(10) + "it" + chr(39) + "s -n" + chr(13) + chr(10) + "'@"):
+    check(f"PowerShell: text that only mentions a flag still passes: {command!r}",
+          run(bare, command, tool="PowerShell")[1] is None, command)
+for command in ("npm.cmd run dev", "npm run ('dev')", "if ($true) {npm run dev}", "$job = npm run dev"):
+    check(f"PowerShell: the dev server behind an expression is denied: {command!r}",
+          ps(configured, command) is not None, command)
+for command in ("cmd /c git push origin main", "if ($?) {git push origin main}", "git push origin ('main')",
+                "Start-Process git -ArgumentList 'push','origin','main'"):
+    check(f"PowerShell: autonomous, the main branch behind an expression is denied: {command!r}",
+          run(repo, command, tool="PowerShell")[1] is not None, command)
 check("PowerShell: the autonomous-mode guard reads it too",
       run(repo, "git switch main; git merge feat/x", tool="PowerShell")[1] is not None)
 
