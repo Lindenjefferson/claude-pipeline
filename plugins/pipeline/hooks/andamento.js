@@ -12,6 +12,14 @@
 // advice for ledger.py, whose `usage` it shows: econômico, the wait for a reset, the pane's usage line). A ledger.py
 // failure (a broken ledger, no Python 3) shows in the band and the pane instead of passing for "no delivery". Other
 // mods' band content is kept below the rows.
+// On its own, after each read of the status, it does the two things the user asked never to wait through: a
+// native notification (`$.ui.notify`) the moment the delivery needs them — the gate ready, the manager asking
+// or stopping, a VALIDAR item — once per state, the line itself being the key; and, for a delivery paused
+// waiting for a usage window, one prompt (`$.prompt.submit`) asking this session to resume once the window has
+// reset, once per pause and never for a pause with no wait behind it. It writes nothing to the delivery.
+// The pane also gives each pipeline agent still running a button that puts its conversation in the main view
+// (`$.ui.view`, which only answers the person's own input, as a press of one is), and lists the delivery's
+// files (the plan and the reports the ledger kept) as paths for the user to open where they choose.
 
 const PANE = 'andamento'
 const POLL_MS = 5000
@@ -34,6 +42,9 @@ let lastRead = -Infinity
 let fronts = []
 let python = null
 let written = null
+let notified = null
+let waited = false
+let resumed = null
 
 function clock(minutes) {
   return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}`
@@ -138,6 +149,36 @@ export function rowText(row) {
   return row.map((part) => part.text).join(GAP)
 }
 
+// One line naming everything the delivery needs from the user right now, or null: the gate ready, the manager asking
+// or stopping, and the VALIDAR items. It is also the key of the notification: a new item changes the text.
+export function waitsForYou(r) {
+  if (!r) return null
+  const ids = waiting(r).map((item) => item.id)
+  const asked = (r.steps || []).filter((step) => step.step === 'ask' || step.step === 'stop').map((step) => said(step))
+  const parts = [...(r.ready_for_gate ? ['pronto para o gate'] : []), ...asked,
+                 ...(ids.length ? [`${ids.length === 1 ? '1 decisão espera' : `${ids.length} decisões esperam`} você `
+                                   + `(${listed(ids)})`] : [])]
+  return parts.length ? `${title(r)}: ${listed(parts)}` : null
+}
+
+// The session's pipeline agents that have not finished, each with the task of the ledger its description names.
+export function paneAgents(list, dispatched) {
+  const tasks = Object.keys(dispatched || {})
+  return (list || []).filter((agent) => String(agent.type || '').startsWith('pipeline:')
+                                        && ['pending', 'running', 'waiting'].includes(agent.status))
+    .map((agent) => {
+      const kind = agent.type.slice('pipeline:'.length)
+      const task = tasks.find((name) => String(agent.description || '').includes(name))
+      return { id: agent.id, label: task ? `${kind} ${taskName(task)}` : kind }
+    })
+}
+
+// The files this delivery wrote, as paths for the user to open: the plan and the reports the ledger kept.
+export function deliveryFiles(r) {
+  return [...(r.plan ? [`plano: ${r.plan}`] : []),
+          ...(r.runs || []).filter((run) => run.report).map((run) => `${run.agent}: ${run.report}`)]
+}
+
 // The band's rows, each a list of {text, tone}, a row with nothing left out: where the delivery is and what is left;
 // what runs, a verdict no step covers and what comes next; the VALIDAR items that wait for the user.
 export function bandRows(r, now) {
@@ -202,6 +243,11 @@ export function paneLines(r, fronts, now, failure = null) {
     if (items.length) {
       lines.push('', 'Decisões que esperam você (VALIDAR):')
       for (const item of items) lines.push(`- ${item.id} ${item.text}`)
+    }
+    const files = deliveryFiles(r)
+    if (files.length) {
+      lines.push('', 'Arquivos da entrega:')
+      for (const file of files) lines.push(`- ${file}`)
     }
     const earlier = ((r.metrics || {}).cycles || []).slice(0, -1)
     if (earlier.length) {
@@ -312,6 +358,44 @@ async function writeUsage($) {
   } catch {}
 }
 
+// A native notification the moment the delivery starts needing the user, once per state (ui.notify limits nothing).
+async function notifyWaiting($) {
+  const line = waitsForYou(report)
+  if (line === notified) return
+  notified = line
+  if (!line) return
+  try {
+    await $.ui.notify(line, { title: 'pipeline' })
+  } catch {}
+}
+
+// A delivery paused waiting for the usage window: once the window has reset, ask this session to go on, so it does
+// not sit until the user comes back to the terminal. Once per pause, and never for a pause with no wait behind it.
+async function resumeAfterReset($) {
+  if (!report || !report.paused) {
+    waited = false
+    resumed = null
+    return
+  }
+  if (report.usage && report.usage.wait) {
+    waited = true
+    return
+  }
+  if (!waited || resumed === report.paused.at) return
+  resumed = report.paused.at
+  try {
+    await $.prompt.submit({ text: 'pipeline: a janela de uso renovou. Rode o `ledger.py status`, dê `resume` e '
+                                  + 'retome a entrega, despachando de novo cada claim que ele listar.' })
+  } catch {}
+}
+
+// What the mod does on its own with a fresh status: nothing that writes to the delivery, only the two waits the
+// user asked never to sit through (the notification and the resume after a usage reset).
+async function attend($) {
+  await notifyWaiting($)
+  await resumeAfterReset($)
+}
+
 async function otherFronts($) {
   let listing = ''
   try {
@@ -336,10 +420,12 @@ export function register(on) {
   on('session.start', async ($, e, next) => {
     $.clock.every(POLL_MS, async () => {
       const changed = await refresh($)
+      if (changed) await attend($)
       if (changed || (report && Object.keys(report.dispatched || {}).length)) $.ui.invalidate('ui.render')
     })
     $.clock.after(0, async () => {
       if (await refresh($)) $.ui.invalidate('ui.render')
+      await attend($)
       await writeUsage($)
     })
     try {
@@ -367,10 +453,22 @@ export function register(on) {
 
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (e.requestId !== PANE) return next(e)
-    const { Box, Text } = $.ui.resolve(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
     const lines = paneLines(report, fronts, await $.clock.now(), failure)
-    return Box({ flexDirection: 'column', children: lines.map((line, index) =>
-      Text({ wrap: 'wrap', ...(index === 0 ? TONE.title : {}), children: [line || ' '] })) })
+    const drawn = lines.map((line, index) =>
+      Text({ wrap: 'wrap', ...(index === 0 ? TONE.title : {}), children: [line || ' '] }))
+    let agents = []
+    try {
+      agents = paneAgents(await $.agent.list(), report && report.dispatched)
+    } catch {}
+    // $.ui.view only answers the person's own input, which a press of these is
+    if (agents.length) {
+      drawn.push(Text({ children: [' '] }), Text({ ...TONE.quiet, children: ['Abrir a conversa de:'] }),
+                 Box({ children: agents.map((agent) => Button({
+                   key: `agente-${agent.id}`, label: agent.label, onPress: () => $.ui.view({ agentId: agent.id }),
+                 })) }))
+    }
+    return Box({ flexDirection: 'column', children: drawn })
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
