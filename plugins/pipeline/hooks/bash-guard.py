@@ -22,11 +22,18 @@ env, command, time, nohup, xargs, `!`, `{` and if/then are looked through; a com
 not read. Permission rules match the command as plain text and cannot tell a flag from a message, which is why this
 check lives here. A command that does not parse (an unbalanced quote) passes, since the shell refuses it too.
 
-A PowerShell call goes through the same checks, read with PowerShell's own rules: single quotes literal ('' an
-escaped quote), double quotes with a backtick escape, a here-string body (@'...'@) data the command only passes
-along, `;` `|` `(` `)` a newline and `&&` `||` as separators, the call operator `&` a wrapper, -Command (any
-unambiguous prefix) and Invoke-Expression or iex read like a shell's -c and eval, a `#` that opens a word a comment
-to the end of its line, and `$env:NAME = value` read as the assignment it is. `--%` is git's argument either way, so a flag behind it still counts.
+A PowerShell call goes through the same checks, read with PowerShell's own rules. Text the command only passes
+along: single quotes literal ('' an escaped quote), double quotes with a backtick escape, the typographic quotes as
+the straight pair they stand for, a here-string body (@'...'@), a `<# ... #>` block and a `#` that opens a word, to
+the end of its line. Separators: `;` `|` a newline and `&&` `||`, and `{` `}` too, since a script block is a
+command of its own whether or not a space follows the brace; a backtick before a line break is a space, and what
+stands between parentheses is read also as an argument of the command around them, which is what PowerShell makes
+of it. Looked through: the call operator `&`, alone or glued to the name; `$name = <command>`, the variable gone
+and the command kept; -Command (any unambiguous prefix), cmd's /c, the first positional argument of powershell.exe
+and a decoded -EncodedCommand, read like a shell's -c; Invoke-Expression or iex, like eval; and Start-Process with
+its -ArgumentList. `$env:NAME = value` is read as the assignment it is, in any spacing, as `${env:NAME}` and as a
+Set-Item or New-Item on env:NAME. Not read, so still passing: a flag held in a variable, an alias, splatting, a
+`%VAR%` expanded after `--%` (a flag written out after it still counts) and a command inside double quotes.
 
 A dev server run in the foreground never returns: the call hangs, and the process is orphaned when it times out.
 The command comes from the project's CLAUDE.md, the line `- Rodar em desenvolvimento: `<command>`` under
@@ -38,6 +45,7 @@ segment (after &&, ||, ;, |, a newline, an opening parenthesis or env assignment
 `npm run dev &` counts too, because the shell leaves the same orphan. Text the shell only passes along is not
 read: quoted strings (a commit message) and heredoc bodies (a file being written), unless a shell reads the
 heredoc (`bash <<EOF`). The reason names the right form. Any failure of the hook itself lets the call through."""
+import base64
 import importlib.util
 import json
 import os
@@ -85,8 +93,8 @@ def executed(command):
 
 
 def program_name(word):
-    """The command's name without its path, its case or a .exe suffix."""
-    return re.split(r"[\\/]", word)[-1].lower().removesuffix(".exe")
+    """The command's name without its path, its case or a Windows executable suffix."""
+    return re.sub(r"\.(exe|cmd|bat|ps1)$", "", re.split(r"[\\/]", word)[-1].lower())
 
 
 def runs_it(command, dev, powershell=False):
@@ -102,7 +110,9 @@ def runs_it(command, dev, powershell=False):
 
 
 SHELLS = {"sh", "bash", "zsh", "dash"}
-PS_SHELLS = {"powershell", "pwsh"}
+PS_SHELLS = {"powershell", "pwsh", "cmd"}
+PS_LAUNCHERS = {"start-process", "saps", "start"}
+PS_SET_ENV = {"set-item", "si", "new-item", "ni", "set-variable", "sv"}
 EVALS = {"eval"}
 PS_EVALS = {"invoke-expression", "iex"}
 WRAPPERS = {"env", "command", "time", "nohup", "exec", "xargs", "!", "{", "&", "if", "then", "else", "elif", "do",
@@ -133,43 +143,70 @@ def segments(command, commenters=""):
     return found + [words] if words else found
 
 
-PS_HERESTRING = re.compile(r"@(['\"])[ \t]*\n.*?\n\1@", re.S)
-PS_SEPARATORS = ";\n|()"
+PS_HERESTRING = re.compile(r"@(['\"])[ \t]*\r?\n.*?\n\1@", re.S)
+PS_SEPARATORS = ";\n|(){}"
+PS_QUOTES = {"'": "'", '"': '"', "\u2018": "\u2019", "\u2019": "\u2019", "\u201c": "\u201d", "\u201d": "\u201d"}
+PS_LITERAL = {"'", "\u2018", "\u2019"}
 
 
 def ps_quoted(text, index, quote):
     """The text of the quoted string that opens at index, and the index after it. Inside single quotes '' is an
-    escaped quote and nothing else is special; inside double quotes a backtick escapes the next character."""
-    word, index = "", index + 1
+    escaped quote and nothing else is special; inside double quotes a backtick escapes the next character. The
+    typographic quotes PowerShell also accepts are read as the straight pair they stand for."""
+    closing, word, index = PS_QUOTES[quote], "", index + 1
     while index < len(text):
         char = text[index]
-        if char == quote:
-            if text[index + 1:index + 2] != quote:
+        if char == closing:
+            if text[index + 1:index + 2] != closing:
                 return word, index + 1
             index += 1
-        elif char == "`" and quote == '"':
+        elif char == "`" and quote not in PS_LITERAL:
             index += 1
             if index >= len(text):
                 break
         word += text[index]
         index += 1
-    raise ValueError(f"unbalanced {quote} in the PowerShell command")
+    raise ValueError(f"unbalanced {closing} in the PowerShell command")
+
+
+def ps_glued(words):
+    """An assignment written with the `=` apart put back together: `$x = v`, `$x =v` and `$x= v` all become `$x=v`,
+    so one rule reads every spacing PowerShell accepts."""
+    found, index = [], 0
+    while index < len(words):
+        word = words[index]
+        if word.startswith("$") and "=" not in word and words[index + 1:index + 2] \
+                and words[index + 1].startswith("="):
+            word, index = word + words[index + 1], index + 1
+        if word.startswith("$") and word.endswith("=") and words[index + 1:index + 2]:
+            word, index = word + words[index + 1], index + 1
+        found.append(word)
+        index += 1
+    return found
 
 
 def ps_assignments(words):
-    """`$env:NAME = value` and `$env:NAME=value` as `export NAME=value`: it does change the process environment of
-    what follows, and that is the shape the checks already read. A `$env:NAME` read as a value is left as it is, so
-    it stays one argument of the command."""
-    found, index = [], 0
-    while index < len(words):
-        word, assignment = words[index], ""
-        if word.lower().startswith("$env:"):
-            assignment = word[len("$env:"):]
-            if "=" not in assignment and words[index + 1:index + 2] == ["="]:
-                assignment += "=" + (words[index + 2] if index + 2 < len(words) else "")
-                index += 2
-        found += ["export", assignment] if "=" in assignment else [word]
-        index += 1
+    """A PowerShell assignment read as the shape the checks already know. `$env:NAME=value` becomes
+    `export NAME=value` (also `${env:NAME}=`, the `=` spaced either way, and a Set-Item or New-Item on env:NAME):
+    it does change the process environment of what follows. `$name = <command>` keeps the command, which runs
+    either way, and drops the variable. A `$env:NAME` read as a value is left as it is, so it stays one argument."""
+    words = ps_glued(words)
+    if words and program_name(words[0]) in PS_SET_ENV:
+        names = [word[len("env:"):] for word in words[1:] if re.fullmatch(r"env:\w+", word, re.I)]
+        values = [word for word in words[1:]
+                  if not word.startswith("-") and not re.fullmatch(r"env:\w+", word, re.I)]
+        if names and values:
+            return ["export", names[0] + "=" + values[-1]]
+    found = []
+    for word in words:
+        name, sep, value = word.partition("=")
+        plain = name.replace("${", "$").replace("}", "")
+        if plain.lower().startswith("$env:") and sep:
+            found += ["export", plain[len("$env:"):] + "=" + value]
+        elif plain.startswith("$") and sep:
+            found += [value] if value else []
+        else:
+            found.append(word)
     return found
 
 
@@ -180,13 +217,30 @@ def ps_segments(command):
     found, words, word, open_word, index = [], [], "", False, 0
     while index < len(text):
         char, pair = text[index], text[index:index + 2]
-        if char in "'\"":
+        if char in PS_QUOTES:
             quoted, index = ps_quoted(text, index, char)
             word, open_word = word + quoted, True
+            continue
+        if pair == "${" and text.find("}", index + 2) >= 0:
+            end = text.find("}", index + 2)
+            word, open_word, index = word + text[index:end + 1], True, end + 1
+            continue
+        if pair == "${" and text.find("}", index + 2) >= 0:
+            end = text.find("}", index + 2)
+            word, open_word, index = word + text[index:end + 1], True, end + 1
             continue
         if open_word and (char in " \t\r" or char in PS_SEPARATORS or pair in ("&&", "||")):
             words.append(word)
             word, open_word = "", False
+        if pair == "<#" and not open_word:
+            end = text.find("#>", index + 2)
+            index = len(text) if end < 0 else end + 2
+            continue
+        if char == "`" and text[index + 1:index + 2] in ("\n", "\r"):
+            index += 1
+            while index < len(text) and text[index] in "\r\n":
+                index += 1
+            continue
         if char == "#" and not open_word:
             index = text.find("\n", index)
             if index < 0:
@@ -215,6 +269,27 @@ def hooks_path(key):
     return key.split("=", 1)[0].lower() == "core.hookspath"
 
 
+PS_COMMAND_FLAGS = ("/c", "/k", "/r")
+
+
+def ps_inner(words):
+    """The command a PowerShell or cmd call runs: behind -Command (any unambiguous prefix) or cmd's /c, decoded
+    from -EncodedCommand, or the first word that is not an option, which powershell.exe reads as -Command too."""
+    for index, word in enumerate(words[1:], 1):
+        lower = word.lower()
+        if lower.startswith("-") and len(lower) > 2 and "-encodedcommand".startswith(lower):
+            try:
+                return base64.b64decode(words[index + 1]).decode("utf-16-le", "ignore")
+            except Exception:
+                return None
+        if (lower.startswith("-") and len(lower) > 1 and "-command".startswith(lower)) \
+                or lower in PS_COMMAND_FLAGS:
+            return " ".join(words[index + 1:])
+        if not lower.startswith(("-", "/")):
+            return " ".join(words[index:])
+    return None
+
+
 def simple_commands(command, powershell=False):
     """Each simple command the shell runs, as (program, its arguments, the segment's words), looking through
     wrappers and into a shell's -c (PowerShell's -Command) and eval (Invoke-Expression). In Bash a '#' is read as
@@ -229,20 +304,38 @@ def simple_commands(command, powershell=False):
             parsed = segments(command, "#")
         except ValueError:
             return
+    if powershell and "(" in command:
+        try:
+            parsed = parsed + ps_segments(command.replace("(", " ").replace(")", " "))
+        except ValueError:
+            pass
     for segment in parsed:
         words = segment
-        while words and (words[0] in WRAPPERS or re.fullmatch(r"[A-Za-z_]\w*=.*", words[0])
-                         or (words[0].startswith("-") and len(words) > 1)):
-            words = words[1:]
+        while words:
+            if words[0] in WRAPPERS or re.fullmatch(r"[A-Za-z_]\w*=.*", words[0]) \
+                    or (words[0].startswith("-") and len(words) > 1):
+                words = words[1:]
+            elif powershell and words[0].startswith("&") and len(words[0]) > 1:
+                words = [words[0][1:]] + words[1:]
+            else:
+                break
         if not words:
             continue
         program = program_name(words[0])
-        if program in (PS_SHELLS if powershell else SHELLS):
+        if powershell and program in PS_SHELLS:
+            inner = ps_inner(words)
+            if inner:
+                yield from simple_commands(inner, True)
+        elif powershell and program in PS_LAUNCHERS:
+            parts = [part for word in words[1:] if not word.startswith("-")
+                     for part in word.split(",") if part]
+            if parts:
+                yield program_name(parts[0]), parts[1:], parts
+        elif not powershell and program in SHELLS:
             for position, word in enumerate(words[1:-1], 1):
                 if not word.startswith("-"):
                     break
-                if ("-command".startswith(word.lower()) and len(word) > 1) if powershell \
-                        else re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", word):
+                if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", word):
                     yield from simple_commands(words[position + 1], powershell)
                     break
         elif program in (PS_EVALS if powershell else EVALS):
