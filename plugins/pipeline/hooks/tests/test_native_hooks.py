@@ -140,3 +140,4 @@ sh(repo, "git", "reset", "-q")
 os.remove(os.path.join(repo, "plus.txt"))
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
+sys.exit(0 if all(results) else 1)
