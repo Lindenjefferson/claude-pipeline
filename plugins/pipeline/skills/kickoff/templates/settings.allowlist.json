@@ -1,5 +1,5 @@
 {
-  "entry": "Bash(<command>) e PowerShell(<command>)",
+  "entry": ["Bash(<command>)", "PowerShell(<command>)"],
   "deny": [
     "Edit(.pipeline-secrets-allow)",
     "Bash(git commit --no-v*)",
