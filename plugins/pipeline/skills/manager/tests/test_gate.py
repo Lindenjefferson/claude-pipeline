@@ -196,6 +196,12 @@ r = gate("--base", "main")
 check("an id truncated by a placeholder is a template, not a criterion, and the gate warns naming it",
       "Criteria:   PASS" in r.stdout and "id template" in r.stdout and "warning: plan.md writes AC-T " in r.stdout,
       r.stdout)
+commit("plan.md", IDS + "Write each id as AC-05T<task>-<n>.\n## Errata\n",
+       "docs: the plan writes a prefixed id template")
+r = gate("--base", "main")
+check("a template whose prefix holds digits is no criterion either: no AC-05 is traced",
+      "Criteria:   PASS" in r.stdout and "writes AC-05T with a placeholder" in r.stdout
+      and "AC-05 " not in r.stdout.replace("AC-05T", ""), r.stdout)
 commit("plan.md", IDS + "## Errata\n", "docs: plan without the template")
 
 write("tests/d.test.txt", "test('AC-T1-4 given d')\n")
