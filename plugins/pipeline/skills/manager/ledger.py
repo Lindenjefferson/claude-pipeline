@@ -15,7 +15,7 @@
   note    --text <text> [--validar]                           a decision taken on the user's behalf
   validate --id <id> --decision <text>                        the user's decision on a VALIDAR item (V1, V2...)
   waive   --agent reviewer|qa [--task spec|plan] --reason <text>   accepts the open findings of that agent's latest FAIL
-  extend  --reason <text>                                     the user lets the cycle's fixes go on past the round limit
+  extend  --reason <text> [--task spec|plan]                  the user lets the fixes, or that review loop, go on
   plan    --path <path>                                       the approved plan, when start ran before it existed
   scope   --cycle <name> --tasks <id,id,...>                  the tasks of one plan cycle, in plan order
   mode    autonomous|supervised                               the user turned autonomous mode on, or is back
@@ -44,7 +44,8 @@ task, and qa ran again after every fix of a blocking (FAIL) finding. The next re
 A fix round (task fix-N) and the cleanup task (task cleanup) stay in the current cycle, even a closed one: they need
 a reviewer pass, and qa again only when a FAIL came before them. Every finding carries its origin (design,
 assumption, plan, execution, environment); --report keeps the path of the file the manager saved the agent's report
-in, so a FAIL still open names it; --seconds takes 90, 12m, 1h5m or 12m30s, and --seconds and --tokens are optional, from the
+in, so a FAIL still open names it, and is refused when no file is there (the agents have no Write: the manager saves
+the report, then adds the run naming it), read from the current directory or from the ledger's project root; --seconds takes 90, 12m, 1h5m or 12m30s, and --seconds and --tokens are optional, from the
 agent's completion notification when it already arrived, never an estimate (a run without them goes unmeasured, its
 span counting from its timestamp in the cycle's elapsed, which is null when that span comes to zero, and 0 is refused). measure fills the numbers
 of a run whose completion notification arrived after its add, as its own line naming that run: with one run of that
@@ -57,7 +58,8 @@ ledger-<old-slug>.jsonl next to the ledger first. --check exits 1 while anything
 it. A cycle whose reviewer or qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on
 up to three, then the delivery stops. extend, once status asks the user or stops, records the user's decision to go
 on (a note, VALIDAR in autonomous mode): the current cycle gets one more fix round, and a reviewer or qa FAIL after
-it asks or stops again; it never carries to the next cycle. With scope recorded, a task of a later plan cycle may be
+it asks or stops again; it never carries to the next cycle. extend --task spec|plan is the same for that review loop,
+which runs one more round, and each extension is read only by the loop (or the cycle) it was given to. With scope recorded, a task of a later plan cycle may be
 claimed while the current cycle is open, but its add is refused until the cycle closes, so the next cycle's range
 starts at the head that closed this one. waive is refused when the dev ran after that FAIL (the fix needs its review); it
 records the reason as a note and counts as that agent's PASS at the head it reviewed. Notes marked --validar (and
@@ -250,6 +252,11 @@ def where(entry):
     return f", report {entry['report']}" if entry.get("report") else ""
 
 
+def saved_report(path, ledger):
+    root = os.path.dirname(os.path.dirname(os.path.abspath(ledger)))
+    return os.path.isfile(path) or os.path.isfile(os.path.join(root, path))
+
+
 def report_of(entry):
     return {"report": entry["report"]} if entry.get("report") else {}
 
@@ -267,7 +274,7 @@ def cycles(entries):
 
 
 def extension(entries, cycle):
-    marks = [index for index, entry in enumerate(entries) if entry["type"] == "extend"]
+    marks = [index for index, entry in enumerate(entries) if entry["type"] == "extend" and not entry.get("task")]
     position = {id(entry): index for index, entry in enumerate(entries)}
     if not marks or not cycle or marks[-1] < position[id(cycle[0])]:
         return None
@@ -335,13 +342,23 @@ def cycle_state(cycle, autonomous=False, extended=None):
     return state, pending
 
 
+def review_extension(entries, task):
+    marks = [index for index, entry in enumerate(entries) if entry["type"] == "extend" and entry.get("task") == task]
+    if not marks:
+        return None
+    return sum(1 for index, entry in enumerate(entries)
+               if index < marks[-1] and entry["type"] == "run" and is_review(entry) and entry["task"] == task)
+
+
 def review_state(entries, autonomous=False):
     pending, steps = [], []
     for task in REVIEWS:
         done = reviews(entries, task)
         if not done or done[-1]["verdict"] != "FAIL":
             continue
-        last, rounds, limit = done[-1], len(done), REVIEW_ROUNDS[autonomous]
+        extended = review_extension(entries, task)
+        last, rounds = done[-1], len(done)
+        limit = REVIEW_ROUNDS[autonomous] if extended is None else extended + 1
         if rounds < limit:
             text = f"{task} review round {rounds} FAIL ({last['open']} open{where(last)}): "
             final = autonomous and rounds == limit - 1
@@ -349,12 +366,12 @@ def review_state(entries, autonomous=False):
                      if final else "apply the corrections and dispatch the reviewer on them again")
             steps.append({"step": "review", "task": task, "round": rounds + 1, "open": last["open"], **report_of(last),
                           **({"last": True} if final else {})})
-        elif autonomous:
-            text = f"{task} review still fails after {rounds} rounds: stop the delivery and record the open findings as note --validar"
-            steps.append({"step": "stop", "task": task, "rounds": rounds})
         else:
-            text = f"{task} review still fails after {rounds} rounds: ask the user"
-            steps.append({"step": "ask", "task": task, "rounds": rounds})
+            after = "the extra round" if extended is not None else f"{rounds} rounds"
+            text = f"{task} review still fails after {after}: " + (
+                "stop the delivery and record the open findings as note --validar" if autonomous else "ask the user")
+            steps.append({"step": "stop" if autonomous else "ask", "task": task, "rounds": rounds,
+                          **({"extended": True} if extended is not None else {})})
         pending.append(text)
     return pending, steps
 
@@ -566,6 +583,9 @@ def add(args):
         sys.exit("--task on a reviewer run is spec or plan (one round of that review loop); qa runs take none")
     if args.agent == "dev" and args.report:
         sys.exit("--report keeps the file of a reviewer or qa report; the dev's report is checked before integrating")
+    if args.report and not saved_report(args.report, args.ledger):
+        sys.exit(f"--report {args.report} is no file: the agents have no Write, so save the report there yourself "
+                 "and add the run naming the file you saved")
     if args.full and args.agent != "qa":
         sys.exit("--full marks a qa run of the project's full test command")
     if args.simpler and not (args.agent == "dev" and args.verdict == "NEEDS_CONTEXT"):
@@ -851,13 +871,19 @@ def extend(args):
     entries = read(args.ledger)
     if not entries:
         sys.exit("no delivery started: run start first")
-    cycle = cycles(entries)[-1]
-    state = cycle_state(cycle, autonomous(entries), extension(entries, cycle))[0]
-    if not any(step["step"] in ("stop", "ask") for step in state["steps"]):
-        sys.exit("the cycle has not run out of fix rounds: nothing to extend")
-    text = f"extra fix round: {args.reason}"
+    if args.task:
+        steps = review_state(entries, autonomous(entries))[1]
+        if not any(step["step"] in ("stop", "ask") and step.get("task") == args.task for step in steps):
+            sys.exit(f"the {args.task} review has not run out of rounds: nothing to extend")
+        text = f"extra {args.task} review round: {args.reason}"
+    else:
+        cycle = cycles(entries)[-1]
+        state = cycle_state(cycle, autonomous(entries), extension(entries, cycle))[0]
+        if not any(step["step"] in ("stop", "ask") for step in state["steps"]):
+            sys.exit("the cycle has not run out of fix rounds: nothing to extend")
+        text = f"extra fix round: {args.reason}"
     write(args.ledger, {"type": "note", "text": text, **({"validar": True} if autonomous(entries) else {})})
-    write(args.ledger, {"type": "extend", "reason": args.reason})
+    write(args.ledger, {"type": "extend", **({"task": args.task} if args.task else {}), "reason": args.reason})
     print(text)
 
 
@@ -1386,6 +1412,7 @@ def main():
     command.set_defaults(run=waive)
     command = commands.add_parser("extend")
     command.add_argument("--reason", required=True)
+    command.add_argument("--task", choices=REVIEWS)
     command.set_defaults(run=extend)
     command = commands.add_parser("plan")
     command.add_argument("--path", required=True)
