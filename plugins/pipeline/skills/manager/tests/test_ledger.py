@@ -742,9 +742,9 @@ check("plan reviews are counted in the metrics by rounds, findings, refused find
 r = review("FAIL", open_count=1, triage="applied=1")
 check("--triage on the first round of a review is refused: there is no previous round to triage",
       r.returncode != 0 and "--triage" in r.stderr, r.stderr)
-review("FAIL", open_count=1)
+r = review("FAIL", open_count=1)
 check("a review after a PASS (a change of scope) is a new loop: its counter starts again at round 1",
-      status(LOOP)["steps"][0]["round"] == 2, status(LOOP)["steps"])
+      status(LOOP)["steps"][0]["round"] == 2 and "(round 1)" in r.stdout, (r.stdout, status(LOOP)["steps"]))
 review("FAIL", task="spec", open_count=1)
 check("a spec review has its own loop",
       {step["task"] for step in status(LOOP)["steps"] if step["step"] == "review"} == {"plan", "spec"}, status(LOOP)["steps"])

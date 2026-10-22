@@ -654,7 +654,7 @@ def add(args):
         entry["usage"] = {name: item["percent"] for name, item in windows.items()}
     write(args.ledger, entry)
     label = f"{args.agent}{' ' + args.task if args.task else ''}: {args.verdict}"
-    print(f"{label} (round {len(reviews(read(args.ledger), args.task))})" if is_review(entry)
+    print(f"{label} (round {len(review_loop(read(args.ledger), args.task))})" if is_review(entry)
           else f"{label} (cycle {len(cycles(read(args.ledger)))})")
 
 
