@@ -5,7 +5,8 @@
   add     --agent dev --task <id> --verdict <v> [--simpler] [--seconds <duration>] [--tokens N]
   add     --agent reviewer|qa --verdict PASS|FAIL [--critical N --important N --minor N --origin <origin>=N,...]
           [--report <path>] [--seconds <duration>] [--tokens N]
-  add     --agent reviewer --task spec|plan --verdict PASS|FAIL ...       one round of the spec or plan review loop
+  add     --agent reviewer --task spec|plan --verdict PASS|FAIL ... [--triage applied=N,refused=N,errata=N]
+                                                              one round of the spec or plan review loop
   add     --agent qa ... --full                               the qa ran the project's full test command
   claim   --task <id> [--worktree <path>] [--origin <rev>]    a dev run dispatched; refused if the task is in flight or done
   release --task <id>                                         frees a claim whose run was lost
@@ -59,7 +60,7 @@ it. A cycle whose reviewer or qa still fails after a fix round asks the user; in
 up to three, then the delivery stops. extend, once status asks the user or stops, records the user's decision to go
 on (a note, VALIDAR in autonomous mode): the current cycle gets one more fix round, and a reviewer or qa FAIL after
 it asks or stops again; it never carries to the next cycle. extend --task spec|plan is the same for that review loop,
-which runs one more round, and each extension is read only by the loop (or the cycle) it was given to. With scope recorded, a task of a later plan cycle may be
+which runs one more round (also when status says waive: the user overrules it), and each extension is read only by the loop (or the cycle) it was given to. With scope recorded, a task of a later plan cycle may be
 claimed while the current cycle is open, but its add is refused until the cycle closes, so the next cycle's range
 starts at the head that closed this one. waive is refused when the dev ran after that FAIL (the fix needs its review); it
 records the reason as a note and counts as that agent's PASS at the head it reviewed. Notes marked --validar (and
@@ -69,17 +70,21 @@ ledger with no mode entry is supervised.
 
 A reviewer run with --task spec or plan is one round of that review loop, before the code: it is no part of any
 cycle, and its findings, time and tokens are counted apart in the metrics. While the latest round is a FAIL, status
-asks for the next round; after the 3rd FAIL it asks the user, or in autonomous mode allows a 4th round that checks
-only the corrections of the open findings (its PASS goes with those findings as note --validar) and then stops the
-delivery. waive --task closes the loop when the user accepts the open findings.
+asks for the next round, on the range from the head the failed round recorded (the corrections only), and every
+later round of the loop needs --triage: what became of each finding of the previous round (applied, refused or carried
+to the errata), counting every one of them once; the metrics sum the refused ones. A loop is the rounds since that
+review's latest PASS (a waiver included), so a document reviewed again after a change of scope starts at round 1. After
+the 3rd FAIL with no Critical open, in either mode, status says waive (carry the open findings to the plan's Errata, or
+to the plan's brief for a spec, and waive --task) without asking the user; with a Critical open it asks the user, or
+stops the delivery in autonomous mode. waive --task closes the loop.
 
 status --json also gives the pending items as data and where the delivery is in its plan. claims: one {task, at,
 worktree, origin, tip, head_moved} per task in flight; paused: {text, at} or null; full_qa: the latest qa run added with
 --full, or null. from: the commit the current cycle's diff starts at, for the reviewer's and qa's range: the base for
 cycle 1, else the head the run that closed the previous cycle recorded (a commit made after it and before this cycle's
-first task, such as an errata, falls in the range too). steps: one {"step": resume|dev|reviewer|qa|fix|review|ask|
+first task, such as an errata, falls in the range too). steps: one {"step": resume|dev|reviewer|qa|fix|review|waive|ask|
 stop|decide, ...} per pending item, with its detail (task and verdict, agent, open findings and the report path, a qa
-re-run, a review round and its report, a deferred id and text, the pause text); a task in flight is no step. scope:
+re-run, a review round with its from and report, a review loop to waive, a deferred id and text, the pause text); a task in flight is no step. scope:
 the plan cycles recorded with scope, in the order first recorded (a later scope for a cycle replaces its tasks in place, an empty one removes
 it), each with the tasks that have no DONE run yet; the current cycle (the one holding the task in flight once the
 open cycle has closed, else the latest task); and how many tasks and cycles are left (a cycle whose tasks are done
@@ -152,7 +157,8 @@ VERDICTS = {
 ORIGINS = ("design", "assumption", "plan", "execution", "environment")
 SEVERITIES = ("critical", "important", "minor")
 FIX_ROUNDS = {False: 1, True: 3}
-REVIEW_ROUNDS = {False: 3, True: 4}
+REVIEW_ROUNDS = 3
+TRIAGE = ("applied", "refused", "errata")
 REVIEWS = ("spec", "plan")
 DONE = ("DONE", "DONE_WITH_CONCERNS")
 FIX_TASK = re.compile(r"fix-\d+", re.IGNORECASE)
@@ -277,12 +283,13 @@ def cycles(entries):
     return groups
 
 
-def extension(entries, cycle):
-    marks = [index for index, entry in enumerate(entries) if entry["type"] == "extend" and not entry.get("task")]
+def extension(entries, group, task=None):
+    """How many runs of the group (a cycle, or a review loop with its task) came before the latest extend given to it."""
+    marks = [index for index, entry in enumerate(entries) if entry["type"] == "extend" and entry.get("task") == task]
     position = {id(entry): index for index, entry in enumerate(entries)}
-    if not marks or not cycle or marks[-1] < position[id(cycle[0])]:
+    if not marks or not group or marks[-1] < position[id(group[0])]:
         return None
-    return sum(1 for entry in cycle if position[id(entry)] < marks[-1])
+    return sum(1 for entry in group if position[id(entry)] < marks[-1])
 
 
 def cycle_state(cycle, autonomous=False, extended=None):
@@ -346,36 +353,41 @@ def cycle_state(cycle, autonomous=False, extended=None):
     return state, pending
 
 
-def review_extension(entries, task):
-    marks = [index for index, entry in enumerate(entries) if entry["type"] == "extend" and entry.get("task") == task]
-    if not marks:
-        return None
-    return sum(1 for index, entry in enumerate(entries)
-               if index < marks[-1] and entry["type"] == "run" and is_review(entry) and entry["task"] == task)
+def review_loop(entries, task):
+    """The rounds of that review since its latest PASS (a waiver included): a document reviewed again after a PASS, as
+    after a change of scope, starts a new loop at round 1."""
+    done = reviews(entries, task)
+    passed = [index for index, entry in enumerate(done) if entry["verdict"] == "PASS"]
+    return done[passed[-1] + 1:] if passed else done
 
 
 def review_state(entries, autonomous=False):
     pending, steps = [], []
     for task in REVIEWS:
-        done = reviews(entries, task)
-        if not done or done[-1]["verdict"] != "FAIL":
+        loop = review_loop(entries, task)
+        if not loop:
             continue
-        extended = review_extension(entries, task)
-        last, rounds = done[-1], len(done)
-        limit = REVIEW_ROUNDS[autonomous] if extended is None else extended + 1
-        if rounds < limit:
-            text = f"{task} review round {rounds} FAIL ({last['open']} open{where(last)}): "
-            final = autonomous and rounds == limit - 1
-            text += ("a last round checks only the corrections of the open findings; on PASS they become note --validar"
-                     if final else "apply the corrections and dispatch the reviewer on them again")
-            steps.append({"step": "review", "task": task, "round": rounds + 1, "open": last["open"], **report_of(last),
-                          **({"last": True} if final else {})})
+        extended = extension(entries, loop, task)
+        last, rounds = loop[-1], len(loop)
+        mark = {"extended": True} if extended is not None else {}
+        after = "the extra round" if extended is not None else f"{rounds} rounds"
+        if rounds < (REVIEW_ROUNDS if extended is None else extended + 1):
+            head = last.get("head")
+            text = (f"{task} review round {rounds} FAIL ({last['open']} open{where(last)}): triage every finding "
+                    f"(applied, refused or errata), commit the {task} and dispatch the reviewer on "
+                    + (f"{head[:12]}..HEAD, the corrections only" if head else "the corrections only"))
+            steps.append({"step": "review", "task": task, "round": rounds + 1, "open": last["open"],
+                          **({"from": head} if head else {}), **report_of(last)})
+        elif last.get("critical") == 0:
+            text = (f"{task} review still fails after {after} with no Critical: carry each open finding to the "
+                    + ("plan's Errata" if task == "plan" else "plan's brief")
+                    + f" and waive --task {task}; extend only on the user's word")
+            steps.append({"step": "waive", "task": task, "rounds": rounds, "open": last["open"], **report_of(last),
+                          **mark})
         else:
-            after = "the extra round" if extended is not None else f"{rounds} rounds"
             text = f"{task} review still fails after {after}: " + (
                 "stop the delivery and record the open findings as note --validar" if autonomous else "ask the user")
-            steps.append({"step": "stop" if autonomous else "ask", "task": task, "rounds": rounds,
-                          **({"extended": True} if extended is not None else {})})
+            steps.append({"step": "stop" if autonomous else "ask", "task": task, "rounds": rounds, **mark})
         pending.append(text)
     return pending, steps
 
@@ -422,15 +434,16 @@ def seconds(text):
     return total
 
 
-def origins(text, total):
+def tally(flag, names, text, total):
+    """<name>=N,... counts that must add up to total, every finding counted once (--origin, --triage)."""
     counts = {}
     for item in filter(None, (part.strip() for part in (text or "").split(","))):
         name, _, number = (piece.strip() for piece in item.partition("="))
-        if name not in ORIGINS or not number.isdigit():
-            sys.exit(f"--origin takes <origin>=N with origin one of {', '.join(ORIGINS)}, not {item!r}")
+        if name not in names or not number.isdigit():
+            sys.exit(f"{flag} takes <name>=N with name one of {', '.join(names)}, not {item!r}")
         counts[name] = counts.get(name, 0) + int(number)
     if sum(counts.values()) != total:
-        sys.exit(f"--origin must classify every finding: {sum(counts.values())} classified, {total} counted")
+        sys.exit(f"{flag} must count every finding once: {sum(counts.values())} counted, {total} findings")
     return counts
 
 
@@ -594,6 +607,12 @@ def add(args):
         sys.exit("--full marks a qa run of the project's full test command")
     if args.simpler and not (args.agent == "dev" and args.verdict == "NEEDS_CONTEXT"):
         sys.exit("--simpler marks a dev NEEDS_CONTEXT run that proposes a simpler way (a simpler: proposal)")
+    loop = review_loop(entries, args.task) if args.agent == "reviewer" and args.task in REVIEWS else []
+    if loop and args.triage is None:
+        sys.exit(f"round {len(loop) + 1} of the {args.task} review needs --triage applied=N,refused=N,errata=N: what "
+                 f"became of each finding of round {len(loop)}, so the next round reviews only the corrections")
+    if args.triage is not None and not loop:
+        sys.exit("--triage counts the findings of the previous round of a spec or plan review that failed")
     blocking = args.critical + args.important
     if args.agent in ("reviewer", "qa") and (args.verdict == "FAIL") != (blocking > 0):
         sys.exit("FAIL needs open Critical/Important findings (--critical or --important > 0) and PASS none")
@@ -605,9 +624,12 @@ def add(args):
                      "(status says what the cycle still needs), so the next cycle's range starts where this one ends")
     entry = {"type": "run", "agent": args.agent, "task": args.task, "verdict": args.verdict, "open": blocking,
              "critical": args.critical, "important": args.important, "minor": args.minor,
-             "origin": origins(args.origin, blocking + args.minor), "head": git_head(ledger=args.ledger) or ""}
+             "origin": tally("--origin", ORIGINS, args.origin, blocking + args.minor),
+             "head": git_head(ledger=args.ledger) or ""}
     if args.report:
         entry["report"] = args.report
+    if loop:
+        entry["triage"] = tally("--triage", TRIAGE, args.triage, sum(loop[-1].get(key) or 0 for key in SEVERITIES))
     if args.full:
         entry["full"] = True
     if args.seconds is not None:
@@ -632,7 +654,7 @@ def add(args):
         entry["usage"] = {name: item["percent"] for name, item in windows.items()}
     write(args.ledger, entry)
     label = f"{args.agent}{' ' + args.task if args.task else ''}: {args.verdict}"
-    print(f"{label} (round {len(reviews(read(args.ledger), args.task))})" if is_review(entry)
+    print(f"{label} (round {len(review_loop(read(args.ledger), args.task))})" if is_review(entry)
           else f"{label} (cycle {len(cycles(read(args.ledger)))})")
 
 
@@ -884,7 +906,7 @@ def extend(args):
         sys.exit("no delivery started: run start first")
     if args.task:
         steps = review_state(entries, autonomous(entries))[1]
-        if not any(step["step"] in ("stop", "ask") and step.get("task") == args.task for step in steps):
+        if not any(step["step"] in ("stop", "ask", "waive") and step.get("task") == args.task for step in steps):
             sys.exit(f"the {args.task} review has not run out of rounds: nothing to extend")
         text = f"extra {args.task} review round: {args.reason}"
     else:
@@ -1035,8 +1057,10 @@ def metrics(entries):
     for entry in reviews(entries):
         if entry.get("waived") is not None:
             continue
-        loop = loops.setdefault(entry["task"], {"rounds": 0, **{key: 0 for key in SEVERITIES}, "seconds": 0, "tokens": 0})
+        loop = loops.setdefault(entry["task"], {"rounds": 0, **{key: 0 for key in SEVERITIES}, "refused": 0, "seconds": 0,
+                                                "tokens": 0})
         loop["rounds"] += 1
+        loop["refused"] += (entry.get("triage") or {}).get("refused", 0)
         for key in SEVERITIES + ("seconds", "tokens"):
             loop[key] += entry.get(key) or 0
         classify(entry, found)
@@ -1392,6 +1416,7 @@ def main():
     command.add_argument("--tokens", type=count, help="the tokens the run used, from its completion notification")
     command.add_argument("--full", action="store_true", help="the qa ran the project's full test command")
     command.add_argument("--simpler", action="store_true", help="the dev's NEEDS_CONTEXT is a simpler: proposal")
+    command.add_argument("--triage", help="applied=N,refused=N,errata=N: the previous round's findings of a spec or plan review")
     command.set_defaults(run=add)
     for name, run in (("claim", claim), ("release", release)):
         command = commands.add_parser(name)

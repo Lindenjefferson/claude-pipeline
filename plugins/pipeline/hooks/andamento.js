@@ -140,6 +140,7 @@ function said(step) {
     case 'review': return `${agent}, rodada ${step.round} (${plural(step.open, 'achado aberto', 'achados abertos')})`
     case 'ask': return `falar com você (${agent} ainda reprova depois ${step.task ? `de ${step.rounds} rodadas` : 'da correção'})`
     case 'stop': return `parar e registrar como VALIDAR (${agent} ainda reprova depois de ${step.rounds} rodadas)`
+    case 'waive': return `dispensar a ${agent} (${plural(step.open, 'achado aberto vai', 'achados abertos vão')} para a Errata)`
     case 'decide': return `decidir ${step.id}: ${step.text}`
     case 'resume': return `retomar a entrega (pausada: ${step.text})`
     default: return step.step
