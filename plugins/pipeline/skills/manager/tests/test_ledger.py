@@ -33,6 +33,13 @@ def add(agent, verdict, task=None, open_count=0, ledger=None, seconds=None):
     return run(*(args + (["--task", task] if task else [])), ledger=ledger)
 
 
+def report_file(name):
+    path = f".superpowers/reports/{name}"
+    os.makedirs(os.path.join(repo, ".superpowers", "reports"), exist_ok=True)
+    open(os.path.join(repo, path), "w", encoding="utf-8").close()
+    return path
+
+
 def check(name, ok, detail=""):
     results.append(bool(ok))
     print("PASS" if ok else "FAIL", name, "" if ok else f"| {str(detail)[-300:]}")
@@ -610,18 +617,23 @@ check("--summary is gone", r.returncode != 0, r.stdout)
 r = run("add", "--agent", "dev", "--task", "T2", "--verdict", "DONE", "--report", "x.md", ledger=REPORTS)
 check("a dev run has no report file: --report is refused", r.returncode != 0 and "--report" in r.stderr, r.stderr)
 r = run("add", "--agent", "reviewer", "--verdict", "FAIL", "--important", "2", "--origin", "execution=2", "--report",
-        "/w/.superpowers/reports/reports/1-reviewer.md", ledger=REPORTS)
+        "reports/1-reviewer.md", ledger=REPORTS)
+check("--report is refused when no file was saved there: the agents cannot write it, the manager does",
+      r.returncode != 0 and "no file" in r.stderr and not status(REPORTS)["reviewer"], (r.stderr, status(REPORTS)))
+REVIEW_REPORT, QA_REPORT = report_file("1-reviewer.md"), report_file("1-qa.md")
+r = run("add", "--agent", "reviewer", "--verdict", "FAIL", "--important", "2", "--origin", "execution=2", "--report",
+        REVIEW_REPORT, ledger=REPORTS)
 run("add", "--agent", "qa", "--verdict", "FAIL", "--important", "1", "--origin", "execution=1", "--report",
-    "/w/.superpowers/reports/reports/1-qa.md", ledger=REPORTS)
+    QA_REPORT, ledger=REPORTS)
 state = status(REPORTS)
 check("add --report keeps the report path with the run and in its fix step",
-      r.returncode == 0 and state["reviewer"][0]["report"] == "/w/.superpowers/reports/reports/1-reviewer.md"
-      and state["steps"] == [{"step": "fix", "agent": "reviewer", "open": 2, "report": "/w/.superpowers/reports/reports/1-reviewer.md"},
-                             {"step": "fix", "agent": "qa", "open": 1, "report": "/w/.superpowers/reports/reports/1-qa.md"}],
+      r.returncode == 0 and state["reviewer"][0]["report"] == REVIEW_REPORT
+      and state["steps"] == [{"step": "fix", "agent": "reviewer", "open": 2, "report": REVIEW_REPORT},
+                             {"step": "fix", "agent": "qa", "open": 1, "report": QA_REPORT}],
       (r.stderr, state["steps"]))
 text = run("status", ledger=REPORTS).stdout
 check("the pending text names the report of each open FAIL",
-      "reviewer FAIL (2 open, report /w/.superpowers/reports/reports/1-reviewer.md)" in text and "1-qa.md" in text, text)
+      f"reviewer FAIL (2 open, report {REVIEW_REPORT})" in text and "1-qa.md" in text, text)
 add("dev", "DONE", "fix-1", ledger=REPORTS)
 check("a run without --report has no report key", "report" not in status(REPORTS)["runs"][0]
       and not any("report" in step for step in status(REPORTS)["steps"]), status(REPORTS)["steps"])
@@ -644,13 +656,14 @@ def review(verdict, task="plan", open_count=0, ledger=LOOP, report=None):
     return run(*(args + (["--report", report] if report else [])), "--seconds", "5m", ledger=ledger)
 
 
-r = review("FAIL", open_count=2, report="/w/r1.md")
+LOOP_REPORT = report_file("loop-1.md")
+r = review("FAIL", open_count=2, report=LOOP_REPORT)
 state = status(LOOP)
 check("a plan review FAIL is a review step with its round, outside the cycles",
       r.returncode == 0 and state["cycle"] == 1 and state["tasks"] == {} and state["reviewer"] == []
-      and state["steps"] == [{"step": "review", "task": "plan", "round": 2, "open": 2, "report": "/w/r1.md"}, {"step": "dev"}]
-      and state["pending"][0] == "plan review round 1 FAIL (2 open, report /w/r1.md): apply the corrections and dispatch "
-                                 "the reviewer on them again", (r.stderr, state["steps"], state["pending"]))
+      and state["steps"] == [{"step": "review", "task": "plan", "round": 2, "open": 2, "report": LOOP_REPORT}, {"step": "dev"}]
+      and state["pending"][0] == f"plan review round 1 FAIL (2 open, report {LOOP_REPORT}): apply the corrections and "
+                                 "dispatch the reviewer on them again", (r.stderr, state["steps"], state["pending"]))
 check("status --check fails while the plan review is open", run("status", "--check", ledger=LOOP).returncode == 1)
 review("FAIL", open_count=1)
 review("FAIL", open_count=1)
@@ -686,6 +699,39 @@ check("waive --task closes a review loop the user accepted as it is",
       (r.stderr, state))
 check("waive --task of a review that passed is refused",
       run("waive", "--agent", "reviewer", "--task", "plan", "--reason", "x", ledger=LOOP).returncode != 0)
+
+EXT = ".superpowers/extend-review.jsonl"
+run("start", "--slug", "extend-review", ledger=EXT)
+r = run("extend", "--task", "plan", "--reason", "x", ledger=EXT)
+check("extend --task of a review loop that never failed is refused",
+      r.returncode != 0 and "nothing to extend" in r.stderr, r.stderr)
+for _ in range(3):
+    review("FAIL", open_count=1, ledger=EXT)
+check("supervised: the plan review asks the user after its three rounds",
+      status(EXT)["steps"][0] == {"step": "ask", "task": "plan", "rounds": 3}, status(EXT)["steps"])
+r = run("extend", "--task", "plan", "--reason", "user wants the corrections checked", ledger=EXT)
+state = status(EXT)
+check("extend --task records the user's extra review round and the loop goes on",
+      r.returncode == 0 and state["steps"][0] == {"step": "review", "task": "plan", "round": 4, "open": 1}
+      and state["notes"][-1] == "extra plan review round: user wants the corrections checked", (r.stderr, state))
+check("a review extension does not extend the cycle's fix rounds",
+      run("extend", "--reason", "y", ledger=EXT).returncode != 0)
+review("FAIL", open_count=1, ledger=EXT)
+state = status(EXT)
+check("the extra round failing asks the user again, naming it as the extra one",
+      state["steps"][0] == {"step": "ask", "task": "plan", "rounds": 4, "extended": True}
+      and state["pending"][0] == "plan review still fails after the extra round: ask the user", state)
+run("mode", "autonomous", ledger=EXT)
+check("in autonomous mode the extra round that failed stops the delivery",
+      status(EXT)["steps"][0]["step"] == "stop" and "note --validar" in status(EXT)["pending"][0], status(EXT))
+r = run("extend", "--task", "plan", "--reason", "one more", ledger=EXT)
+check("the user may authorize another round after the extra one",
+      r.returncode == 0 and status(EXT)["steps"][0]["step"] == "review", (r.stderr, status(EXT)["steps"]))
+check("the note of an extension in autonomous mode is a VALIDAR item",
+      status(EXT)["validar"][-1]["text"] == "extra plan review round: one more", status(EXT)["validar"])
+r = run("extend", "--task", "spec", "--reason", "x", ledger=EXT)
+check("extend --task names the review loop that ran out, not another",
+      r.returncode != 0 and "spec" in r.stderr, r.stderr)
 
 FROM = ".superpowers/from.jsonl"
 base_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
@@ -852,22 +898,23 @@ check("--full is refused on the reviewer", r.returncode != 0 and "--full" in r.s
 r = run("add", "--agent", "dev", "--task", "T2", "--verdict", "DONE", "--full", ledger=FULL)
 check("--full is refused on the dev", r.returncode != 0 and "--full" in r.stderr, r.stderr)
 check("refused --full runs write nothing", len(status(FULL)["runs"]) == 1)
-r = run("add", "--agent", "qa", "--verdict", "PASS", "--full", "--report", "first.md", ledger=FULL)
+FIRST, PLAIN, SECOND = report_file("first.md"), report_file("plain.md"), report_file("second.md")
+r = run("add", "--agent", "qa", "--verdict", "PASS", "--full", "--report", FIRST, ledger=FULL)
 state = status(FULL)
 check("--full on qa is stored on the run and shows as full_qa",
       r.returncode == 0 and state["qa"][0].get("full") is True and state["full_qa"] == state["qa"][0]
       and state["full_qa"]["head"], (r.stderr, state["full_qa"]))
-run("add", "--agent", "qa", "--verdict", "PASS", "--report", "plain.md", ledger=FULL)
+run("add", "--agent", "qa", "--verdict", "PASS", "--report", PLAIN, ledger=FULL)
 state = status(FULL)
 check("a qa run without --full has no full key and does not replace full_qa",
-      "full" not in state["qa"][0] and state["full_qa"]["report"] == "first.md", state["full_qa"])
+      "full" not in state["qa"][0] and state["full_qa"]["report"] == FIRST, state["full_qa"])
 add("dev", "DONE", "T3", ledger=FULL)
-run("add", "--agent", "qa", "--verdict", "PASS", "--full", "--report", "second.md", ledger=FULL)
+run("add", "--agent", "qa", "--verdict", "PASS", "--full", "--report", SECOND, ledger=FULL)
 add("reviewer", "PASS", ledger=FULL)
 add("dev", "DONE", "T4", ledger=FULL)
 state = status(FULL)
 check("full_qa is the latest full qa run across the whole delivery, even from an earlier cycle",
-      state["cycle"] > 1 and state["full_qa"]["report"] == "second.md", state["full_qa"])
+      state["cycle"] > 1 and state["full_qa"]["report"] == SECOND, state["full_qa"])
 
 def stamp(hours):
     return (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=hours)).isoformat(timespec="seconds")
