@@ -1,6 +1,6 @@
 # claude-pipeline
 
-Um time de desenvolvimento multiagente e independente para o [Claude Code](https://code.claude.com), que constrói produtos pequenos de forma autônoma e leva cada um, pequeno ou não, pelo ciclo inteiro (descoberta, triagem, desenvolvimento, testes, documentação, auditoria, segurança e operação), com a mesma qualidade. O `manager` orquestra e gere a entrega; agentes especializados implementam, revisam e validam; você só decide as questões de produto e aprova o plano e o merge.
+Um time de desenvolvimento multiagente e independente para o [Claude Code](https://code.claude.com), que constrói produtos pequenos de forma autônoma e leva cada um pelo ciclo inteiro (descoberta, triagem, desenvolvimento, testes, documentação, auditoria, segurança e operação), com a qualidade de um produto grande. O `manager` orquestra e gere a entrega; agentes especializados implementam, revisam e validam; você só decide as questões de produto e aprova o plano e o merge.
 
 O objetivo é que nada errado saia da máquina sem que você precise acompanhar cada passo: o trabalho anda em ciclos curtos, com testes primeiro, revisão e validação em todo ciclo e um gate local antes do merge.
 
@@ -72,7 +72,7 @@ Para atualizar, veja "Atualização" abaixo. Para desenvolver o plugin, use um c
 
 ## O que fica no seu projeto
 
-Vai para o git, no mesmo slug da entrega: a spec (`docs/specs/<slug>.md`, nas entregas grandes), o plano (`docs/plans/<slug>.md`), o mockup das telas (`docs/mockups/<slug>.html`) e o relatório de qualidade do gate (`docs/quality-reports/`). Ficam também a doc de cada módulo em `docs/`, com o índice em `docs/README.md`, as lições em `docs/lessons.md`, os achados do `discovery` em `docs/discovery/` e as convenções do projeto no `CLAUDE.md`. Ficam fora do git: `.superpowers/`, com o ledger e os relatórios de cada agente, e o `CLAUDE.local.md`, com o que vale só para este computador.
+Vai para o git, no mesmo slug da entrega: a spec (`docs/specs/<slug>.md`, nas entregas grandes), o plano (`docs/plans/<slug>.md`), o mockup das telas (`docs/mockups/<slug>.html`) e o relatório de qualidade do gate (`docs/quality-reports/`). Ficam também a doc de cada módulo em `docs/`, com o índice em `docs/README.md`, os padrões que todo código segue e o mapa dos módulos em `docs/arquitetura.md`, o roteiro de publicar, guardar e reverter em `docs/operacao.md`, as lições em `docs/lessons.md`, os achados do `discovery` em `docs/discovery/` e as convenções do projeto no `CLAUDE.md`. Ficam fora do git: `.superpowers/`, com o ledger e os relatórios de cada agente, e o `CLAUDE.local.md`, com o que vale só para este computador.
 
 ## O que esperar de uma entrega
 
