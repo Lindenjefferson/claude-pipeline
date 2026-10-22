@@ -42,6 +42,7 @@ Cada componente tem **uma** fonte de verdade, o próprio arquivo. Os outros docu
 | Testes dos scripts | `plugins/pipeline/skills/manager/tests/`, `plugins/pipeline/hooks/tests/` (o do mod é `andamento.test.ts`) |
 | O que o CI roda a cada push e PR | [`.github/workflows/testes.yml`](.github/workflows/testes.yml) |
 | Versões entregues, backlog | [`docs/roadmap.md`](docs/roadmap.md) |
+| Análise de uma entrega real que virou item do backlog | [`docs/analises/`](docs/analises/), um arquivo por entrega, no slug dela |
 | Notas de atualização (vão com a versão instalada) e como atualizar um projeto | [`plugins/pipeline/UPGRADING.md`](plugins/pipeline/UPGRADING.md), aplicadas pela skill [`atualizar`](plugins/pipeline/skills/atualizar/SKILL.md) |
 | Apresentação, começo rápido, componentes em uma linha | [`README.md`](README.md) |
 | Manifesto e marketplace | [`plugins/pipeline/.claude-plugin/plugin.json`](plugins/pipeline/.claude-plugin/plugin.json), [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) |
