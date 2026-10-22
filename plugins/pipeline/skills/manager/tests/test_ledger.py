@@ -1798,7 +1798,25 @@ check("start carries the items the latest quality report moved to a later delive
       (r.stdout, state["deferred"], state["steps"]))
 check("a carried item numbers the next deferred item after it",
       "deferred D3" in run("defer", "--text", "x", "--recommend", "y", ledger=CARRY).stdout)
-for name in os.listdir(QUALITY):
+with open(os.path.join(QUALITY, "2026-10-01-zeta.md"), "w", encoding="utf-8", newline="\n") as handle:
+    handle.write("# zeta\n\n## Deferred\n\n- D1 stale -> moved to alpha: older\n")
+with open(os.path.join(QUALITY, "2026-10-01-alpha.md"), "w", encoding="utf-8", newline="\n") as handle:
+    handle.write("# alpha\n\n## Deferred\n\n- D1 thing -> moved to d: map a -> b\n- D2 other -> Moved to d: later\n")
+for name in ("2026-10-01-zeta.md", "2026-10-01-alpha.md"):
+    subprocess.run(["git", "add", "-f", os.path.join("docs", "quality-reports", name)], cwd=repo, check=True,
+                   capture_output=True)
+    subprocess.run(["git", "commit", "-q", "-m", f"docs: quality report {name}"], cwd=repo, check=True,
+                   capture_output=True)
+r = run("start", "--slug", "e", "--archive", ledger=CARRY)
+texts = [item["text"] for item in status(CARRY)["deferred"]]
+check("the latest report is the one committed last, not the last by name, and an arrow in a reason or a capital "
+      "Moved keeps the item", r.returncode == 0
+      and texts == ["thing (moved here by docs/quality-reports/2026-10-01-alpha.md)",
+                    "other (moved here by docs/quality-reports/2026-10-01-alpha.md)"], (r.stdout, texts))
+subprocess.run(["git", "rm", "-q", "-r", os.path.join("docs", "quality-reports")], cwd=repo, check=True,
+               capture_output=True)
+subprocess.run(["git", "commit", "-q", "-m", "docs: drop reports"], cwd=repo, check=True, capture_output=True)
+for name in os.listdir(QUALITY) if os.path.isdir(QUALITY) else []:
     os.remove(os.path.join(QUALITY, name))
 r = run("start", "--slug", "d", "--archive", ledger=CARRY)
 check("with no quality report, start carries nothing", r.returncode == 0 and "carried" not in r.stdout

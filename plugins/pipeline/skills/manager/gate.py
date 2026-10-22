@@ -74,7 +74,7 @@ DAY = 24 * 60 * 60
 REPORTS = "docs/quality-reports"
 PATTERNS = "docs/arquitetura.md"
 MODULE_DOC = re.compile(r"docs/\d+-[^/]+\.md")
-LINK = re.compile(r"\]\(([^)\s]+)\)")
+LINK = re.compile(r"\]\(((?:[^()\s]|\([^()\s]*\))+)\)")
 LESSONS = "docs/lessons.md"
 SECRETS_ALLOW = ".pipeline-secrets-allow"
 
@@ -257,7 +257,7 @@ def docs():
     if not os.path.isfile("docs/README.md"):
         return True, "no docs/README.md: the kickoff prepares it"
     problems = []
-    modules = [path for path in git("ls-files", "docs")[1].splitlines() if MODULE_DOC.fullmatch(path)]
+    modules = [path for path in git("ls-files", "-z", "docs")[1].split("\0") if MODULE_DOC.fullmatch(path)]
     index = open("docs/README.md", encoding="utf-8").read()
     problems += [f"docs/README.md does not list {os.path.basename(path)}" for path in modules
                  if os.path.basename(path) not in index]
