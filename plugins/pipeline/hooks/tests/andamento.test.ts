@@ -18,7 +18,8 @@ const STATUS = {
   scope: { cycles: [{ cycle: '1', tasks: ['T1.1'], left: [] }, { cycle: '2', tasks: ['T2.1', 'T2.2'], left: ['T2.1'] },
                     { cycle: 'R', tasks: ['TR.1', 'TR.2'], left: ['TR.1', 'TR.2'] }],
            current: '2', position: 2, total: 3, tasks_left: 3, cycles_left: 2 },
-  validar: [{ id: 'V1', text: 'page size 50', decision: null }, { id: 'V2', text: 'sort by date', decision: 'ok' }],
+  validar: [{ id: 'V1', text: 'page size 50', decision: null, recommend: 'confirmar: 50 cabe na menor tela' },
+            { id: 'V2', text: 'sort by date', decision: 'ok' }],
   deferred: [], notes: [], ready_for_gate: false,
   metrics: { cycles: [{ cycle: 1, critical: 0, important: 1, minor: 2, open: 1, fix_rounds: 1, seconds: 3600, tokens: 0 },
                       { cycle: 2, critical: 0, important: 2, minor: 0, open: 2, fix_rounds: 0, seconds: 241, tokens: 98357 }] },
@@ -155,6 +156,7 @@ test('the pane lists what is left per cycle, the cycle runs, what comes next, VA
   expect(lines).toContain('- correção (2 achados da revisão)')
   expect(lines).toContain('Decisões que esperam você (VALIDAR):')
   expect(lines).toContain('- V1 page size 50')
+  expect(lines).toContain('  recomendo: confirmar: 50 cabe na menor tela')
   expect(lines.join('\n')).not.toContain('sort by date')
   expect(lines).toContain('- ciclo 1: 0 Critical, 1 Important, 2 Minor; 1 rodada de correção; 1h00 de agente')
   expect(lines).toContain('Outras frentes:')
