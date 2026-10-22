@@ -5,7 +5,8 @@
 // cycle, whether it is paused and
 // the tasks and cycles left; the tasks in flight with their time, a verdict no next step covers and what comes next;
 // and the VALIDAR items waiting, in the warning color. Only the first row dims while Claude works.
-// /andamento opens a pane with what is left per cycle, the current cycle's runs, the next steps, the earlier cycles
+// /andamento opens a pane with what is left per cycle, the current cycle's runs, the next steps, the decisions
+// waiting with the recommendation the ledger holds for each, the earlier cycles
 // and the other fronts (each worktree with a ledger of its own), and answers in text where nothing draws. Every rule
 // stays in ledger.py (its steps and scope): this file only lays them out. It checks the ledger file every 5 s and
 // runs ledger.py again only when the file changed, or once a minute (every 5 minutes while there is no ledger file).
@@ -247,7 +248,9 @@ export function paneLines(r, fronts, now, failure = null) {
     const items = waiting(r)
     if (items.length) {
       lines.push('', 'Decisões que esperam você (VALIDAR):')
-      for (const item of items) lines.push(`- ${item.id} ${item.text}`)
+      for (const item of items) {
+        lines.push(`- ${item.id} ${item.text}`, ...(item.recommend ? [`  recomendo: ${item.recommend}`] : []))
+      }
     }
     const files = deliveryFiles(r)
     if (files.length) {

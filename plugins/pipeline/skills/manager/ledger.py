@@ -12,14 +12,14 @@
   pause   --text <text>                                       the delivery stops; the text says what comes on return
   resume                                                      the work restarts; lists the claims still in flight
   measure --agent dev|reviewer|qa [--task <id>] [--at <at>] [--seconds <duration>] [--tokens N]  numbers of a run added
-  note    --text <text> [--validar]                           a decision taken on the user's behalf
+  note    --text <text> [--validar --recommend <text>]        a decision taken on the user's behalf
   validate --id <id> --decision <text>                        the user's decision on a VALIDAR item (V1, V2...)
   waive   --agent reviewer|qa [--task spec|plan] --reason <text>   accepts the open findings of that agent's latest FAIL
   extend  --reason <text> [--task spec|plan]                  the user lets the fixes, or that review loop, go on
   plan    --path <path>                                       the approved plan, when start ran before it existed
   scope   --cycle <name> --tasks <id,id,...>                  the tasks of one plan cycle, in plan order
   mode    autonomous|supervised                               the user turned autonomous mode on, or is back
-  defer   --text <text>                                       an item left for later; prints its id (D1, D2...)
+  defer   --text <text> --recommend <text>                    an item left for later; prints its id (D1, D2...)
   resolve --id <id> --decision <text>                         the final decision on a deferred item
   lesson  --text <rule> [--check <test or lint rule>]         a lesson, automated when --check names the check
   status  [--json] [--check]                                  the current cycle, what it still needs, and metrics
@@ -53,7 +53,7 @@ agent and task still unmeasured it takes them by itself, and with more than one 
 --at then names (a waived run takes none, and a run already measured is refused) - guessing would move the numbers of
 every later notification by one run, for the whole delivery. No dispatch ever waits for a notification. status gives each claim in flight its waiting_minutes and, for a claim with no worktree whose delivery
 head moved since, committed: the dev commits straight on the branch, so its work may be in and its report waiting to
-be added. A deferred item with no decision keeps the delivery from the gate. start --archive moves an existing delivery to
+be added. A deferred item with no decision keeps the delivery from the gate. Everything that waits for the user carries --recommend, what the manager would decide and why, so every list of what waits (status, the pane, validar) recommends without being asked: defer requires it, note takes it with --validar and refuses it without. An entry of an earlier version, with no recommendation, reads as before. start --archive moves an existing delivery to
 ledger-<old-slug>.jsonl next to the ledger first. --check exits 1 while anything is pending, so the gate can rely on
 it. A cycle whose reviewer or qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on
 up to three, then the delivery stops. extend, once status asks the user or stops, records the user's decision to go
@@ -255,6 +255,10 @@ def where(entry):
 def saved_report(path, ledger):
     root = os.path.dirname(os.path.dirname(os.path.abspath(ledger)))
     return os.path.isfile(path) or os.path.isfile(os.path.join(root, path))
+
+
+def advice_of(entry):
+    return {"recommend": entry["recommend"]} if entry.get("recommend") else {}
 
 
 def report_of(entry):
@@ -758,9 +762,15 @@ def resume(args):
 def note(args):
     if not read(args.ledger):
         sys.exit("no delivery started: run start first")
+    if args.recommend and not args.validar:
+        sys.exit("--recommend goes with --validar: a plain note records what is already decided and waits for nobody")
+    if args.validar and not args.recommend:
+        sys.exit("--validar needs --recommend: say what you would decide and why, so the user reads the item and the "
+                 "recommendation together")
     entry = {"type": "note", "text": args.text}
     if args.validar:
         entry["validar"] = True
+        entry["recommend"] = args.recommend
     write(args.ledger, entry)
     print("noted (VALIDAR)" if args.validar else "noted")
 
@@ -769,7 +779,8 @@ def validar(entries):
     items, decisions = [], {}
     for entry in entries:
         if entry["type"] == "note" and entry.get("validar"):
-            items.append({"id": f"V{len(items) + 1}", "text": entry["text"], "decision": None})
+            items.append({"id": f"V{len(items) + 1}", "text": entry["text"], "decision": None,
+                          **advice_of(entry)})
         elif entry["type"] == "validate":
             decisions[entry["id"]] = entry["decision"]
     for item in items:
@@ -955,7 +966,7 @@ def deferred(entries):
     items = {}
     for entry in entries:
         if entry["type"] == "defer":
-            items[entry["id"]] = {"id": entry["id"], "text": entry["text"], "decision": None}
+            items[entry["id"]] = {"id": entry["id"], "text": entry["text"], "decision": None, **advice_of(entry)}
         elif entry["type"] == "resolve" and entry["id"] in items:
             items[entry["id"]]["decision"] = entry["decision"]
     return list(items.values())
@@ -966,7 +977,7 @@ def defer(args):
     if not entries:
         sys.exit("no delivery started: run start first")
     item = f"D{len(deferred(entries)) + 1}"
-    write(args.ledger, {"type": "defer", "id": item, "text": args.text})
+    write(args.ledger, {"type": "defer", "id": item, "text": args.text, "recommend": args.recommend})
     print(f"deferred {item}: needs a final decision before the gate (resolve --id {item})")
 
 
@@ -1060,6 +1071,10 @@ def line_totals(entries):
             "share": round(follow_up / total, 2) if total else None, "unmeasured": unmeasured}
 
 
+def advice(item):
+    return f" (recommend: {item['recommend']})" if item.get("recommend") else ""
+
+
 def totals(entries, key):
     sums = {"agents": {}, "tasks": {}, "unmeasured": 0}
     for entry in entries:
@@ -1098,9 +1113,10 @@ def status(args):
                        f"once this cycle closes, or release --task {task}{since}" if later else
                        f"dev {task} dispatched at {at}, no report yet (add it as soon as it reports, or "
                        f"release --task {task}){since}")
-    pending += [f"deferred {item['id']} has no decision: {item['text']}" for item in items if not item["decision"]]
-    steps += [step for _, step in kept] + [{"step": "decide", "id": item["id"], "text": item["text"]}
-                                           for item in items if not item["decision"]]
+    pending += [f"deferred {item['id']} has no decision: {item['text']}" + advice(item)
+                for item in items if not item["decision"]]
+    steps += [step for _, step in kept] + [{"step": "decide", "id": item["id"], "text": item["text"],
+                                            **advice_of(item)} for item in items if not item["decision"]]
     pause_state = paused(entries)
     if pause_state:
         pending.insert(0, f"delivery paused since {pause_state['at']}: {pause_state['text']} "
@@ -1161,7 +1177,7 @@ def status(args):
         for text in report["notes"]:
             print(f"note: {text}")
         for item in report["validar"]:
-            print(f"VALIDAR {item['id']}: {item['text']}" if item["decision"] is None
+            print(f"VALIDAR {item['id']}: {item['text']}" + advice(item) if item["decision"] is None
                   else f"validated {item['id']}: {item['text']} -> {item['decision']}")
         for item in items:
             if item["decision"]:
@@ -1392,6 +1408,7 @@ def main():
     command = commands.add_parser("note")
     command.add_argument("--text", required=True)
     command.add_argument("--validar", action="store_true", help="the user validates this decision on return")
+    command.add_argument("--recommend", help="what you would decide and why, read with the item")
     command.set_defaults(run=note)
     command = commands.add_parser("measure")
     command.add_argument("--agent", required=True, choices=sorted(VERDICTS))
@@ -1426,6 +1443,7 @@ def main():
     command.set_defaults(run=mode)
     command = commands.add_parser("defer")
     command.add_argument("--text", required=True)
+    command.add_argument("--recommend", required=True, help="what you would decide and why, read with the item")
     command.set_defaults(run=defer)
     command = commands.add_parser("resolve")
     command.add_argument("--id", required=True)
