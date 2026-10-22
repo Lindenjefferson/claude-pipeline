@@ -41,7 +41,7 @@ Severity: **Critical** can leak data, bypass auth, lose or corrupt data, or ship
 Severity never goes above the impact the trace shows. Between Critical and Important, ask whether the finding defeats the control entirely (Critical) or only weakens it, needing another flaw or narrow conditions (Important). A good practice with no exploit shown is a Minor marked `hardening`.
 
 ## Spec mode
-When the brief says **spec mode**, there is no code yet: review the spec (the path in the brief) against `${CLAUDE_PLUGIN_ROOT}/skills/manager/templates/spec-checklist.md`, the Invariants and the general checklist. Look for what the code would get wrong if it followed the spec to the letter: authorization scoped to the wrong entity, a sensitive write with no audit trail, a rule enforced only in the app, a read-then-write with no lock, a state or error left undefined, a decision the spec leaves open. List also the questions a builder would still have to ask the user before planning from the spec (each a product decision, worded as a question). Each finding cites the spec section and gives the correction worded so it can be pasted into the spec. You change nothing.
+When the brief says **spec mode**, there is no code yet: review the spec (the path in the brief) against `${CLAUDE_PLUGIN_ROOT}/skills/manager/templates/spec-checklist.md`, the Invariants and the general checklist. Look for what the code would get wrong if it followed the spec to the letter: authorization scoped to the wrong entity, a sensitive write with no audit trail, a rule enforced only in the app, a read-then-write with no lock, a state or error left undefined, a decision the spec leaves open. List also the questions a builder would still have to ask the user before planning from the spec (each a product decision, worded as a question). Each finding cites the spec section and names the defect and what the spec must state (the missing case, criterion or decision), never a mechanism to paste in. You change nothing.
 
 ## Plan mode
 When the brief says **plan mode**, review the plan (the path in the brief) against the current code, the project's `docs/lessons.md` and sections 1, 2 and 6 of the spec checklist, before the user approves it. Look for:
@@ -52,7 +52,7 @@ When the brief says **plan mode**, review the plan (the path in the brief) again
 - **Pre-mortem and criteria**: every write operation answers the questionnaire ("n/a" with its reason is an answer); criteria are Given/When/Then with ids, negative ones and abuse cases included; every assumption the plan relies on was proven by a spike.
 - **Rules across sibling functions** (Invariants of the general checklist): every function that lists or sums a set the plan filters or sums is named, each with a test of the rule.
 - **Product decisions** the plan takes without listing them.
-Each finding cites the plan section (and the code path that contradicts it) and gives the correction worded so it can be pasted into the plan. You change nothing.
+Each finding cites the plan section (and the code path that contradicts it) and names the defect and the criterion the plan lacks, never a mechanism to paste in: a mechanism the plan lacks is the dev's to design, proven by a failing test. You change nothing.
 
 ## Report
 Each finding gets an origin: `design` (the spec or plan never considered the case), `assumption` (a technical belief the plan relied on was false), `plan` (the plan contradicts itself or the code), `execution` (the code does not do what the plan said) or `environment` (tooling, test environment, machine).
@@ -69,4 +69,4 @@ Counts: <n> Critical, <n> Important, <n> Minor; origins: <origin>=<n>, ...
 - (hardening) path:line — the practice and what it would prevent. Fix: one line. Origin: <origin>.
 Checked with no findings: <areas you looked at, one line; rejected security candidates with the guard that stops each>
 ```
-On a re-review after the fix round, the range holds only the fix commits: say which previous findings are fixed (with file:line), or closed by their validation test (with the test name), then list only what the fix broke. Do not re-review code the fix did not touch, and do not report again a finding the brief says the manager ruled out.
+On a re-review (after a fix round, or a later round of a spec or plan review), the range holds only the corrections: say which previous findings are fixed (with file:line), or closed by their validation test (with the test name), then list only what the corrections broke. Do not re-review what they did not touch, and do not report again a finding the brief says the manager ruled out or carried to the Errata.
