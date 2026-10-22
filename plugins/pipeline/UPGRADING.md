@@ -6,7 +6,7 @@ Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão 
 
 **A numeração voltou para 1.x** (decisão do usuário, com o plugin só em instalação local). A 2.12.0 passou a ser a **1.12.0**, e cada versão da linha 2.x segue a mesma conta (a 2.9.9 é a 1.9.9, e assim por diante). A linha 1.x original, de antes da 2.0.0, virou 0.x pela mesma conta (a 1.6.0 de então é a **0.6.0**), para nenhum número valer por duas versões. Nada muda no comportamento. Uma cópia 2.x se atualiza pelo caminho normal — `claude plugin marketplace update linden-plugins` e `claude plugin update pipeline@linden-plugins --scope <escopo>`, depois `/reload-plugins` — porque o instalador compara com o que o marketplace oferece, não a ordem dos números; a skill `atualizar` continua valendo. Conferido na prática, de 2.12.0 para 1.12.0.
 
-## 1.17.0 — todo projeto com a mesma documentação, os mesmos padrões e nada adiado esquecido (PR #<n>)
+## 1.17.0 — todo projeto com a mesma documentação, os mesmos padrões e nada adiado esquecido (PR #60)
 
 Decisão do usuário: "mesmo que se trate de um produto pequeno, devemos ter todo o ciclo do produto, não é pelo tamanho que não vamos entregar qualidade"; e, sobre a documentação, a preocupação de "o projeto expandir e o dev ou a própria IA não seguir o padrão do início porque não está corretamente documentado". Uma análise do Fable mapeou as oito etapas (descoberta, triagem, desenvolvimento, testes, documentação, auditoria, segurança e operação) e achou duas lacunas conferidas; o usuário pediu que o que cada projeto resolveu do seu jeito vire padrão do plugin. Nenhuma etapa ganhou agente novo: o de documentação foi recusado (ver o roadmap), e cada lacuna fechou no menor mecanismo.
 
