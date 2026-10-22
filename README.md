@@ -1,6 +1,6 @@
 # claude-pipeline
 
-Um time de desenvolvimento multiagente e independente para o [Claude Code](https://code.claude.com), que constrói produtos pequenos de forma autônoma. O `manager` orquestra e gere a entrega; agentes especializados implementam, revisam e validam; você só decide as questões de produto e aprova o plano e o merge.
+Um time de desenvolvimento multiagente e independente para o [Claude Code](https://code.claude.com), que constrói produtos pequenos de forma autônoma e leva cada um pelo ciclo inteiro (descoberta, triagem, desenvolvimento, testes, documentação, auditoria, segurança e operação), com a qualidade de um produto grande. O `manager` orquestra e gere a entrega; agentes especializados implementam, revisam e validam; você só decide as questões de produto e aprova o plano e o merge.
 
 O objetivo é que nada errado saia da máquina sem que você precise acompanhar cada passo: o trabalho anda em ciclos curtos, com testes primeiro, revisão e validação em todo ciclo e um gate local antes do merge.
 
@@ -45,7 +45,7 @@ Numa sessão na pasta do projeto, peça o **kickoff** para preparar a estrutura 
 
 Noutro computador, num projeto que já usa o plugin (no GitHub ou em produção): clone o repositório, instale o plugin nele e peça o **kickoff**. Ele percebe que é uma máquina nova e segue a seção "Preparar uma máquina" do `CLAUDE.md` do projeto: confere e instala os pré-requisitos que o projeto declara, instala as dependências, cria os arquivos de ambiente (baixando os valores quando o projeto diz de onde), sobe os serviços e roda a prova de que está pronto, com uma confirmação sua e dizendo o que ficou com você.
 
-Para atualizar um projeto, peça "atualizar o plugin" na sessão dele (a skill `atualizar` faz os passos abaixo e o resto); à mão, é `claude plugin marketplace update linden-plugins` e `claude plugin update pipeline@linden-plugins --scope local`, e uma sessão aberta segue na versão que carregou até o `/reload-plugins` ou reiniciar. Para desenvolver o plugin, use um clone local (`claude plugin marketplace add ./claude-pipeline`), que é carregado do disco: as edições valem na próxima sessão.
+Para atualizar, veja "Atualização" abaixo. Para desenvolver o plugin, use um clone local (`claude plugin marketplace add ./claude-pipeline`), que é carregado do disco: as edições valem na próxima sessão.
 
 ## Componentes
 
@@ -70,11 +70,30 @@ Para atualizar um projeto, peça "atualizar o plugin" na sessão dele (a skill `
 | [Guarda dos comandos](plugins/pipeline/hooks/bash-guard.py) | `PreToolUse` em `Bash` e `PowerShell`: nega pular o `pre-commit` (`--no-verify`, `-n`, `core.hooksPath`), o que chega na branch principal no modo autônomo e o comando da linha "Rodar em desenvolvimento" do `CLAUDE.md` do projeto fora do modo background. |
 | [Andamento](plugins/pipeline/hooks/andamento.js) | Mod do Claude Code: com entrega aberta, até três linhas em português acima do prompt: o ciclo do plano e quantas tarefas e ciclos faltam; as tarefas em andamento, os vereditos e o que vem depois; e, em destaque, as decisões que esperam você; notifica o sistema quando a entrega passa a precisar de você; `/andamento` abre o painel com a tabela do ciclo, as outras frentes, os arquivos da entrega e um botão por agente em andamento, que abre a conversa dele; grava o uso da conta ao lado do ledger, para o manager economizar ou pausar. |
 
+## O que fica no seu projeto
+
+Vai para o git, no mesmo slug da entrega: a spec (`docs/specs/<slug>.md`, nas entregas grandes), o plano (`docs/plans/<slug>.md`), o mockup das telas (`docs/mockups/<slug>.html`) e o relatório de qualidade do gate (`docs/quality-reports/`). Ficam também a doc de cada módulo em `docs/`, com o índice em `docs/README.md`, os padrões que todo código segue e o mapa dos módulos em `docs/arquitetura.md`, o roteiro de publicar, guardar e reverter em `docs/operacao.md`, as lições em `docs/lessons.md`, os achados do `discovery` em `docs/discovery/` e as convenções do projeto no `CLAUDE.md`. Ficam fora do git: `.superpowers/`, com o ledger e os relatórios de cada agente, e o `CLAUDE.local.md`, com o que vale só para este computador.
+
+## O que esperar de uma entrega
+
+Numa entrega real, a [`0.5-launcher-civic`](docs/analises/0.5-launcher-civic.md), foram 11,8 h de relógio, das quais só 3,4 h com algum agente rodando, e 3,73M tokens; 4,4 h foram uma pausa pedida pelo dono. Das seis esperas por você (~1,5 h ao todo), cinco foram para autorizar mais uma rodada de revisão de spec ou plano (~64 min), o que a 1.16.0 deixou de perguntar. A fase de código não teve nenhum achado Important.
+
+## Quando não usar
+
+- Produto grande, com muitas equipes e módulos: o plugin foi desenhado e medido em produtos pequenos.
+- Time com vários humanos no mesmo repositório: as aprovações e as decisões de produto são de um dono só.
+- Deploy contínuo pelo agente: o plugin nunca publica nem faz push sem o seu pedido.
+- macOS: ainda não testado (Windows e Linux são).
+
 ## Atualização
 
-- Instalações a partir do GitHub ficam fixas na `version` do `plugin.json` (como atualizar: "Começo rápido").
-- Para atualizar, peça "atualizar o plugin" na sessão do projeto: a skill [`atualizar`](plugins/pipeline/skills/atualizar/SKILL.md) espera um ponto de parada da entrega, atualiza, abre a sessão nova e aplica as [notas de atualização](plugins/pipeline/UPGRADING.md) de cada versão pulada.
+- Instalações a partir do GitHub ficam fixas na `version` do `plugin.json`.
+- Para atualizar, peça "atualizar o plugin" na sessão do projeto: a skill [`atualizar`](plugins/pipeline/skills/atualizar/SKILL.md) espera um ponto de parada da entrega, atualiza, abre a sessão nova e aplica o "Ao atualizar" de cada versão pulada, no [histórico](plugins/pipeline/UPGRADING.md). À mão: `claude plugin marketplace update linden-plugins` e `claude plugin update pipeline@linden-plugins --scope local`; uma sessão aberta segue na versão que carregou até o `/reload-plugins` ou reiniciar.
 - Ative também a proteção de push contra segredos do seu provedor (no GitHub, secret scanning push protection): o hook local é contra acidentes, não contra quem o pula.
+
+## Para onde vai
+
+As ideias em avaliação e as recusadas estão no [roadmap](docs/roadmap.md); o que cada versão entregou, no [histórico](plugins/pipeline/UPGRADING.md).
 
 ## Licença
 

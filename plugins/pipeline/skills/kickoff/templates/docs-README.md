@@ -10,6 +10,8 @@ Esta pasta é a documentação viva do código: registra **o que existe e por qu
 
 ## Outras pastas
 
+- [`arquitetura.md`](arquitetura.md) — os padrões que todo código segue e o mapa dos módulos; o `dev` lê antes de cada tarefa.
+- [`operacao.md`](operacao.md) — publicar, backup e restauração, reverter e onde ler os logs.
 - [`discovery/`](discovery/) — achados estruturados das fontes brutas (gerados pelo agente `discovery`).
 - `specs/` — uma spec por entrega grande (`<slug>.md`), decidida antes de codar.
 - `plans/` — um plano por entrega (`<slug>.md`), o que o `manager` executa e o `gate.py` rastreia.

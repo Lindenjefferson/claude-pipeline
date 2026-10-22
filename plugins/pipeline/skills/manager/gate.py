@@ -4,7 +4,7 @@
   gate.py [--base <rev>] [--ledger <path>] [--cmd Name=command ...] [--report <slug>]
 
 Checks, in order: nothing is pending in the ledger (the current cycle is closed and every deferred item has a final
-decision); the tree is clean; every acceptance-criterion id of the plan recorded in the ledger (tokens like AC-T3-2)
+decision); the tree is clean; the documentation the kickoff prepared stays whole (with a docs/README.md: docs/arquitetura.md, the patterns every task follows, exists and, once a module doc docs/NN-*.md is tracked, holds no _(...)_ placeholder; the index names every tracked module doc; and no relative link of README.md, docs/README.md or docs/arquitetura.md points to a missing file); every acceptance-criterion id of the plan recorded in the ledger (tokens like AC-T3-2)
 appears in a tracked test file, as written or, for a test named by an identifier, in any case with _ for - and .
 (ac_t3_2, test_AC_T3_2; a longer id such as AC-T3-21, AC-T3-2.1 or ac_t3_2_1 is another id); the plan names no path inside .superpowers/, the agent workspace the kickoff
 ignores, since no clone would have it (the globs on the
@@ -72,6 +72,9 @@ CRITERION = re.compile(CRITERION_ANY.pattern + r"(?![<{\w-])")
 MINUTES = 15
 DAY = 24 * 60 * 60
 REPORTS = "docs/quality-reports"
+PATTERNS = "docs/arquitetura.md"
+MODULE_DOC = re.compile(r"docs/\d+-[^/]+\.md")
+LINK = re.compile(r"\]\(((?:[^()\s]|\([^()\s]*\))+)\)")
 LESSONS = "docs/lessons.md"
 SECRETS_ALLOW = ".pipeline-secrets-allow"
 
@@ -246,6 +249,30 @@ def artifacts(plan):
                        "these, and an artifact anyone reads (a mock above all) lives in a versioned path: "
                        + ", ".join(named))
     return True, ""
+
+
+def docs():
+    """The documentation the kickoff prepared stays whole: the patterns file, every module doc in the index, and no
+    dead relative link in the root README, the index or the patterns."""
+    if not os.path.isfile("docs/README.md"):
+        return True, "no docs/README.md: the kickoff prepares it"
+    problems = []
+    modules = [path for path in git("ls-files", "-z", "docs")[1].split("\0") if MODULE_DOC.fullmatch(path)]
+    index = open("docs/README.md", encoding="utf-8").read()
+    problems += [f"docs/README.md does not list {os.path.basename(path)}" for path in modules
+                 if os.path.basename(path) not in index]
+    if not os.path.isfile(PATTERNS):
+        problems.append(f"no {PATTERNS}: the patterns every task follows (the kickoff's template)")
+    elif modules and "_(" in open(PATTERNS, encoding="utf-8").read():
+        problems.append(f"{PATTERNS} still holds a placeholder _(...)_ while the project has modules")
+    for page in ("README.md", "docs/README.md", PATTERNS):
+        if not os.path.isfile(page):
+            continue
+        for target in LINK.findall(open(page, encoding="utf-8").read()):
+            path = target.split("#")[0]
+            if path and ":" not in path and not os.path.exists(os.path.join(os.path.dirname(page), path)):
+                problems.append(f"dead link: {page} -> {path}")
+    return not problems, "\n".join(problems)
 
 
 def repo_path(path):
@@ -578,6 +605,7 @@ def main():
         drop_report(report_path(args.report), git("cat-file", "-e", f"HEAD:{report_path(args.report)}")[0] == 0)
     dirty = git("status", "--porcelain")[1].strip()
     checks.append(("Clean tree", not dirty, dirty))
+    checks.append(("Docs", *docs()))
 
     commands = project_commands(args.cmd)
     if ledger:

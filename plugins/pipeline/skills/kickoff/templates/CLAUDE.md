@@ -6,6 +6,7 @@
 
 - **Não escrever comentários nem docstrings em classes, funções ou componentes** para explicar o que fazem. O código deve se explicar por nomes e estrutura.
 - A documentação vive em [`docs/`](docs/README.md), um arquivo por módulo (`docs/NN-nome-do-modulo.md`), seguindo o template de `docs/README.md`.
+- Os padrões que todo código segue (camadas, nomes, erros, logs, testes, o mapa dos módulos e as decisões) ficam em [`docs/arquitetura.md`](docs/arquitetura.md), e publicar, backup, restauração e reversão em [`docs/operacao.md`](docs/operacao.md). Um padrão novo entra lá na tarefa que o adota; o `reviewer` aponta o código que diverge, e o `gate.py` confere o índice e os links.
 - **Toda rodada de código que criar, alterar ou remover algo de um módulo atualiza o `docs/` daquele módulo na mesma rodada** (arquivos-chave, classes/funções principais, decisões de design com o porquê, fluxo de dados, dependências e **Status**). O agente `dev` faz isso na mesma tarefa.
 - A documentação da API pública (quando o projeto é uma biblioteca ou expõe uma API a outros programas), no formato da ferramenta de documentação da linguagem, não conta como comentário: segue a convenção da linguagem.
 - Exceção de comentário inline: um "porquê" realmente não óbvio (restrição escondida, workaround de bug específico), em uma linha. Nunca "o que" a função faz.
@@ -64,7 +65,7 @@ A skill `manager` conduz cada entrega, do tamanho do pedido ao `gate.py` (o flux
 - O hook `pre-commit` do git (instalado pelo `kickoff`) bloqueia commits com arquivos `.env` ou linhas com cara de segredo. Nunca usar `--no-verify` nem mexer em `.git/hooks`: um segredo commitado fica no histórico.
 - Cada entrega aprovada pelo `gate.py` gera um relatório em `docs/quality-reports/`.
 - Formatos de tela que a rodada de design, as capturas e a revisão visual cobrem (se houver tela): _(ex.: a menor largura suportada e o desktop; celular e tablet; a resolução do jogo)_
-- Ambiente de testes antes de produção: _(onde a entrega é publicada primeiro, como as migrations passam por ele, como fazer backup e reverter)_
+- Ambiente de testes antes de produção: _(onde a entrega é publicada primeiro e como as migrations passam por ele; os procedimentos ficam em `docs/operacao.md`)_
 
 ## Regras que valem sempre
 
