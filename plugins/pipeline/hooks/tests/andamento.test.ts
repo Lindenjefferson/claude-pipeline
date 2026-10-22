@@ -28,9 +28,9 @@ const STATUS = {
 const shown = (r) => bandRows(r, NOW).map(rowText)
 const OTHER = { ...STATUS, slug: 'etapa-6', ledger: '/other/.superpowers/ledger.jsonl', dispatched: {}, scope: null }
 const BAND = {
-  plugin: 'pipeline', component: 'AbovePrompt', requestId: 'band', surface: 'terminal',
+  plugin: 'pipeline', component: 'PromptHint', requestId: 'band', surface: 'terminal',
   viewport: { columns: 140, rows: 40 },
-  props: { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 140, scroll: { offset: 0, bodyRows: 6 }, view: {} },
+  props: { isDraft: false, isWorking: false, hint: '? for shortcuts' },
 } as const
 const PANE = {
   ...BAND, component: 'Pane', requestId: 'andamento',
@@ -202,12 +202,22 @@ test('a paused delivery says so in the title and spells out the resume step', ()
   expect(shown({ ...paused, paused: null, steps: [] })).toEqual(['etapa 5, ciclo 2, modo autônomo'])
 })
 
-test('with a delivery open, the band is drawn above the prompt and keeps what other mods draw there', async ($, on) => {
+test('with a delivery open, the band is drawn under the prompt, below the hint line Claude Code keeps drawing', async ($, on) => {
   const clock = stubs(on, STATUS)
   await start($, clock)
   const ui = await $.ui.mount(BAND)
-  expect(await ui.find({ type: 'Text', text: /^etapa 5, ciclo 2 de 3/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: 'drawn by Claude Code' })).toBeDefined()
+  const [theirs, first] = (await ui.drawn()).children
+  expect(theirs.children).toEqual(['drawn by Claude Code'])
+  // the first row has several parts, each a Text of its own
+  expect(first.children[0].children.join('')).toMatch(/^etapa 5, ciclo 2 de 3/)
+  await ui.unmount()
+})
+
+test('a row too wide for the viewport becomes one line per part in the band too', async ($, on) => {
+  const clock = stubs(on, STATUS)
+  await start($, clock)
+  const ui = await $.ui.mount({ ...BAND, viewport: { columns: 40, rows: 40 } })
+  expect(await ui.find({ type: 'Text', text: /^faltam 3 tarefas em 2 ciclos$/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -217,18 +227,6 @@ test('a row too wide for the terminal becomes one line per part, so no part read
                                                           '● dev na T2.1 há 14 min',
                                                           'depois: correção (2 achados da revisão)',
                                                           '1 decisão espera você'])
-})
-
-test('the band opens with a row that holds a line, so its first row never runs into the text above it', async ($, on) => {
-  const clock = stubs(on, STATUS)
-  await start($, clock)
-  const ui = await $.ui.mount(BAND)
-  // a space, not '': a Text of an empty string lays out as no row at all and the band would open glued to the
-  // text above it, as the pane's own rows have always known (`line || ' '`)
-  const opening = (await ui.drawn()).children[0]
-  expect(opening.children).toEqual([' '])
-  expect(await ui.find({ type: 'Text', text: /^$/ })).toBeUndefined()
-  await ui.unmount()
 })
 
 test('the band rows wrap instead of cutting, only the title dims while Claude works, and VALIDAR is a warning', async ($, on) => {
@@ -242,14 +240,6 @@ test('the band rows wrap instead of cutting, only the title dims while Claude wo
   expect(title?.props.dimColor).toBe(true)
   expect(now?.props.dimColor).toBeFalsy()
   expect(you?.props.color).toBe('warning')
-  await ui.unmount()
-})
-
-test('while a survey holds the band, the mod yields it', async ($, on) => {
-  const clock = stubs(on, STATUS)
-  await start($, clock)
-  const ui = await $.ui.mount({ ...BAND, props: { ...BAND.props, hasSurvey: true } })
-  expect(await ui.find({ type: 'Text', text: /ciclo/ })).toBeUndefined()
   await ui.unmount()
 })
 
