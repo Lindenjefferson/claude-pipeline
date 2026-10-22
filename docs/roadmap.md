@@ -61,7 +61,7 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
 
-## 1.16.0 — a revisão de spec e de plano para quando deixa de achar defeito (PR #<n>)
+## 1.16.0 — a revisão de spec e de plano para quando deixa de achar defeito (PR #59)
 
 As três propostas da [análise da `0.5-launcher-civic`](analises/0.5-launcher-civic.md), aprovadas juntas por decisão do usuário (mudam o desenho do fluxo). Na entrega, 6 h de documento (17 rodadas, 57 Important) para 1,4 h de código sem nenhum Important; o retorno virou negativo na rodada 2 de cada documento.
 
