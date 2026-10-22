@@ -61,7 +61,7 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
 
-## 1.15.0 — nenhuma decisão chega ao usuário sem a recomendação (PR #PRNUM)
+## 1.15.0 — nenhuma decisão chega ao usuário sem a recomendação (PR #58)
 
 - **Toda decisão que espera o usuário grava o que o manager recomenda** (pedido do usuário, a partir da entrega `0.5-launcher-civic`: "quando tiver decisão pendente e eu perguntar, já me responder com uma lista das decisões e recomendações para cada uma"): a skill `validar` perguntava item a item com Confirmar / Mudar / Depois **sem recomendação**, e só quando chamada; os itens adiados não tinham campo nenhum para ela. Em vez de uma regra de prompt que ninguém confere, a recomendação virou campo do ledger (regra 3 do filtro): `defer --recommend` é exigido, `note --validar` exige `--recommend` e o recusa sem `--validar`, e a recomendação viaja até o item, o passo `decide`, o texto do `status`, o painel do `/andamento` e as opções da skill `validar`, onde a recomendada vem primeiro e marcada. A regra de apresentação cabe na linha do `PushNotification` que já tratava de parar para o usuário, sem bullet novo. Ledger de versão anterior, sem o campo, continua legível. Traz do backlog a metade leve do **Cartão de decisão**, que continua em espera para a parte de painel com botões. Número: decisões pendentes que chegam ao usuário sem recomendação (a zero, pelo ledger) e perguntas de "o que está pendente?" por entrega.
 
