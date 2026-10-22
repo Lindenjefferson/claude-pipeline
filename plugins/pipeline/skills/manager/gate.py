@@ -40,7 +40,7 @@ merge base with the default branch. With --report, the gate writes and stages do
 changed "Comandos" section and the delivery metrics: findings per cycle and origin, fix rounds, time per cycle, task
 and agent, tokens per agent and task, lines changed per dev task with the share of fix and cleanup, lessons added
 and automated) before running the commands, so the project's own tests check it too (the metrics also give each spec
-or plan review loop its rounds and findings); READY rewrites
+or plan review loop its rounds, findings and the findings refused in triage); READY rewrites
 its check lines, NOT READY removes it, and a draft of the same report left staged by a run that was killed is removed
 first."""
 import argparse
@@ -479,7 +479,8 @@ def metrics_lines(metrics):
                      + f"; {rounds} fix round{'' if rounds == 1 else 's'}")
     for task, loop in (metrics.get("reviews") or {}).items():
         lines.append(f"- {task.capitalize()} review: {loop['rounds']} round{'' if loop['rounds'] == 1 else 's'}, "
-                     f"{loop['critical']} Critical, {loop['important']} Important, {loop['minor']} Minor")
+                     f"{loop['critical']} Critical, {loop['important']} Important, {loop['minor']} Minor"
+                     + (f"; {loop['refused']} refused in triage" if loop.get("refused") else ""))
     origins = dict(metrics.get("origins") or {})
     if origins:
         unclassified = origins.pop("unclassified", 0)
