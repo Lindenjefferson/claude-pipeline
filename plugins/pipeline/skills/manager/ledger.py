@@ -55,7 +55,7 @@ agent and task still unmeasured it takes them by itself, and with more than one 
 every later notification by one run, for the whole delivery. No dispatch ever waits for a notification. status gives each claim in flight its waiting_minutes and, for a claim with no worktree whose delivery
 head moved since, committed: the dev commits straight on the branch, so its work may be in and its report waiting to
 be added. A deferred item with no decision keeps the delivery from the gate. Everything that waits for the user carries --recommend, what the manager would decide and why, so every list of what waits (status, the pane, validar) recommends without being asked: defer requires it, note takes it with --validar and refuses it without. An entry of an earlier version, with no recommendation, reads as before. start --archive moves an existing delivery to
-ledger-<old-slug>.jsonl next to the ledger first. start also carries each item the latest quality report (the last docs/quality-reports/*.md by name, at the ledger's project root) moved to a later delivery, a line of its Deferred section whose decision starts with "moved to", as a deferred item of the new delivery, recommending that decision, so it needs a decision before the gate and is never forgotten. --check exits 1 while anything is pending, so the gate can rely on
+ledger-<old-slug>.jsonl next to the ledger first. start also carries each item the latest quality report (the docs/quality-reports/*.md git added last at the ledger's project root, else the last by name) moved to a later delivery, a line of its Deferred section whose decision, after the first arrow, starts with "moved to" in any case, as a deferred item of the new delivery, recommending that decision, so it needs a decision before the gate and is never forgotten. --check exits 1 while anything is pending, so the gate can rely on
 it. A cycle whose reviewer or qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on
 up to three, then the delivery stops. extend, once status asks the user or stops, records the user's decision to go
 on (a note, VALIDAR in autonomous mode): the current cycle gets one more fix round, and a reviewer or qa FAIL after
@@ -161,6 +161,7 @@ REVIEW_ROUNDS = 3
 TRIAGE = ("applied", "refused", "errata")
 REVIEWS = ("spec", "plan")
 QUALITY_REPORTS = "docs/quality-reports"
+MOVED = re.compile(r"- D\d+ (.*?) -> (moved to .*)", re.IGNORECASE)
 DONE = ("DONE", "DONE_WITH_CONCERNS")
 FIX_TASK = re.compile(r"fix-\d+", re.IGNORECASE)
 FOLLOW_UP = re.compile(r"fix-\d+|cleanup", re.IGNORECASE)
@@ -432,22 +433,26 @@ def start(args):
 
 
 def carried(ledger):
-    """The items the latest quality report moved to a later delivery: (report path, [(text, decision)])."""
+    """The items the latest quality report moved to a later delivery: (report path, [(text, decision)]). The latest is
+    the one git added last (two reports of one day sort by slug, and a clone keeps no file times), else the last by
+    name; the decision starts at the first arrow followed by "moved to", in any case."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(ledger)))
     folder = os.path.join(root, *QUALITY_REPORTS.split("/"))
     names = sorted(name for name in os.listdir(folder) if name.endswith(".md")) if os.path.isdir(folder) else []
     if not names:
         return None, []
+    result = subprocess.run(["git", "log", "-1", "--diff-filter=A", "--format=", "--name-only", "-z", "--",
+                             QUALITY_REPORTS], capture_output=True, text=True, encoding="utf-8", cwd=root)
+    added = [os.path.basename(path) for path in result.stdout.split("\0")] if result.returncode == 0 else []
+    latest = max((name for name in added if name in names), default=names[-1])
     section, moved = False, []
-    with open(os.path.join(folder, names[-1]), encoding="utf-8") as handle:
+    with open(os.path.join(folder, latest), encoding="utf-8") as handle:
         for line in handle:
             if line.startswith("## "):
                 section = line.strip() == "## Deferred"
-            elif section and line.startswith("- D"):
-                item, _, decision = line.strip()[2:].rpartition(" -> ")
-                if decision.startswith("moved to"):
-                    moved.append((item.partition(" ")[2], decision))
-    return f"{QUALITY_REPORTS}/{names[-1]}", moved
+            elif section and (match := MOVED.fullmatch(line.strip())):
+                moved.append(match.groups())
+    return f"{QUALITY_REPORTS}/{latest}", moved
 
 
 def seconds(text):

@@ -679,6 +679,15 @@ commit("README.md", "# p\n\nVeja [a doc](docs/README.md) e [o guia](docs/guia.md
 r = gate("--base", "main")
 check("Docs FAILs naming a dead relative link of the root README",
       re.search(r"Docs:\s+FAIL", r.stdout) and "README.md -> docs/guia.md" in r.stdout, r.stdout)
+commit("docs/a(1).md", "x\n", "docs: a file with parentheses")
+commit("README.md", "# p\n\nVeja [a doc](docs/README.md) e [a cópia](docs/a(1).md).\n", "docs: readme fixed")
+r = gate("--base", "main")
+check("Docs reads a link whose path holds parentheses as one link, not a dead one",
+      re.search(r"Docs:\s+PASS", r.stdout), r.stdout)
+commit("docs/03-configuração.md", "# Módulo 3 — Configuração\n", "docs: accented module")
+r = gate("--base", "main")
+check("Docs FAILs naming an accented module doc the index does not list (git quotes such paths by default)",
+      re.search(r"Docs:\s+FAIL", r.stdout) and "03-configuração.md" in r.stdout, r.stdout)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)
