@@ -688,6 +688,15 @@ commit("docs/03-configuração.md", "# Módulo 3 — Configuração\n", "docs: a
 r = gate("--base", "main")
 check("Docs FAILs naming an accented module doc the index does not list (git quotes such paths by default)",
       re.search(r"Docs:\s+FAIL", r.stdout) and "03-configuração.md" in r.stdout, r.stdout)
+os.makedirs(os.path.join(repo, "docs", "modules"))
+os.makedirs(os.path.join(repo, "docs", "notas"))
+commit("docs/modules/04-extra.md", "# Módulo 4 — Extra\n", "docs: a module in a subfolder the project chose")
+commit("docs/notas/2026-10-01-reuniao.md", "# Reunião\n", "docs: a dated note, not a module")
+r = gate("--base", "main")
+check("Docs also reads module docs in one subfolder of docs/, whatever the project named it",
+      re.search(r"Docs:\s+FAIL", r.stdout) and "04-extra.md" in r.stdout, r.stdout)
+check("Docs does not take a dated file in a subfolder (a quality report, a note) for a module doc",
+      "2026-10-01-reuniao.md" not in r.stdout, r.stdout)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)
