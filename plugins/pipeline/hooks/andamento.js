@@ -467,8 +467,9 @@ export function register(on) {
         : row.flatMap((part, at) => [...(at ? [GAP] : []), Text({ ...TONE[part.tone], children: [part.text] })]),
     }))
     const theirs = await next(e)
-    // a blank line opens the band, so its first row never runs into what the terminal printed above it
-    const band = [Text({ children: [''] }), ...drawn]
+    // a blank line opens the band, so its first row never runs into what the terminal printed above it: a space,
+    // because a Text of an empty string lays out as no row at all, as the pane's rows above already know
+    const band = [Text({ children: [' '] }), ...drawn]
     return Box({ flexDirection: 'column', children: theirs ? [...band, theirs] : band })
   })
 }

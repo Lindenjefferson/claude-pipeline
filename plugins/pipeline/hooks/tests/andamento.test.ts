@@ -214,11 +214,15 @@ test('a row too wide for the terminal becomes one line per part, so no part read
                                                           '1 decisão espera você'])
 })
 
-test('the band opens with a blank line, so its first row never runs into the text above it', async ($, on) => {
+test('the band opens with a row that holds a line, so its first row never runs into the text above it', async ($, on) => {
   const clock = stubs(on, STATUS)
   await start($, clock)
   const ui = await $.ui.mount(BAND)
-  expect(await ui.find({ type: 'Text', text: /^$/ })).toBeDefined()
+  // a space, not '': a Text of an empty string lays out as no row at all and the band would open glued to the
+  // text above it, as the pane's own rows have always known (`line || ' '`)
+  const opening = (await ui.drawn()).children[0]
+  expect(opening.children).toEqual([' '])
+  expect(await ui.find({ type: 'Text', text: /^$/ })).toBeUndefined()
   await ui.unmount()
 })
 
