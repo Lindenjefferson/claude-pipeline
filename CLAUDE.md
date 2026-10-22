@@ -2,7 +2,7 @@
 
 ## Propósito
 
-Este repositório é o plugin `pipeline` do Claude Code: um time de desenvolvimento multiagente e independente que constrói produtos pequenos de forma autônoma. O `manager` orquestra e gere a entrega; agentes especializados implementam (`dev`), revisam (`reviewer`) e validam (`qa`); o usuário só decide as questões de produto e aprova o plano e o merge.
+Este repositório é o plugin `pipeline` do Claude Code: um time de desenvolvimento multiagente e independente que constrói produtos pequenos de forma autônoma e leva cada um, pequeno ou não, pelo ciclo inteiro (descoberta, triagem, desenvolvimento, testes, documentação, auditoria, segurança e operação), com a mesma qualidade. O `manager` orquestra e gere a entrega; agentes especializados implementam (`dev`), revisam (`reviewer`) e validam (`qa`); o usuário só decide as questões de produto e aprova o plano e o merge.
 
 Três princípios valem para toda mudança:
 - **Só orquestração.** O plugin conduz e gere o desenvolvimento (skills, agentes, `ledger.py`, `gate.py`, princípios gerais). Não traz código, template nem configuração de produto.
@@ -41,9 +41,9 @@ Cada componente tem **uma** fonte de verdade, o próprio arquivo. Os outros docu
 | Linha de andamento, painel `/andamento` e o uso da conta em `usage.json` (mod) | comentário do topo de [`hooks/andamento.js`](plugins/pipeline/hooks/andamento.js), listado em `modules` no `hooks.json` |
 | Testes dos scripts | `plugins/pipeline/skills/manager/tests/`, `plugins/pipeline/hooks/tests/` (o do mod é `andamento.test.ts`) |
 | O que o CI roda a cada push e PR | [`.github/workflows/testes.yml`](.github/workflows/testes.yml) |
-| Versões entregues, backlog | [`docs/roadmap.md`](docs/roadmap.md) |
+| Ideias (não triadas, backlog, em espera, recusadas) | [`docs/roadmap.md`](docs/roadmap.md) |
 | Análise de uma entrega real que virou item do backlog | [`docs/analises/`](docs/analises/), um arquivo por entrega, no slug dela |
-| Notas de atualização (vão com a versão instalada) e como atualizar um projeto | [`plugins/pipeline/UPGRADING.md`](plugins/pipeline/UPGRADING.md), aplicadas pela skill [`atualizar`](plugins/pipeline/skills/atualizar/SKILL.md) |
+| Histórico das versões, com as notas de atualização (vai com a versão instalada) | [`plugins/pipeline/UPGRADING.md`](plugins/pipeline/UPGRADING.md), aplicadas pela skill [`atualizar`](plugins/pipeline/skills/atualizar/SKILL.md) |
 | Apresentação, começo rápido, componentes em uma linha | [`README.md`](README.md) |
 | Manifesto e marketplace | [`plugins/pipeline/.claude-plugin/plugin.json`](plugins/pipeline/.claude-plugin/plugin.json), [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) |
 
@@ -60,12 +60,12 @@ O `kickoff` prepara o projeto uma vez. A cada pedido, o `manager` dimensiona o t
   4. cada regra nova diz que número do ledger deve mudar (rodadas por ciclo, achados por origem por ciclo, horas por agente); o `feedback-plugin` da entrega seguinte traz esses números, e a regra que não mudou nada em duas entregas sai;
   5. o que muda o desenho do fluxo (tirar uma etapa, mudar quem faz o quê, mexer na segurança) vai para o usuário decidir.
 
-  Toda ideia termina no roadmap: na versão, em "Em espera" com o sinal que a traz de volta, ou em "Recusado" com o motivo em uma linha; a que veio de um projeto é marcada, no arquivo de atritos dele, com a versão ou o destino. Antes de fechar cada versão, uma revisão por outro modelo, com base nos ledgers e relatórios das entregas, e uma revisão do diff inteiro e dos arquivos que ele toca tiram o que ficou repetido, específico de stack, impossível de conferir ou sem uso, e conferem que a documentação e o repositório continuam organizados: cada informação no arquivo que o mapa diz, links válidos, nenhum arquivo solto ou sem uso. Uma lição que se repete em dois projetos é candidata a princípio em `checklists/general.md`.
-- **Fonte única por componente.** Comportamento novo vai para o arquivo do componente; README e este `CLAUDE.md` ganham no máximo uma linha com link. Ao mudar um componente, conferir que README, `CLAUDE.md`, `docs/roadmap.md` e os outros componentes que o citam continuam consistentes (mesmos termos, nenhuma cópia). Única cópia permitida: os três princípios acima, idênticos palavra por palavra na seção "Propósito e princípios" do README; as duas cópias mudam juntas, no mesmo commit.
+  Toda ideia passa pelo roadmap e termina na seção da versão que a entregou, no histórico (`plugins/pipeline/UPGRADING.md`), em "Em espera" com o sinal que a traz de volta, ou em "Recusado" com o motivo em uma linha; a que veio de um projeto é marcada, no arquivo de atritos dele, com a versão ou o destino. Antes de fechar cada versão, uma revisão por outro modelo, com base nos ledgers e relatórios das entregas, e uma revisão do diff inteiro e dos arquivos que ele toca tiram o que ficou repetido, específico de stack, impossível de conferir ou sem uso, e conferem que a documentação e o repositório continuam organizados: cada informação no arquivo que o mapa diz, links válidos, nenhum arquivo solto ou sem uso. Uma lição que se repete em dois projetos é candidata a princípio em `checklists/general.md`.
+- **Fonte única por componente.** Comportamento novo vai para o arquivo do componente; README e este `CLAUDE.md` ganham no máximo uma linha com link. Ao mudar um componente, conferir que README, `CLAUDE.md`, `docs/roadmap.md`, o histórico e os outros componentes que o citam continuam consistentes (mesmos termos, nenhuma cópia). Única cópia permitida: os três princípios acima, idênticos palavra por palavra na seção "Propósito e princípios" do README; as duas cópias mudam juntas, no mesmo commit.
 - **Enxugar ao tocar.** Ao editar um arquivo, remover o que ficou obsoleto, duplicado ou sem uso, e listar o que saiu no PR.
-- **Teste primeiro** para `ledger.py`, `gate.py`, os hooks e o mod: o teste novo falha antes da mudança. Ledgers de versões anteriores continuam legíveis, ou a quebra vai para as notas de atualização (`plugins/pipeline/UPGRADING.md`).
+- **Teste primeiro** para `ledger.py`, `gate.py`, os hooks e o mod: o teste novo falha antes da mudança. Ledgers de versões anteriores continuam legíveis, ou a quebra vai para o "Ao atualizar" da versão no histórico (`plugins/pipeline/UPGRADING.md`).
 - Sem datas no texto dos documentos: o git registra quando cada coisa mudou. A origem vai como versão, PR ou "decisão do usuário".
-- Arquivos em UTF-8 e LF (`.gitattributes`). Prompts de skills e agentes em inglês; README, este arquivo e o roadmap em português.
+- Arquivos em UTF-8 e LF (`.gitattributes`). Prompts de skills e agentes em inglês; README, este arquivo, o roadmap e o histórico em português.
 - Nunca `git commit --no-verify`.
 
 ## Testar e validar
@@ -85,6 +85,6 @@ Num clone novo, instale aqui o mesmo `pre-commit` que o `kickoff` instala em qua
 
 - Trabalho numa branch `feat/...` ou `fix/...` a partir da `master`, entregue por PR. Mudança só de documentação fora do que se instala (`docs/`, `README.md`, este arquivo) ou de limpeza do backlog vai numa branch `docs/...` e entra na `master` por merge `--no-ff`, sem PR e sem subir a versão (decisão do usuário).
 - **Major, minor e patch.** Major só quando um ledger da versão anterior deixa de ser legível — a única quebra irreversível, e o teste do `ledger.py` a confere; minor quando há comportamento novo; patch quando é só correção, sem mudança de comportamento. A numeração voltou para 1.x por decisão do usuário, com o plugin só em instalação local, e a linha 1.x original virou 0.x (a conta está no `UPGRADING.md`): daqui para a frente, uma v2 significa exatamente essa quebra, nada mais.
-- Cada release sobe a `version` de `plugin.json` (instalações do GitHub ficam fixas nela) e move os itens entregues em `docs/roadmap.md` para a seção da versão, com o número do PR, e uma linha da versão em `plugins/pipeline/UPGRADING.md` ("nada muda" quando nada muda, para a skill `atualizar` saber).
+- Cada release sobe a `version` de `plugin.json` (instalações do GitHub ficam fixas nela) e ganha uma seção no histórico (`plugins/pipeline/UPGRADING.md`) com os itens entregues, que saem de `docs/roadmap.md`, o número do PR e o parágrafo "Ao atualizar" ("nada muda" quando nada muda, para a skill `atualizar` saber).
 - As lições de uma entrega acumulam na versão seguinte e saem num ponto de parada da entrega (nenhum agente rodando); correção de script quebrado (hook, gate, ledger) pode sair sozinha. Cada item do backlog diz se é **defeito** (o plugin não faz o que o arquivo dele diz) ou **melhoria**: defeito conferido não espera na fila, sai no próximo ponto de parada; melhoria espera a versão.
 - Merge e instalação do plugin atualizado só com pedido explícito do dono.
