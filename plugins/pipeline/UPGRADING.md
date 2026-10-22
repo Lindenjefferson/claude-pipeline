@@ -6,12 +6,11 @@ Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão 
 
 **A numeração voltou para 1.x** (decisão do usuário, com o plugin só em instalação local). A 2.12.0 passou a ser a **1.12.0**, e cada versão da linha 2.x segue a mesma conta (a 2.9.9 é a 1.9.9, e assim por diante). A linha 1.x original, de antes da 2.0.0, virou 0.x pela mesma conta (a 1.6.0 de então é a **0.6.0**), para nenhum número valer por duas versões. Nada muda no comportamento. Uma cópia 2.x se atualiza pelo caminho normal — `claude plugin marketplace update linden-plugins` e `claude plugin update pipeline@linden-plugins --scope <escopo>`, depois `/reload-plugins` — porque o instalador compara com o que o marketplace oferece, não a ordem dos números; a skill `atualizar` continua valendo. Conferido na prática, de 2.12.0 para 1.12.0.
 
-## 1.17.1 — a checagem Docs também lê `docs/modulos/` (PR #61)
+## 1.17.1 — a checagem Docs também lê os módulos numa subpasta de `docs/` (PR #61)
 
-- **Módulos numa subpasta** (defeito; achado ao atualizar o `controle-financeiro`, que guarda os quinze documentos de módulo em `docs/modulos/NN-*.md`): a checagem `Docs` do `gate.py` só reconhecia `docs/NN-*.md`, então nesse projeto não conferia o índice nem os campos por preencher de `docs/arquitetura.md`. Agora reconhece as duas pastas.
-- **Branch principal `main`** (decisão do usuário): o repositório do plugin trocou `master` por `main`, como nos outros projetos; o CI e o `CLAUDE.md` acompanham.
+- **Módulos numa subpasta** (defeito; achado ao atualizar o `controle-financeiro`, que guarda os quinze documentos de módulo em `docs/modulos/NN-*.md`): a checagem `Docs` do `gate.py` só reconhecia `docs/NN-*.md`, então nesse projeto não conferia o índice nem os campos por preencher de `docs/arquitetura.md`. Agora reconhece também `NN-*.md` em uma subpasta de `docs/`, qualquer que seja o nome dela; um arquivo datado (como um relatório de qualidade) não conta como módulo. Número: projetos com módulos em que a `Docs` passa com campo por preencher em `arquitetura.md` (era 1, vai a zero).
 
-**Ao atualizar:** num projeto com módulos em `docs/modulos/`, o gate passa a exigir `docs/arquitetura.md` preenchido e cada módulo listado em `docs/README.md`; preencha na próxima entrega.
+**Ao atualizar:** os ledgers da 1.17.0 continuam valendo. Num projeto com módulos numa subpasta de `docs/`, o gate passa a exigir `docs/arquitetura.md` preenchido e cada módulo listado em `docs/README.md`; preencha na próxima entrega.
 
 ## 1.17.0 — todo projeto com a mesma documentação, os mesmos padrões e nada adiado esquecido (PR #60)
 
