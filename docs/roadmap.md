@@ -61,7 +61,7 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
 
-## 1.15.1 — o modelo de id com prefixo volta a não contar como critério (PR #PRNUM)
+## 1.15.1 — o modelo de id com prefixo volta a não contar como critério (PR #58)
 
 - **Modelo de id com prefixo deixava um critério fantasma no gate** (defeito; lição gravada na entrega `0.5-launcher-civic`, que contorna o problema em todo plano): a 1.10.0 fez o gate deixar de contar como critério um id seguido de `<` ou `{`, mas o lookahead `(?![<{])` só olhava o fim da maior correspondência. Num modelo com prefixo — `AC-05T<tarefa>-<n>`, a forma que o projeto usa para os ids de uma entrega não colidirem com os da anterior — a expressão voltava atrás e casava `AC-05`, um id que nenhum teste satisfaz: o `Criteria` reprovava com a entrega pronta. O projeto pagou com uma lição que manda nunca escrever o modelo com hífen e com um parágrafo do plano explicando o contorno, que era justamente o que a 1.10.0 dizia ter resolvido. O lookahead passa a barrar também o que continua o id (`\w` e `-`), então nenhuma volta atrás produz um id curto. Número: ids rastreados que o plano não escreveu (a zero) e linhas de `lessons.md` que existem só para contornar o gate.
 
