@@ -61,7 +61,7 @@ O que falta fazer e o que cada versão entregou; o que muda para quem atualiza e
 - **Dois `dev` na mesma tarefa para escolher o melhor** (comparação do Conductor): dobra o custo da tarefa.
 - **Papéis do BMAD** (analyst, PM, architect, scrum master, PO): o manager e o `reviewer` nos modos spec e plano já cobrem, e mais papéis contrariam o "enxuto".
 
-## 1.14.0 — a revisão de spec e de plano ganha o que o ciclo já tinha (PR #PRNUM)
+## 1.14.0 — a revisão de spec e de plano ganha o que o ciclo já tinha (PR #57)
 
 Os dois defeitos vieram do feedback da entrega `0.5-launcher-civic` (projeto `launcher-multimidia`), conferidos no ledger dela: 17 rodadas de revisão, nenhuma execução de `dev`, 1,94M tokens.
 
