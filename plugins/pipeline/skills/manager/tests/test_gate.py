@@ -643,5 +643,42 @@ check("Full suite FAILs when the full qa head is not in this history",
       r.returncode == 1 and re.search(r"Full suite:\s+FAIL", r.stdout)
       and f"the full qa head {full_head[:7]} is not in this history" in r.stdout, r.stdout)
 
+repo = os.path.join(base_dir, "repo4")
+os.makedirs(repo)
+sh("git", "init", "-q", "-b", "main")
+sh("git", "config", "user.email", "t@t.com")
+sh("git", "config", "user.name", "t")
+commit("CLAUDE.md", f"# p\n\n## Comandos\n\n- Testes: `{PY} -c \"print('ok')\"`\n", "base")
+r = gate("--base", "main")
+check("Docs is SKIP in a project the kickoff never prepared (no docs/README.md)",
+      re.search(r"Docs:\s+SKIP", r.stdout) and "no docs/README.md" in r.stdout, r.stdout)
+os.makedirs(os.path.join(repo, "docs"))
+commit("docs/README.md", "# Docs\n\n- [Arquitetura](arquitetura.md)\n- [site](https://example.com/x.md)\n", "docs")
+r = gate("--base", "main")
+check("Docs FAILs without docs/arquitetura.md, the patterns every task follows",
+      re.search(r"Docs:\s+FAIL", r.stdout) and "docs/arquitetura.md" in r.stdout, r.stdout)
+commit("docs/arquitetura.md", "# Arquitetura\n\n## Erros\n\n_(como o código trata um erro)_\n", "docs: arquitetura")
+r = gate("--base", "main")
+check("Docs passes with the patterns still a template while no module exists",
+      re.search(r"Docs:\s+PASS", r.stdout), r.stdout)
+commit("docs/01-core.md", "# Módulo 1 — Core\n", "docs: core")
+r = gate("--base", "main")
+check("Docs FAILs naming a module doc the index does not list",
+      re.search(r"Docs:\s+FAIL", r.stdout) and "01-core.md" in r.stdout and "docs/README.md" in r.stdout, r.stdout)
+commit("docs/README.md", "# Docs\n\n- [Arquitetura](arquitetura.md)\n- [Core](01-core.md#proposito)\n", "docs: index")
+r = gate("--base", "main")
+check("Docs FAILs while a module exists and docs/arquitetura.md still holds a placeholder",
+      re.search(r"Docs:\s+FAIL", r.stdout) and "placeholder" in r.stdout and "docs/arquitetura.md" in r.stdout,
+      r.stdout)
+commit("docs/arquitetura.md", "# Arquitetura\n\n## Erros\n\nTodo erro de entrada volta como mensagem ao usuário.\n",
+       "docs: arquitetura filled")
+r = gate("--base", "main")
+check("Docs passes with every module indexed, the patterns filled and every link alive (anchors and URLs aside)",
+      re.search(r"Docs:\s+PASS", r.stdout), r.stdout)
+commit("README.md", "# p\n\nVeja [a doc](docs/README.md) e [o guia](docs/guia.md).\n", "docs: readme")
+r = gate("--base", "main")
+check("Docs FAILs naming a dead relative link of the root README",
+      re.search(r"Docs:\s+FAIL", r.stdout) and "README.md -> docs/guia.md" in r.stdout, r.stdout)
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)
