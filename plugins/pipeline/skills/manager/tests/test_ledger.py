@@ -1776,5 +1776,51 @@ r = run("measure", "--agent", "qa", "--seconds", "90", ledger=WAIVED)
 check("with the real run measured and only the waiver left, another measure is refused",
       r.returncode != 0 and "already measured" in r.stderr, r.stderr)
 
+CARRY = ".superpowers/carry.jsonl"
+QUALITY = os.path.join(repo, "docs", "quality-reports")
+os.makedirs(QUALITY, exist_ok=True)
+with open(os.path.join(QUALITY, "2026-09-01-a.md"), "w", encoding="utf-8", newline="\n") as handle:
+    handle.write("# a\n\n## Deferred\n\n- D1 old thing -> moved to b: later\n")
+with open(os.path.join(QUALITY, "2026-10-01-b.md"), "w", encoding="utf-8", newline="\n") as handle:
+    handle.write("# b\n\n## Deferred\n\n- D1 export csv -> moved to c: needs the API\n- D2 typo -> fixed in fix-1\n"
+                 "- D3 a -> b mapping -> moved to the car test: needs the car\n\n## Metrics\n\n- D9 not deferred -> moved to x\n")
+r = run("start", "--slug", "c", ledger=CARRY)
+state = status(CARRY)
+LATEST = "docs/quality-reports/2026-10-01-b.md"
+check("start carries the items the latest quality report moved to a later delivery, each needing a decision",
+      r.returncode == 0 and "carried 2 items moved to a later delivery from " + LATEST in r.stdout
+      and state["deferred"] == [{"id": "D1", "text": f"export csv (moved here by {LATEST})", "decision": None,
+                                 "recommend": "decide whether this delivery takes it: moved to c: needs the API"},
+                                {"id": "D2", "text": f"a -> b mapping (moved here by {LATEST})", "decision": None,
+                                 "recommend": "decide whether this delivery takes it: moved to the car test: needs the car"}]
+      and {"step": "decide", "id": "D1", "text": f"export csv (moved here by {LATEST})",
+           "recommend": "decide whether this delivery takes it: moved to c: needs the API"} in state["steps"],
+      (r.stdout, state["deferred"], state["steps"]))
+check("a carried item numbers the next deferred item after it",
+      "deferred D3" in run("defer", "--text", "x", "--recommend", "y", ledger=CARRY).stdout)
+with open(os.path.join(QUALITY, "2026-10-01-zeta.md"), "w", encoding="utf-8", newline="\n") as handle:
+    handle.write("# zeta\n\n## Deferred\n\n- D1 stale -> moved to alpha: older\n")
+with open(os.path.join(QUALITY, "2026-10-01-alpha.md"), "w", encoding="utf-8", newline="\n") as handle:
+    handle.write("# alpha\n\n## Deferred\n\n- D1 thing -> moved to d: map a -> b\n- D2 other -> Moved to d: later\n")
+for name in ("2026-10-01-zeta.md", "2026-10-01-alpha.md"):
+    subprocess.run(["git", "add", "-f", os.path.join("docs", "quality-reports", name)], cwd=repo, check=True,
+                   capture_output=True)
+    subprocess.run(["git", "commit", "-q", "-m", f"docs: quality report {name}"], cwd=repo, check=True,
+                   capture_output=True)
+r = run("start", "--slug", "e", "--archive", ledger=CARRY)
+texts = [item["text"] for item in status(CARRY)["deferred"]]
+check("the latest report is the one committed last, not the last by name, and an arrow in a reason or a capital "
+      "Moved keeps the item", r.returncode == 0
+      and texts == ["thing (moved here by docs/quality-reports/2026-10-01-alpha.md)",
+                    "other (moved here by docs/quality-reports/2026-10-01-alpha.md)"], (r.stdout, texts))
+subprocess.run(["git", "rm", "-q", "-r", os.path.join("docs", "quality-reports")], cwd=repo, check=True,
+               capture_output=True)
+subprocess.run(["git", "commit", "-q", "-m", "docs: drop reports"], cwd=repo, check=True, capture_output=True)
+for name in os.listdir(QUALITY) if os.path.isdir(QUALITY) else []:
+    os.remove(os.path.join(QUALITY, name))
+r = run("start", "--slug", "d", "--archive", ledger=CARRY)
+check("with no quality report, start carries nothing", r.returncode == 0 and "carried" not in r.stdout
+      and status(CARRY)["deferred"] == [], (r.stdout, status(CARRY)["deferred"]))
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)
