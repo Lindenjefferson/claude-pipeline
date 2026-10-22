@@ -66,7 +66,9 @@ TEST_FILES = "arquivos de teste"
 NOT_COMMANDS = {TEST_FILES, "testes afetados"}
 INTERFACE = ("verificação de interface", "verificacao de interface")
 CRITERION_ANY = re.compile(r"(?<![\w-])AC-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*")
-CRITERION = re.compile(CRITERION_ANY.pattern + r"(?![<{])")
+# The placeholder may sit after a piece of the id (AC-05T<task>-<n>): without \w and - in the lookahead the
+# match backtracks to AC-05 and the gate traces a criterion the plan never wrote.
+CRITERION = re.compile(CRITERION_ANY.pattern + r"(?![<{\w-])")
 MINUTES = 15
 DAY = 24 * 60 * 60
 REPORTS = "docs/quality-reports"
