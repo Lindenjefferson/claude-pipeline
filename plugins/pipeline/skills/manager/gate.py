@@ -4,7 +4,7 @@
   gate.py [--base <rev>] [--ledger <path>] [--cmd Name=command ...] [--report <slug>]
 
 Checks, in order: nothing is pending in the ledger (the current cycle is closed and every deferred item has a final
-decision); the tree is clean; the documentation the kickoff prepared stays whole (with a docs/README.md: docs/arquitetura.md, the patterns every task follows, exists and, once a module doc docs/NN-*.md (or docs/modulos/NN-*.md) is tracked, holds no _(...)_ placeholder; the index names every tracked module doc; and no relative link of README.md, docs/README.md or docs/arquitetura.md points to a missing file); every acceptance-criterion id of the plan recorded in the ledger (tokens like AC-T3-2)
+decision); the tree is clean; the documentation the kickoff prepared stays whole (with a docs/README.md: docs/arquitetura.md, the patterns every task follows, exists and, once a module doc docs/NN-*.md (in docs/ or one subfolder of it) is tracked, holds no _(...)_ placeholder; the index names every tracked module doc; and no relative link of README.md, docs/README.md or docs/arquitetura.md points to a missing file); every acceptance-criterion id of the plan recorded in the ledger (tokens like AC-T3-2)
 appears in a tracked test file, as written or, for a test named by an identifier, in any case with _ for - and .
 (ac_t3_2, test_AC_T3_2; a longer id such as AC-T3-21, AC-T3-2.1 or ac_t3_2_1 is another id); the plan names no path inside .superpowers/, the agent workspace the kickoff
 ignores, since no clone would have it (the globs on the
@@ -73,7 +73,7 @@ MINUTES = 15
 DAY = 24 * 60 * 60
 REPORTS = "docs/quality-reports"
 PATTERNS = "docs/arquitetura.md"
-MODULE_DOC = re.compile(r"docs/(?:modulos/)?\d+-[^/]+\.md")
+MODULE_DOC = re.compile(r"docs/(?:[^/]+/)?\d{1,3}-[^/]+\.md")
 LINK = re.compile(r"\]\(((?:[^()\s]|\([^()\s]*\))+)\)")
 LESSONS = "docs/lessons.md"
 SECRETS_ALLOW = ".pipeline-secrets-allow"
