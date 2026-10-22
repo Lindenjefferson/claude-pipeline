@@ -1776,5 +1776,33 @@ r = run("measure", "--agent", "qa", "--seconds", "90", ledger=WAIVED)
 check("with the real run measured and only the waiver left, another measure is refused",
       r.returncode != 0 and "already measured" in r.stderr, r.stderr)
 
+CARRY = ".superpowers/carry.jsonl"
+QUALITY = os.path.join(repo, "docs", "quality-reports")
+os.makedirs(QUALITY, exist_ok=True)
+with open(os.path.join(QUALITY, "2026-09-01-a.md"), "w", encoding="utf-8", newline="\n") as handle:
+    handle.write("# a\n\n## Deferred\n\n- D1 old thing -> moved to b: later\n")
+with open(os.path.join(QUALITY, "2026-10-01-b.md"), "w", encoding="utf-8", newline="\n") as handle:
+    handle.write("# b\n\n## Deferred\n\n- D1 export csv -> moved to c: needs the API\n- D2 typo -> fixed in fix-1\n"
+                 "- D3 a -> b mapping -> moved to the car test: needs the car\n\n## Metrics\n\n- D9 not deferred -> moved to x\n")
+r = run("start", "--slug", "c", ledger=CARRY)
+state = status(CARRY)
+LATEST = "docs/quality-reports/2026-10-01-b.md"
+check("start carries the items the latest quality report moved to a later delivery, each needing a decision",
+      r.returncode == 0 and "carried 2 items moved to a later delivery from " + LATEST in r.stdout
+      and state["deferred"] == [{"id": "D1", "text": f"export csv (moved here by {LATEST})", "decision": None,
+                                 "recommend": "decide whether this delivery takes it: moved to c: needs the API"},
+                                {"id": "D2", "text": f"a -> b mapping (moved here by {LATEST})", "decision": None,
+                                 "recommend": "decide whether this delivery takes it: moved to the car test: needs the car"}]
+      and {"step": "decide", "id": "D1", "text": f"export csv (moved here by {LATEST})",
+           "recommend": "decide whether this delivery takes it: moved to c: needs the API"} in state["steps"],
+      (r.stdout, state["deferred"], state["steps"]))
+check("a carried item numbers the next deferred item after it",
+      "deferred D3" in run("defer", "--text", "x", "--recommend", "y", ledger=CARRY).stdout)
+for name in os.listdir(QUALITY):
+    os.remove(os.path.join(QUALITY, name))
+r = run("start", "--slug", "d", "--archive", ledger=CARRY)
+check("with no quality report, start carries nothing", r.returncode == 0 and "carried" not in r.stdout
+      and status(CARRY)["deferred"] == [], (r.stdout, status(CARRY)["deferred"]))
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)

@@ -55,7 +55,7 @@ agent and task still unmeasured it takes them by itself, and with more than one 
 every later notification by one run, for the whole delivery. No dispatch ever waits for a notification. status gives each claim in flight its waiting_minutes and, for a claim with no worktree whose delivery
 head moved since, committed: the dev commits straight on the branch, so its work may be in and its report waiting to
 be added. A deferred item with no decision keeps the delivery from the gate. Everything that waits for the user carries --recommend, what the manager would decide and why, so every list of what waits (status, the pane, validar) recommends without being asked: defer requires it, note takes it with --validar and refuses it without. An entry of an earlier version, with no recommendation, reads as before. start --archive moves an existing delivery to
-ledger-<old-slug>.jsonl next to the ledger first. --check exits 1 while anything is pending, so the gate can rely on
+ledger-<old-slug>.jsonl next to the ledger first. start also carries each item the latest quality report (the last docs/quality-reports/*.md by name, at the ledger's project root) moved to a later delivery, a line of its Deferred section whose decision starts with "moved to", as a deferred item of the new delivery, recommending that decision, so it needs a decision before the gate and is never forgotten. --check exits 1 while anything is pending, so the gate can rely on
 it. A cycle whose reviewer or qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on
 up to three, then the delivery stops. extend, once status asks the user or stops, records the user's decision to go
 on (a note, VALIDAR in autonomous mode): the current cycle gets one more fix round, and a reviewer or qa FAIL after
@@ -160,6 +160,7 @@ FIX_ROUNDS = {False: 1, True: 3}
 REVIEW_ROUNDS = 3
 TRIAGE = ("applied", "refused", "errata")
 REVIEWS = ("spec", "plan")
+QUALITY_REPORTS = "docs/quality-reports"
 DONE = ("DONE", "DONE_WITH_CONCERNS")
 FIX_TASK = re.compile(r"fix-\d+", re.IGNORECASE)
 FOLLOW_UP = re.compile(r"fix-\d+|cleanup", re.IGNORECASE)
@@ -421,6 +422,32 @@ def start(args):
         print(f"archived {entries[0].get('slug')} to {target}")
     write(args.ledger, {"type": "start", "slug": args.slug, "base": base, "plan": args.plan})
     print(f"started {args.slug} at {base[:12]}")
+    report, moved = carried(args.ledger)
+    for number, (text, decision) in enumerate(moved, 1):
+        write(args.ledger, {"type": "defer", "id": f"D{number}", "text": f"{text} (moved here by {report})",
+                            "recommend": f"decide whether this delivery takes it: {decision}"})
+    if moved:
+        print(f"carried {len(moved)} items moved to a later delivery from {report}: each needs a decision "
+              "before the gate (resolve --id)")
+
+
+def carried(ledger):
+    """The items the latest quality report moved to a later delivery: (report path, [(text, decision)])."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(ledger)))
+    folder = os.path.join(root, *QUALITY_REPORTS.split("/"))
+    names = sorted(name for name in os.listdir(folder) if name.endswith(".md")) if os.path.isdir(folder) else []
+    if not names:
+        return None, []
+    section, moved = False, []
+    with open(os.path.join(folder, names[-1]), encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("## "):
+                section = line.strip() == "## Deferred"
+            elif section and line.startswith("- D"):
+                item, _, decision = line.strip()[2:].rpartition(" -> ")
+                if decision.startswith("moved to"):
+                    moved.append((item.partition(" ")[2], decision))
+    return f"{QUALITY_REPORTS}/{names[-1]}", moved
 
 
 def seconds(text):
