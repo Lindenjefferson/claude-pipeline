@@ -682,48 +682,72 @@ check("a reviewer task other than spec or plan is refused",
       run("add", "--agent", "reviewer", "--task", "T1", "--verdict", "PASS", ledger=LOOP).returncode != 0)
 
 
-def review(verdict, task="plan", open_count=0, ledger=LOOP, report=None):
+def review(verdict, task="plan", open_count=0, ledger=LOOP, report=None, critical=0, minor=0, triage=None):
     args = ["add", "--agent", "reviewer", "--task", task, "--verdict", verdict]
     if open_count:
-        args += ["--important", str(open_count), "--origin", f"plan={open_count}"]
+        args += ["--important", str(open_count)]
+    if critical:
+        args += ["--critical", str(critical)]
+    if minor:
+        args += ["--minor", str(minor)]
+    if open_count + critical + minor:
+        args += ["--origin", f"plan={open_count + critical + minor}"]
+    if triage:
+        args += ["--triage", triage]
     return run(*(args + (["--report", report] if report else [])), "--seconds", "5m", ledger=ledger)
 
 
+LOOP_HEAD = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
 LOOP_REPORT = report_file("loop-1.md")
-r = review("FAIL", open_count=2, report=LOOP_REPORT)
+r = review("FAIL", open_count=2, minor=1, report=LOOP_REPORT)
 state = status(LOOP)
-check("a plan review FAIL is a review step with its round, outside the cycles",
+check("a plan review FAIL is a review step with its round and the range of the next one, outside the cycles",
       r.returncode == 0 and state["cycle"] == 1 and state["tasks"] == {} and state["reviewer"] == []
-      and state["steps"] == [{"step": "review", "task": "plan", "round": 2, "open": 2, "report": LOOP_REPORT}, {"step": "dev"}]
-      and state["pending"][0] == f"plan review round 1 FAIL (2 open, report {LOOP_REPORT}): apply the corrections and "
-                                 "dispatch the reviewer on them again", (r.stderr, state["steps"], state["pending"]))
+      and state["steps"] == [{"step": "review", "task": "plan", "round": 2, "open": 2, "from": LOOP_HEAD,
+                              "report": LOOP_REPORT}, {"step": "dev"}]
+      and state["pending"][0] == f"plan review round 1 FAIL (2 open, report {LOOP_REPORT}): triage every finding "
+                                 "(applied, refused or errata), commit the plan and dispatch the reviewer on "
+                                 f"{LOOP_HEAD[:12]}..HEAD, the corrections only", (r.stderr, state["steps"], state["pending"]))
 check("status --check fails while the plan review is open", run("status", "--check", ledger=LOOP).returncode == 1)
-review("FAIL", open_count=1)
-review("FAIL", open_count=1)
+r = review("FAIL", open_count=1)
+check("the next round is refused without the triage of the previous round's findings",
+      r.returncode != 0 and "--triage applied=N,refused=N,errata=N" in r.stderr and len(status(LOOP)["metrics"]["reviews"])
+      and status(LOOP)["metrics"]["reviews"]["plan"]["rounds"] == 1, r.stderr)
+r = review("FAIL", open_count=1, triage="applied=2")
+check("a triage that leaves a finding out is refused: the previous round had 3",
+      r.returncode != 0 and "3 findings" in r.stderr, r.stderr)
+r = review("FAIL", open_count=1, triage="applied=1,kept=2")
+check("a triage outside applied, refused and errata is refused", r.returncode != 0 and "kept" in r.stderr, r.stderr)
+r = review("FAIL", open_count=1, triage="applied=1,refused=1,errata=1")
+check("the triage of every finding of the previous round lets the next round in", r.returncode == 0, r.stderr)
+review("FAIL", open_count=1, triage="applied=1")
 state = status(LOOP)
-check("supervised: the third plan review FAIL asks the user",
-      state["steps"][0] == {"step": "ask", "task": "plan", "rounds": 3}
-      and state["pending"][0] == "plan review still fails after 3 rounds: ask the user", state)
+check("supervised: three rounds with no Critical open go on without asking: carry the open findings and waive",
+      state["steps"][0] == {"step": "waive", "task": "plan", "rounds": 3, "open": 1}
+      and state["pending"][0] == "plan review still fails after 3 rounds with no Critical: carry each open finding "
+                                 "to the plan's Errata and waive --task plan; extend only on the user's word", state)
 run("mode", "autonomous", ledger=LOOP)
+check("autonomous: the same three rounds and the same waiver, which becomes a VALIDAR item",
+      status(LOOP)["steps"][0] == {"step": "waive", "task": "plan", "rounds": 3, "open": 1}, status(LOOP)["steps"])
+run("waive", "--agent", "reviewer", "--task", "plan", "--reason", "1 Important carried to the Errata", ledger=LOOP)
 state = status(LOOP)
-check("autonomous: a 4th round checks only the corrections, and its PASS becomes note --validar",
-      state["steps"][0] == {"step": "review", "task": "plan", "round": 4, "open": 1, "last": True}
-      and "note --validar" in state["pending"][0], state)
-review("FAIL", open_count=1)
-state = status(LOOP)
-check("autonomous: a 4th FAIL stops the delivery",
-      state["steps"][0] == {"step": "stop", "task": "plan", "rounds": 4} and "note --validar" in state["pending"][0], state)
-review("PASS", open_count=0)
-state = status(LOOP)
-check("a plan review PASS closes the loop and the cycle steps stay",
-      state["steps"] == [{"step": "dev"}] and state["pending"] == ["no dev task yet"], state)
-check("plan reviews are counted in the metrics by rounds, findings and time, apart from the cycles",
-      state["metrics"]["reviews"] == {"plan": {"rounds": 5, "critical": 0, "important": 5, "minor": 0, "seconds": 1500,
-                                               "tokens": 0}}
-      and state["metrics"]["time"]["agents"] == {"reviewer": 1500} and state["metrics"]["origins"]["plan"] == 5
+check("the waiver closes the loop and the cycle steps stay",
+      state["steps"] == [{"step": "dev"}] and state["pending"] == ["no dev task yet"]
+      and state["validar"][-1]["text"] == "waived reviewer plan FAIL: 1 Important carried to the Errata", state)
+check("plan reviews are counted in the metrics by rounds, findings, refused findings and time, apart from the cycles",
+      state["metrics"]["reviews"] == {"plan": {"rounds": 3, "critical": 0, "important": 4, "minor": 1, "refused": 1,
+                                               "seconds": 900, "tokens": 0}}
+      and state["metrics"]["time"]["agents"] == {"reviewer": 900} and state["metrics"]["origins"]["plan"] == 5
       and state["metrics"]["cycles"][0]["seconds"] == 0, state["metrics"])
+r = review("FAIL", open_count=1, triage="applied=1")
+check("--triage on the first round of a review is refused: there is no previous round to triage",
+      r.returncode != 0 and "--triage" in r.stderr, r.stderr)
+r = review("FAIL", open_count=1)
+check("a review after a PASS (a change of scope) is a new loop: its counter starts again at round 1",
+      status(LOOP)["steps"][0]["round"] == 2 and "(round 1)" in r.stdout, (r.stdout, status(LOOP)["steps"]))
 review("FAIL", task="spec", open_count=1)
-check("a spec review has its own loop", status(LOOP)["steps"][0]["task"] == "spec", status(LOOP)["steps"])
+check("a spec review has its own loop",
+      {step["task"] for step in status(LOOP)["steps"] if step["step"] == "review"} == {"plan", "spec"}, status(LOOP)["steps"])
 r = run("waive", "--agent", "reviewer", "--task", "spec", "--reason", "user approved the spec with the finding", ledger=LOOP)
 state = status(LOOP)
 check("waive --task closes a review loop the user accepted as it is",
@@ -731,37 +755,46 @@ check("waive --task closes a review loop the user accepted as it is",
       and state["validar"][-1]["text"] == "waived reviewer spec FAIL: user approved the spec with the finding",
       (r.stderr, state))
 check("waive --task of a review that passed is refused",
-      run("waive", "--agent", "reviewer", "--task", "plan", "--reason", "x", ledger=LOOP).returncode != 0)
+      run("waive", "--agent", "reviewer", "--task", "spec", "--reason", "x", ledger=LOOP).returncode != 0)
 
 EXT = ".superpowers/extend-review.jsonl"
 run("start", "--slug", "extend-review", ledger=EXT)
 r = run("extend", "--task", "plan", "--reason", "x", ledger=EXT)
 check("extend --task of a review loop that never failed is refused",
       r.returncode != 0 and "nothing to extend" in r.stderr, r.stderr)
-for _ in range(3):
-    review("FAIL", open_count=1, ledger=EXT)
-check("supervised: the plan review asks the user after its three rounds",
-      status(EXT)["steps"][0] == {"step": "ask", "task": "plan", "rounds": 3}, status(EXT)["steps"])
+review("FAIL", critical=1, ledger=EXT)
+for _ in range(2):
+    review("FAIL", critical=1, ledger=EXT, triage="applied=1")
+check("supervised: a Critical still open after three rounds asks the user",
+      status(EXT)["steps"][0] == {"step": "ask", "task": "plan", "rounds": 3}
+      and status(EXT)["pending"][0] == "plan review still fails after 3 rounds: ask the user", status(EXT)["steps"])
 r = run("extend", "--task", "plan", "--reason", "user wants the corrections checked", ledger=EXT)
 state = status(EXT)
 check("extend --task records the user's extra review round and the loop goes on",
-      r.returncode == 0 and state["steps"][0] == {"step": "review", "task": "plan", "round": 4, "open": 1}
+      r.returncode == 0 and state["steps"][0]["step"] == "review" and state["steps"][0]["round"] == 4
       and state["notes"][-1] == "extra plan review round: user wants the corrections checked", (r.stderr, state))
 check("a review extension does not extend the cycle's fix rounds",
       run("extend", "--reason", "y", ledger=EXT).returncode != 0)
-review("FAIL", open_count=1, ledger=EXT)
+review("FAIL", critical=1, ledger=EXT, triage="applied=1")
 state = status(EXT)
 check("the extra round failing asks the user again, naming it as the extra one",
       state["steps"][0] == {"step": "ask", "task": "plan", "rounds": 4, "extended": True}
       and state["pending"][0] == "plan review still fails after the extra round: ask the user", state)
 run("mode", "autonomous", ledger=EXT)
-check("in autonomous mode the extra round that failed stops the delivery",
+check("in autonomous mode a Critical still open stops the delivery",
       status(EXT)["steps"][0]["step"] == "stop" and "note --validar" in status(EXT)["pending"][0], status(EXT))
 r = run("extend", "--task", "plan", "--reason", "one more", ledger=EXT)
 check("the user may authorize another round after the extra one",
       r.returncode == 0 and status(EXT)["steps"][0]["step"] == "review", (r.stderr, status(EXT)["steps"]))
 check("the note of an extension in autonomous mode is a VALIDAR item",
       status(EXT)["validar"][-1]["text"] == "extra plan review round: one more", status(EXT)["validar"])
+review("FAIL", open_count=1, ledger=EXT, triage="applied=1")
+check("the extra round with no Critical left is waived, not asked",
+      status(EXT)["steps"][0] == {"step": "waive", "task": "plan", "rounds": 5, "open": 1, "extended": True},
+      status(EXT)["steps"])
+r = run("extend", "--task", "plan", "--reason", "the user overrules the waiver", ledger=EXT)
+check("extend --task also lets the user overrule the waiver with one more round",
+      r.returncode == 0 and status(EXT)["steps"][0]["step"] == "review", (r.stderr, status(EXT)["steps"]))
 r = run("extend", "--task", "spec", "--reason", "x", ledger=EXT)
 check("extend --task names the review loop that ran out, not another",
       r.returncode != 0 and "spec" in r.stderr, r.stderr)

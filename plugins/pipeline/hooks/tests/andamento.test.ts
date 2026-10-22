@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { bandRows, paneAgents, paneLines, rowText } from '../andamento.js'
+import { bandRows, paneAgents, paneLines, rowText, waitsForYou } from '../andamento.js'
 
 const DISPATCHED = '2026-10-17T17:32:48+00:00'
 const NOW = Date.parse(DISPATCHED) + 14 * 60000
@@ -178,6 +178,9 @@ test('the pane spells out each kind of step', () => {
   expect(paneLines(loop, [], NOW)).toContain('- revisão do plano, rodada 2 (3 achados abertos)')
   expect(paneLines(loop, [], NOW)).toContain('- falar com você (revisão da spec ainda reprova depois de 3 rodadas)')
   expect(paneLines(loop, [], NOW)).toContain('- parar e registrar como VALIDAR (revisão do plano ainda reprova depois de 4 rodadas)')
+  const waived = { ...STATUS, steps: [{ step: 'waive', task: 'plan', rounds: 3, open: 2 }] }
+  expect(paneLines(waived, [], NOW)).toContain('- dispensar a revisão do plano (2 achados abertos vão para a Errata)')
+  expect(waitsForYou({ ...waived, validar: [], ready_for_gate: false })).toBeNull()
   const ready = { ...STATUS, dispatched: {}, steps: [], ready_for_gate: true }
   expect(paneLines(ready, [], NOW)).toContain('Pronto para o gate.')
 })
