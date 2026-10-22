@@ -225,18 +225,30 @@ check("start records the plan path", status(DEFER)["plan"] == "docs/plans/defer.
 for agent, verdict, task in (("dev", "DONE", "T1"), ("reviewer", "PASS", None), ("qa", "PASS", None)):
     add(agent, verdict, task, ledger=DEFER)
 r = run("defer", "--text", "long names wrap badly at the smallest width", ledger=DEFER)
+check("defer without --recommend is refused: a decision that waits for the user says what I would do",
+      r.returncode != 0 and "--recommend" in r.stderr, r.stderr)
+r = run("defer", "--text", "long names wrap badly at the smallest width", "--recommend",
+        "truncate with an ellipsis: the full name is already in the tooltip", ledger=DEFER)
 check("defer gives the item an id", r.returncode == 0 and "D1" in r.stdout, r.stdout + r.stderr)
 state = status(DEFER)
 check("an undecided deferred item blocks the gate",
       state["ready_for_gate"] is False and any("D1" in item for item in state["pending"])
       and run("status", "--check", ledger=DEFER).returncode == 1, state)
+check("the deferred item and its decide step carry the recommendation",
+      state["deferred"][0]["recommend"] == "truncate with an ellipsis: the full name is already in the tooltip"
+      and state["steps"][-1] == {"step": "decide", "id": "D1", "text": "long names wrap badly at the smallest width",
+                                 "recommend": "truncate with an ellipsis: the full name is already in the tooltip"},
+      (state["deferred"], state["steps"]))
+check("the pending text of a deferred item names the recommendation",
+      "recommend: truncate with an ellipsis" in run("status", ledger=DEFER).stdout, run("status", ledger=DEFER).stdout)
 check("resolve refuses an unknown id",
       run("resolve", "--id", "D7", "--decision", "x", ledger=DEFER).returncode != 0)
 run("resolve", "--id", "D1", "--decision", "user: backlog item 12", ledger=DEFER)
 state = status(DEFER)
 check("a decided deferred item no longer blocks and keeps its decision",
       state["ready_for_gate"] is True and state["deferred"] == [
-          {"id": "D1", "text": "long names wrap badly at the smallest width", "decision": "user: backlog item 12"}],
+          {"id": "D1", "text": "long names wrap badly at the smallest width", "decision": "user: backlog item 12",
+           "recommend": "truncate with an ellipsis: the full name is already in the tooltip"}],
       state)
 
 LEGACY = os.path.join(repo, ".superpowers", "legacy.jsonl")
@@ -273,19 +285,27 @@ check("autonomous: a second failed review does not stop for the user, the fix ro
 run("mode", "supervised", ledger=AUTO)
 check("back to supervised: the same cycle asks the user again",
       any("ask the user" in item for item in status(AUTO)["pending"]), status(AUTO)["pending"])
-run("note", "--text", "page size 50", "--validar", ledger=AUTO)
+r = run("note", "--text", "page size 50", "--validar", ledger=AUTO)
+check("note --validar without --recommend is refused", r.returncode != 0 and "--recommend" in r.stderr, r.stderr)
+r = run("note", "--text", "ruled out a finding", "--recommend", "keep it", ledger=AUTO)
+check("--recommend without --validar is refused: a plain note waits for nobody",
+      r.returncode != 0 and "--validar" in r.stderr, r.stderr)
+run("note", "--text", "page size 50", "--validar", "--recommend", "confirm: 50 fits the smallest screen", ledger=AUTO)
 run("note", "--text", "ruled out a finding", ledger=AUTO)
 state = status(AUTO)
-check("note --validar goes to the VALIDAR list with an id, apart from plain notes",
-      state["validar"] == [{"id": "V1", "text": "page size 50", "decision": None}]
+check("note --validar goes to the VALIDAR list with an id and its recommendation, apart from plain notes",
+      state["validar"] == [{"id": "V1", "text": "page size 50", "decision": None,
+                            "recommend": "confirm: 50 fits the smallest screen"}]
       and state["notes"] == ["ruled out a finding"], state)
 text = run("status", ledger=AUTO).stdout
-check("text status shows the VALIDAR list with ids", "VALIDAR V1: page size 50" in text, text)
-run("note", "--text", "sort by date", "--validar", ledger=AUTO)
+check("text status shows the VALIDAR list with ids and the recommendation",
+      "VALIDAR V1: page size 50" in text and "recommend: confirm: 50 fits the smallest screen" in text, text)
+run("note", "--text", "sort by date", "--validar", "--recommend", "confirm", ledger=AUTO)
 r = run("validate", "--id", "V2", "--decision", "user: sort by name", ledger=AUTO)
 state = status(AUTO)
 check("validate records the user's decision on a VALIDAR item",
-      r.returncode == 0 and state["validar"][1] == {"id": "V2", "text": "sort by date", "decision": "user: sort by name"}
+      r.returncode == 0 and state["validar"][1] == {"id": "V2", "text": "sort by date", "decision": "user: sort by name",
+                                                    "recommend": "confirm"}
       and state["validar"][0]["decision"] is None, (r.stderr, state["validar"]))
 text = run("status", ledger=AUTO).stdout
 check("text status lists only the pending VALIDAR items, and the decided ones apart",
@@ -561,11 +581,24 @@ add("reviewer", "FAIL", open_count=1, ledger=STEPS)
 check("a review still failing after the fix round asks the user (supervised)",
       {"step": "ask", "agent": "reviewer"} in status(STEPS)["steps"], status(STEPS)["steps"])
 run("claim", "--task", "T2", ledger=STEPS)
-run("defer", "--text", "page size", ledger=STEPS)
+run("defer", "--text", "page size", "--recommend", "50", ledger=STEPS)
 steps = status(STEPS)["steps"]
 check("a task in flight is no step (the band shows it running), a deferred item with no decision is",
-      not any(step.get("task") == "T2" for step in steps) and {"step": "decide", "id": "D1", "text": "page size"} in steps,
+      not any(step.get("task") == "T2" for step in steps)
+      and {"step": "decide", "id": "D1", "text": "page size", "recommend": "50"} in steps,
       steps)
+
+OLD = ".superpowers/old-pending.jsonl"
+run("start", "--slug", "old-pending", ledger=OLD)
+with open(os.path.join(repo, OLD), "a", encoding="utf-8") as handle:
+    handle.write(json.dumps({"type": "defer", "id": "D1", "text": "old item", "at": "2026-01-01T00:00:00+00:00"}) + "\n")
+    handle.write(json.dumps({"type": "note", "text": "old call", "validar": True,
+                             "at": "2026-01-01T00:00:00+00:00"}) + "\n")
+state = status(OLD)
+check("a ledger of an earlier version, with no recommendation, still reads",
+      state["deferred"][0] == {"id": "D1", "text": "old item", "decision": None}
+      and state["validar"][0] == {"id": "V1", "text": "old call", "decision": None}
+      and {"step": "decide", "id": "D1", "text": "old item"} in state["steps"], state)
 
 SCOPE = ".superpowers/scope.jsonl"
 check("scope before start is refused",
