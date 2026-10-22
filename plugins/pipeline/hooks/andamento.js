@@ -1,7 +1,8 @@
 // Mod (Claude Code v2.1.287 or later): the delivery's progress, drawn from `ledger.py status --json`, in Portuguese
 // (the user reads it; the ledger's own text stays in English for the manager). While the ledger of this worktree has
-// a delivery, rows above the prompt, opened by a blank line so the first never runs into the text the terminal
-// printed above it, say, nothing cut and a row wider than the terminal giving each of its parts a line: the plan
+// a delivery, rows under the prompt, below Claude Code's hint line (the mode, which it keeps drawing live) and so
+// below a command status line too, say, nothing cut and a row wider than the terminal giving each of its parts a
+// line: the plan
 // cycle, whether it is paused and
 // the tasks and cycles left; the tasks in flight with their time, a verdict no next step covers and what comes next;
 // and the VALIDAR items waiting, in the warning color. Only the first row dims while Claude works.
@@ -13,8 +14,8 @@
 // It runs ledger.py with the first of python and python3 that is Python 3, as hooks/python.sh does. It also writes
 // the account's rate-limit windows to usage.json beside the ledger (on session.measure, only when they changed;
 // advice for ledger.py, whose `usage` it shows: econômico, the wait for a reset, the pane's usage line). A ledger.py
-// failure (a broken ledger, no Python 3) shows in the band and the pane instead of passing for "no delivery". Other
-// mods' band content is kept below the rows.
+// failure (a broken ledger, no Python 3) shows in the band and the pane instead of passing for "no delivery". What
+// other mods draw on that line stays above the rows, with it.
 // On its own, after each read of the status, it sends a native notification (`$.ui.notify`) the moment the delivery
 // starts needing the user — the gate ready, the manager asking or stopping, a VALIDAR item — once per state, the
 // line of needs itself being the key, so the delivery does not sit waiting for the user to look at the terminal.
@@ -459,10 +460,10 @@ export function register(on) {
     return Box({ flexDirection: 'column', children: drawn })
   })
 
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if ((!report && !failure) || e.props.hasSurvey) return next(e)
+  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    if (!report && !failure) return next(e)
     const { Box, Text } = $.ui.resolve(e)
-    const rows = report ? bandRows(report, await $.clock.now(), e.props.bodyColumns)
+    const rows = report ? bandRows(report, await $.clock.now(), e.viewport && e.viewport.columns)
       : [[{ text: `pipeline: ledger.py falhou: ${failure}`, tone: 'failed' }]]
     // a row of one part takes its tone whole; a row of several sets each part apart
     const drawn = rows.map((row, index) => Text({
@@ -470,10 +471,8 @@ export function register(on) {
       children: row.length === 1 ? [row[0].text]
         : row.flatMap((part, at) => [...(at ? [GAP] : []), Text({ ...TONE[part.tone], children: [part.text] })]),
     }))
+    // Claude Code's own hint line (the mode, its live pills) stays first, as it draws it; the band goes under it
     const theirs = await next(e)
-    // a blank line opens the band, so its first row never runs into what the terminal printed above it: a space,
-    // because a Text of an empty string lays out as no row at all, as the pane's rows above already know
-    const band = [Text({ children: [' '] }), ...drawn]
-    return Box({ flexDirection: 'column', children: theirs ? [...band, theirs] : band })
+    return Box({ flexDirection: 'column', children: theirs ? [theirs, ...drawn] : drawn })
   })
 }
