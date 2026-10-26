@@ -11,7 +11,16 @@
       "name": "pipeline",
       "source": "./plugins/pipeline",
       "description": "Independent multi-agent dev team in short cycles (manager, dev, reviewer, qa; ledger; local gate script; pre-commit secret scan), enabled per repo."
+    },
+    {
+      "name": "multiplas-contas",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/Lindenjefferson/claude-multiplas-contas.git",
+        "path": "plugins/multiplas-contas"
+      },
+      "description": "Várias contas do Claude Code no Windows com `cc <conta>` e atalho no Explorer."
     }
   ],
-  "description": "Personal plugins, enabled per repo."
+  "description": "Personal plugins."
 }
