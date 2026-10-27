@@ -17,7 +17,7 @@
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/Lindenjefferson/claude-acc-manager.git",
-        "path": "plugins/claude-acc-manager"
+        "path": "plugins/gerenciador-contas"
       },
       "description": "Várias contas do Claude Code no Windows com `cc <conta>` e atalho no Explorer."
     }
