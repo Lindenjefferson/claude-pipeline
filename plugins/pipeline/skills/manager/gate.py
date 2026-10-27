@@ -13,8 +13,8 @@ folder, **/ matches zero or more folders and {a,b} is either; an invalid glob, o
 prints a warning; without that line, every tracked file that is not Markdown); no commit after the head of the
 ledger's latest reviewer run changes anything but the plan, docs/lessons.md, docs/quality-reports/ or the user's
 .pipeline-secrets-allow (first-parent commits only, so a merged front is not counted, and tasks are integrated by
-fast-forward or cherry-pick); when "Comandos" has a "Verificação de interface" line and the gate runs no
-"Testes (<name>)" or "Testes 2" line, a qa run added with --full whose head differs from HEAD in no file but those
+fast-forward or cherry-pick); when "Comandos" has a "Verificação de interface" line and no command the gate runs
+is that line's command, a qa run added with --full whose head differs from HEAD in no file but those
 same exempt files (Full suite, by tree, so a merged front counts); every command of that section passes (lines like
 "- Testes: `<command>`"; Build, Typecheck, Lint, Testes and the optional Auditoria are run, a second line of the same
 kind runs too under its own label, such as "Testes (e2e)", a blank command counts as not configured, and --cmd adds
@@ -413,9 +413,10 @@ def reviewed(ledger):
 
 
 def full_suite(ledger, commands):
-    if not any(label_key(label) in INTERFACE and value for label, value in comandos()):
+    interface = {value for label, value in comandos() if label_key(label) in INTERFACE and value}
+    if not interface:
         return True, "no Verificação de interface line"
-    other = next((name for name in commands if name.startswith("Testes") and name != "Testes"), None)
+    other = next((name for name, command in commands.items() if command in interface), None)
     if other:
         return True, f"the gate runs the interface suite ({other})"
     full = ledger.get("full_qa")
@@ -423,7 +424,7 @@ def full_suite(ledger, commands):
     if not head:
         return False, ("the interface suite runs in no gate line and no qa ran the full suite at the final head: "
                        'dispatch qa on the full suite (every test line of Comandos and the entire interface suite) '
-                       'and add it with --full, or put the interface suite on a "Testes (<name>)" line')
+                       'and add it with --full, or put the interface command on a "Testes (<name>)" line too')
     found, changed = changed_after(ledger, head, tree=True)
     if not found:
         return False, (f"the full qa head {head[:7]} is not in this history: "

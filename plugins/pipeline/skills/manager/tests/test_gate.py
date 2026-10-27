@@ -588,13 +588,20 @@ check("the warning appears in the staged report",
       r.returncode == 0 and "## Test lines not run" in text and "Testes do banco" in text, r.stdout + text)
 sh("git", "commit", "-q", "--no-verify", "-m", "docs: quality report")
 
-UI = f"- Verificação de interface: {OK}\n"
-commit("CLAUDE.md", FULL + "- Testes (e2e): " + OK + "\n" + UI, "docs: e2e line")
+UI_CMD = f"`{PY} -c \"print('ui')\"`"
+UI = f"- Verificação de interface: {UI_CMD}\n"
+commit("CLAUDE.md", FULL + "- Testes (e2e): " + UI_CMD + "\n" + UI, "docs: e2e line")
 close_cycle("fix-1")
 r = gate("--base", "main")
 check("Full suite is SKIP when the gate runs a Testes (e2e) line",
       re.search(r"Full suite:\s+SKIP", r.stdout) and "the gate runs the interface suite (Testes (e2e))" in r.stdout,
       r.stdout)
+commit("CLAUDE.md", FULL + "- Testes (banco): " + OK + "\n" + UI, "docs: a test line that is not the interface")
+close_cycle("fix-1b")
+r = gate("--base", "main")
+check("Full suite FAILs when the Testes (<name>) line runs another command than the interface line",
+      r.returncode == 1 and re.search(r"Full suite:\s+FAIL", r.stdout)
+      and "no qa ran the full suite at the final head" in r.stdout, r.stdout)
 
 commit("CLAUDE.md", FULL + UI, "docs: interface line only")
 close_cycle("fix-2")
@@ -632,7 +639,7 @@ check("Full suite FAILs after a --no-ff merged front changed a code file since t
       r.returncode == 1 and re.search(r"Full suite:\s+FAIL", r.stdout) and "changed after the full qa at" in r.stdout
       and "front.txt" in r.stdout, r.stdout)
 check("Reviewed still ignores the merged front (first-parent log)", re.search(r"Reviewed:\s+PASS", r.stdout), r.stdout)
-r = gate("--base", "main", "--cmd", f"Testes (x)={PY} -c \"print('ok')\"")
+r = gate("--base", "main", "--cmd", f"Testes (x)={PY} -c \"print('ui')\"")
 check("Full suite is SKIP when --cmd adds a Testes (x) line",
       re.search(r"Full suite:\s+SKIP", r.stdout) and "the gate runs the interface suite (Testes (x))" in r.stdout,
       r.stdout)
