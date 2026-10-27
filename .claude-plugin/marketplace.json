@@ -13,7 +13,7 @@
       "description": "Independent multi-agent dev team in short cycles (manager, dev, reviewer, qa; ledger; local gate script; pre-commit secret scan), enabled per repo."
     },
     {
-      "name": "claude-acc-manager",
+      "name": "gerenciador-contas",
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/Lindenjefferson/claude-acc-manager.git",
