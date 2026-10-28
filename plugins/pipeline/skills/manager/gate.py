@@ -2,6 +2,12 @@
 """Local gate: the last check before anything leaves the machine. Deterministic, no agent.
 
   gate.py [--base <rev>] [--ledger <path>] [--cmd Name=command ...] [--report <slug>]
+  gate.py --criteria <task> [--ledger <path>]     only the Criteria check, for that task's criteria; exits 0 or 1
+
+A criterion is an id that opens a list item of the plan (- AC-T3-2, * **AC-T3-2**, 1. `AC-T3-2`); an id written
+anywhere else is cited, a warning ("cited, never defined") and never traced, and a plan where no id opens a list
+item is read as before, every id a criterion. A task's criteria, for --criteria, are those with a segment that is the
+task id or ends with it right after a digit (AC-T3-2, AC-PL-T3-2 and AC-074T3-2 are T3's; AC-T31-2 is not).
 
 Checks, in order: nothing is pending in the ledger (the current cycle is closed and every deferred item has a final
 decision); the tree is clean; the documentation the kickoff prepared stays whole (with a docs/README.md: docs/arquitetura.md, the patterns every task follows, exists and, once a module doc docs/NN-*.md (in docs/ or one subfolder of it) is tracked, holds no _(...)_ placeholder; the index names every tracked module doc; and no relative link of README.md, docs/README.md or docs/arquitetura.md points to a missing file); every acceptance-criterion id of the plan recorded in the ledger (tokens like AC-T3-2)
@@ -69,6 +75,8 @@ CRITERION_ANY = re.compile(r"(?<![\w-])AC-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*")
 # The placeholder may sit after a piece of the id (AC-05T<task>-<n>): without \w and - in the lookahead the
 # match backtracks to AC-05 and the gate traces a criterion the plan never wrote.
 CRITERION = re.compile(CRITERION_ANY.pattern + r"(?![<{\w-])")
+# A criterion is defined where its id opens a list item (after ** or a backtick); anywhere else it is only cited.
+DEFINED = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+[*_`]*(" + CRITERION.pattern + ")", re.MULTILINE)
 MINUTES = 15
 DAY = 24 * 60 * 60
 REPORTS = "docs/quality-reports"
@@ -338,7 +346,13 @@ def born_with_code(base, plan, ids, patterns, tests, folders):
     return found + ([(item, sha) for item in born] if code else [])
 
 
-def traceability(plan, base=""):
+def of_task(item, task):
+    """A segment of the id is the task id, or ends with it right after a digit (AC-T3-2, AC-PL-T3-2, AC-074T3-2)."""
+    return any(part == task or (part.endswith(task) and part[:-len(task)][-1:].isdigit())
+               for part in re.split(r"[.-]", item)[1:])
+
+
+def traceability(plan, base="", task=None):
     if not plan:
         return True, "no plan in the ledger (small work has none; otherwise record it with ledger.py plan --path)"
     if not os.path.exists(plan):
@@ -349,6 +363,17 @@ def traceability(plan, base=""):
     if templates:
         print(f"warning: {plan} writes {', '.join(templates)} with a placeholder right after it, so each is an id "
               "template, not a criterion, and the gate traces no test for it", flush=True)
+    defined = sorted(set(DEFINED.findall(text)))
+    if defined:
+        cited = [item for item in ids if item not in defined]
+        if cited:
+            print(f"warning: {plan}: cited, never defined: {', '.join(cited)} (a criterion is the id that opens a "
+                  "list item; the gate traces no test for these)", flush=True)
+        ids = defined
+    if task:
+        ids = [item for item in ids if of_task(item, task)]
+        if not ids:
+            return True, f"no criterion of {task} in {plan}"
     patterns = {item: re.compile(r"(?<![A-Za-z0-9-])" + "[-_.]".join(map(re.escape, re.split(r"[-.]", item)))
                                  + r"(?![A-Za-z0-9]|[-.][A-Za-z0-9]|_\d)", re.IGNORECASE) for item in ids}
     if not ids:
@@ -584,9 +609,16 @@ def main():
     parser.add_argument("--ledger", help="passed to ledger.py; by default it finds the ledger itself")
     parser.add_argument("--cmd", action="append", default=[], help="Name=command, adds or overrides a check")
     parser.add_argument("--report", metavar="SLUG")
+    parser.add_argument("--criteria", metavar="TASK", help="trace only that task's criteria to tests, nothing else")
     args = parser.parse_args()
 
     ledger, problem = ledger_state(args.ledger)
+    if args.criteria:
+        if not ledger:
+            sys.exit(problem or "no ledger")
+        ok, detail = traceability(ledger.get("plan"), task=args.criteria)
+        print(f"Criteria {args.criteria}: {'PASS' if ok else 'FAIL'}" + (f"\n    {detail}" if detail else ""))
+        sys.exit(0 if ok else 1)
     if args.base:
         base = commit_of(args.base)
         if not base:

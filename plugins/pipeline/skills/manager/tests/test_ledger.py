@@ -609,7 +609,8 @@ for name, tasks in (("1", "T1.1, T1.2"), ("R", "TR.1"), ("2", "T2.1")):
     r = run("scope", "--cycle", name, "--tasks", tasks, ledger=SCOPE)
 check("scope records the tasks of one plan cycle", r.returncode == 0 and "2" in r.stdout, r.stderr)
 check("status --json gives the plan cycles in order, the tasks left, and where the delivery is",
-      status(SCOPE)["scope"] == {"cycles": [{"cycle": "1", "tasks": ["T1.1", "T1.2"], "left": ["T1.1", "T1.2"]},
+      {key: value for key, value in status(SCOPE)["scope"].items() if key not in ("tasks", "median_task_seconds")}
+      == {"cycles": [{"cycle": "1", "tasks": ["T1.1", "T1.2"], "left": ["T1.1", "T1.2"]},
                                             {"cycle": "R", "tasks": ["TR.1"], "left": ["TR.1"]},
                                             {"cycle": "2", "tasks": ["T2.1"], "left": ["T2.1"]}],
                                  "current": "1", "position": 1, "total": 3, "tasks_left": 4, "cycles_left": 3},
@@ -853,7 +854,7 @@ claim2 = status(PAUSE)["claims"][1]
 check("a claim with neither option is stored without them",
       r.returncode == 0 and claim2 == {"task": "P2", "at": claim2["at"], "worktree": None, "origin": None,
                                        "tip": None, "head_moved": False, "waiting_minutes": 0,
-                                       "committed": False}, status(PAUSE)["claims"])
+                                       "committed": False, "partial_report": False}, status(PAUSE)["claims"])
 run("release", "--task", "P2", ledger=PAUSE)
 subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "delivery moved"], cwd=repo, check=True,
                capture_output=True)
@@ -924,7 +925,7 @@ check("a claim written in the old shape still works: no worktree, no origin, hea
       state["in_flight"] == ["L1"] and len(state["claims"]) == 1
       and {key: value for key, value in state["claims"][0].items() if key != "waiting_minutes"}
       == {"task": "L1", "at": "2026-10-01T10:01:00+00:00", "worktree": None, "origin": None, "tip": None,
-          "head_moved": False, "committed": False}
+          "head_moved": False, "committed": False, "partial_report": True}
       and state["claims"][0]["waiting_minutes"] > 0
       and state["paused"] is None and state["full_qa"] is None, state)
 check("the old claim's text line has no place suffix, and says how long it has been waiting",
@@ -1834,7 +1835,7 @@ check("with no quality report, start carries nothing", r.returncode == 0 and "ca
       and status(CARRY)["deferred"] == [], (r.stdout, status(CARRY)["deferred"]))
 
 # runs with no seconds, listed for measure --at
-UNM = ".superpowers/unmeasured.jsonl"
+UNM = ".superpowers/unmeasured-list.jsonl"
 run("start", "--slug", "unmeasured", ledger=UNM)
 add("dev", "DONE", "T1", ledger=UNM)
 add("dev", "DONE", "T2", ledger=UNM, seconds=60)
