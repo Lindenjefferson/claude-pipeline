@@ -72,4 +72,5 @@ A skill `manager` conduz cada entrega, do tamanho do pedido ao `gate.py` (o flux
 - Variáveis de ambiente e segredos nunca são commitados.
 - O que vale só para este computador (quanto uma cópia ocupa aqui, caminhos e limites da máquina) vai no `CLAUDE.local.md`, que fica fora do git; nunca neste arquivo.
 - Antes de escrever ou corrigir um comando de scaffold ou instalação (aqui, numa spec ou num plano), conferir a versão e as flags atuais no gerenciador de pacotes do stack, no `--help` e na documentação atual; nunca de memória.
+- Se houver tela: toda mudança de tela, mockup ou layout, dentro ou fora de uma entrega (brainstorming, pedido avulso, `fix-N`), carrega a skill `frontend-design` antes de desenhar e termina com uma captura de cada formato de tela, conferida antes de ir ao usuário.
 - _(adicionar aqui as regras de stack decididas no brainstorming: acesso a dados, testes, migrations, deploy)_
