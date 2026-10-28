@@ -6,7 +6,7 @@ Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão 
 
 **A numeração voltou para 1.x** (decisão do usuário, com o plugin só em instalação local). A 2.12.0 passou a ser a **1.12.0**, e cada versão da linha 2.x segue a mesma conta (a 2.9.9 é a 1.9.9, e assim por diante). A linha 1.x original, de antes da 2.0.0, virou 0.x pela mesma conta (a 1.6.0 de então é a **0.6.0**), para nenhum número valer por duas versões. Nada muda no comportamento. Uma cópia 2.x se atualiza pelo caminho normal — `claude plugin marketplace update linden-plugins` e `claude plugin update pipeline@linden-plugins --scope <escopo>`, depois `/reload-plugins` — porque o instalador compara com o que o marketplace oferece, não a ordem dos números; a skill `atualizar` continua valendo. Conferido na prática, de 2.12.0 para 1.12.0.
 
-## 1.21.0 — o `dev` propõe a linha da Errata
+## 1.21.0 — o `dev` propõe a linha da Errata (PR #72)
 
 - **Divergência do plano numa rodada de correção sem linha na Errata** (melhoria; entrega `app-f0-api` do `homebudgy-app`, 1.20.0): a revisão do `fix-6` e a do `fix-7` acharam, as duas, Minors de Errata faltando (a troca do depósito da sessão e o Cache-Control; o cenário `lento` em 12 s quando a tabela do plano e o AC-U7-12 dizem 4 s; os ids AC-F7-* que o plano não define). Quem sabe da divergência é o `dev`, e a Errata é do manager. O relatório do `dev` ganha a linha `Errata:`, com o texto de cada divergência do plano (um valor, o teste de um critério, um id que o plano não define) ou `none`, e o manager a confere no diff e a cola. Nenhum script sabe se o código diverge do plano, por isso é linha de prompt e não checagem. Número: achados do `reviewer` de Errata faltando por rodada de correção (deve ser 0).
 
