@@ -2,9 +2,19 @@
 
 O que cada versão entregou e o que muda para quem atualiza. O arquivo vai junto com cada versão instalada: a skill `atualizar` lê o **Ao atualizar** de cada versão pulada, da mais antiga para a mais nova. Termine a entrega em andamento, ou pause-a, antes de atualizar o plugin (a skill `atualizar` confere). As ideias que ainda não viraram versão estão no [roadmap](../../docs/roadmap.md).
 
-Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o número do PR. Só as versões que o `feedback-plugin` das próximas entregas ainda confere (hoje da 1.9.8 à 1.20.0) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta. O que é major, minor e patch está no [`CLAUDE.md`](../../CLAUDE.md).
+Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o número do PR. Só as versões que o `feedback-plugin` das próximas entregas ainda confere (hoje da 1.9.8 à 1.21.0) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta. O que é major, minor e patch está no [`CLAUDE.md`](../../CLAUDE.md).
 
 **A numeração voltou para 1.x** (decisão do usuário, com o plugin só em instalação local). A 2.12.0 passou a ser a **1.12.0**, e cada versão da linha 2.x segue a mesma conta (a 2.9.9 é a 1.9.9, e assim por diante). A linha 1.x original, de antes da 2.0.0, virou 0.x pela mesma conta (a 1.6.0 de então é a **0.6.0**), para nenhum número valer por duas versões. Nada muda no comportamento. Uma cópia 2.x se atualiza pelo caminho normal — `claude plugin marketplace update linden-plugins` e `claude plugin update pipeline@linden-plugins --scope <escopo>`, depois `/reload-plugins` — porque o instalador compara com o que o marketplace oferece, não a ordem dos números; a skill `atualizar` continua valendo. Conferido na prática, de 2.12.0 para 1.12.0.
+
+## 1.21.0 — o `dev` propõe a linha da Errata
+
+- **Divergência do plano numa rodada de correção sem linha na Errata** (melhoria; entrega `app-f0-api` do `homebudgy-app`, 1.20.0): a revisão do `fix-6` e a do `fix-7` acharam, as duas, Minors de Errata faltando (a troca do depósito da sessão e o Cache-Control; o cenário `lento` em 12 s quando a tabela do plano e o AC-U7-12 dizem 4 s; os ids AC-F7-* que o plano não define). Quem sabe da divergência é o `dev`, e a Errata é do manager. O relatório do `dev` ganha a linha `Errata:`, com o texto de cada divergência do plano (um valor, o teste de um critério, um id que o plano não define) ou `none`, e o manager a confere no diff e a cola. Nenhum script sabe se o código diverge do plano, por isso é linha de prompt e não checagem. Número: achados do `reviewer` de Errata faltando por rodada de correção (deve ser 0).
+
+Revistos e fora, do mesmo pedido: o limite do `dev` que investiga, o relatório conferido, o critério só no item de lista, a revisão de segurança sem remoto e a interface no primeiro ciclo já tinham saído na 1.19.0, e a exceção de auditoria já estava em Recusado; o pending do autônomo e o `measure --last` foram para Recusado no roadmap.
+
+O prompt cresceu uma linha no relatório do `dev`; a frase da divergência no `dev.md` e a da Errata no manager foram só reescritas.
+
+**Ao atualizar:** nada muda nos ledgers. Um `dev` despachado antes da atualização relata sem a linha `Errata:`; o manager confere a divergência no diff como antes.
 
 ## 1.20.0 — a branch da entrega apagada depois do merge e a lição automatizada fora do `lessons.md` (PR #71)
 

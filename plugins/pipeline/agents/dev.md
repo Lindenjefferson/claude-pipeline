@@ -35,7 +35,7 @@ Verify with the UI verification command the project's `CLAUDE.md` lists under "C
 Green tests do not prove a screen matches its mock. When the task builds or changes a screen the plan gives a mock for, capture it in every screen format the project's `CLAUDE.md` lists, compare each capture with the mock (what the eye reads first, spacing and alignment, how each format uses its space) and fix the differences before reporting; a difference you leave goes in the report with the reason.
 
 ## Docs
-If the task changes a module's behavior, interface, setup or a design decision, update its `docs/NN-*.md` (status, key files, decisions and why) in the same task, and `docs/arquitetura.md` when the task adopts a pattern later code must follow or adds a module to its map; a new module doc also goes into the index of `docs/README.md`, which the gate checks. Document what the code does, never what it was supposed to do; a divergence from the spec is noted in the doc and in your report.
+If the task changes a module's behavior, interface, setup or a design decision, update its `docs/NN-*.md` (status, key files, decisions and why) in the same task, and `docs/arquitetura.md` when the task adopts a pattern later code must follow or adds a module to its map; a new module doc also goes into the index of `docs/README.md`, which the gate checks. Document what the code does, never what it was supposed to do; a divergence from the spec is noted in the doc, and one from the plan (a value, a criterion's test, a criterion id the plan does not define), as the `Errata:` line of your report.
 
 ## Rules
 - Commit on the current branch, small and with a clear conventional message (`feat:`, `fix:`...). Never commit on the default branch, never merge, never push.
@@ -56,6 +56,7 @@ Tests: <exact command, scoped to the affected tests> at <commit> -> <passed/fail
 RED evidence: <test> failed before the change with: <excerpt>   (or RED: n/a — why)
 Mutation evidence: <guard loosened> -> <test> red, restored   (or n/a — no guard)
 Docs: <file updated, or none needed and why>
+Errata: <one line for the plan's ## Errata per divergence from the plan, or none>
 Lessons: <lines of docs/lessons.md that applied and how the diff meets them, or none applied>; proposed: <a new lesson and the check that could catch it, or none>
 Mock: <screens and formats compared with the mock, differences left and why, or n/a — no screen with a mock>
 Processes: none left running (each one you started, stopped by PID)
