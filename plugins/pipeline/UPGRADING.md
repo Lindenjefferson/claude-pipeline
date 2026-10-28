@@ -2,9 +2,15 @@
 
 O que cada versão entregou e o que muda para quem atualiza. O arquivo vai junto com cada versão instalada: a skill `atualizar` lê o **Ao atualizar** de cada versão pulada, da mais antiga para a mais nova. Termine a entrega em andamento, ou pause-a, antes de atualizar o plugin (a skill `atualizar` confere). As ideias que ainda não viraram versão estão no [roadmap](../../docs/roadmap.md).
 
-Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o número do PR. Só as versões que o `feedback-plugin` das próximas entregas ainda confere (hoje da 1.9.8 à 1.18.1) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta. O que é major, minor e patch está no [`CLAUDE.md`](../../CLAUDE.md).
+Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o número do PR. Só as versões que o `feedback-plugin` das próximas entregas ainda confere (hoje da 1.9.8 à 1.18.2) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta. O que é major, minor e patch está no [`CLAUDE.md`](../../CLAUDE.md).
 
 **A numeração voltou para 1.x** (decisão do usuário, com o plugin só em instalação local). A 2.12.0 passou a ser a **1.12.0**, e cada versão da linha 2.x segue a mesma conta (a 2.9.9 é a 1.9.9, e assim por diante). A linha 1.x original, de antes da 2.0.0, virou 0.x pela mesma conta (a 1.6.0 de então é a **0.6.0**), para nenhum número valer por duas versões. Nada muda no comportamento. Uma cópia 2.x se atualiza pelo caminho normal — `claude plugin marketplace update linden-plugins` e `claude plugin update pipeline@linden-plugins --scope <escopo>`, depois `/reload-plugins` — porque o instalador compara com o que o marketplace oferece, não a ordem dos números; a skill `atualizar` continua valendo. Conferido na prática, de 2.12.0 para 1.12.0.
+
+## 1.18.2 — as linhas de uma tarefa integrada por fast-forward antes do `add` (PR #68)
+
+- **Linhas da tarefa zeradas quando ela é integrada por fast-forward antes do `add`** (defeito; entrega `0.7.4-sessao-e-relogio` do `launcher-multimidia`, 1.17.1): o relatório de qualidade deu "Lines changed: T1 0", e o T1 mudou layout, teste e versão. O `task_diff` do `ledger.py` media a partir do `merge-base` do head da entrega e da ponta da worktree, e depois de um fast-forward os dois são o mesmo commit; o `references/parallel.md` manda integrar antes do `add`, então o caminho previsto quebrava a métrica. Agora, quando a ponta já está no head, a medida parte do `origin` do `claim`; com teste primeiro. Número: tarefas do `dev` com commits e `diff.files` 0 (deve ser 0).
+
+**Ao atualizar:** nada muda nos ledgers; as tarefas já registradas ficam com a medida que tinham.
 
 ## 1.18.1 — a Full suite só é dispensada quando o gate roda o comando da interface (PR #67)
 

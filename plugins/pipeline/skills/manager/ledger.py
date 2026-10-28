@@ -108,7 +108,8 @@ the valid windows' percent as usage.
 
 add --agent dev also stores diff {files, added, removed}, the size of the task's own commits (git diff --numstat; a
 binary file counts as one file and no line). A worktree run is measured from the merge-base of the delivery head and
-the worktree's tip (the claim's origin when that fails, as for a claim with no --origin), so a worktree rebased onto
+the worktree's tip (the claim's origin when that fails or is the tip itself, a task integrated by fast-forward before
+its add), so a worktree rebased onto
 later integrations counts only its own commits, to the tip, which the run stores as tip; the next dev run of the
 same task starts at that stored tip when it is an ancestor of the new one and later than the merge-base, so wip
 commits count once. A run with no worktree (or one that is gone) is measured from the head its live claim stored at
@@ -605,7 +606,10 @@ def task_diff(entries, task, head, ledger):
     held = claims(entries).get(task)
     if held and held.get("worktree") and os.path.isdir(held["worktree"]):
         tree, end = held["worktree"], tip(held)
-        start = (git_ok(tree, "merge-base", head, end) if head and end else None) or held.get("origin")
+        start = git_ok(tree, "merge-base", head, end) if head and end else None
+        # A tip already in the head (integrated by fast-forward before the add) is its own merge-base: no lines.
+        if not start or start == end:
+            start = held.get("origin") or start
         stored = [entry["tip"] for entry in entries if entry["type"] == "run" and entry.get("agent") == "dev"
                   and entry.get("task") == task and entry.get("tip")]
         if start and end and stored and git_ok(tree, "merge-base", "--is-ancestor", stored[-1], end) is not None \
