@@ -10,8 +10,7 @@ Nenhuma no momento.
 
 ## Backlog
 
-- **Branch da entrega apagada depois do merge** (melhoria; pedido do dono, já aprovado; o sinal veio): no `civic-home` a `feat/0.7-controles-topway` ficou viva, local e no GitHub, depois do merge da 0.7, como a da 0.5 antes. O passo 7 fecha pela `superpowers:finishing-a-development-branch`, que não a apaga. Proposta: uma linha no passo 7 apaga a branch local depois do merge e, junto do push que o usuário aprovar, a remota. Número: branches mergeadas que ficam (deve ser 0). Esforço: P.
-- **Lição automatizada que continua no `docs/lessons.md`** (melhoria; o sinal veio: o `lessons.md` do `homebudgy` tem 28 linhas): das 4 lições do ledger com `--check`, 1 continua no arquivo, que o `dev` e o `reviewer` leem a cada tarefa. Proposta: ao registrar `lesson --check`, a linha sai do `lessons.md` no mesmo commit (uma frase no passo 4.5, trocando outra). O crescimento vem das lições em texto; ler só as que batem com o `Touches:` da tarefa muda o fluxo e espera custar uma rodada. Número: lições com `--check` ainda no `lessons.md` (deve ser 0). Esforço: P.
+Nenhum no momento.
 
 ## Em espera (voltam com um sinal)
 
