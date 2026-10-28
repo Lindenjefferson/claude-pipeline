@@ -2,9 +2,20 @@
 
 O que cada versão entregou e o que muda para quem atualiza. O arquivo vai junto com cada versão instalada: a skill `atualizar` lê o **Ao atualizar** de cada versão pulada, da mais antiga para a mais nova. Termine a entrega em andamento, ou pause-a, antes de atualizar o plugin (a skill `atualizar` confere). As ideias que ainda não viraram versão estão no [roadmap](../../docs/roadmap.md).
 
-Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o número do PR. Só as versões que o `feedback-plugin` das próximas entregas ainda confere (hoje da 1.9.8 à 1.19.0) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta. O que é major, minor e patch está no [`CLAUDE.md`](../../CLAUDE.md).
+Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o número do PR. Só as versões que o `feedback-plugin` das próximas entregas ainda confere (hoje da 1.9.8 à 1.20.0) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta. O que é major, minor e patch está no [`CLAUDE.md`](../../CLAUDE.md).
 
 **A numeração voltou para 1.x** (decisão do usuário, com o plugin só em instalação local). A 2.12.0 passou a ser a **1.12.0**, e cada versão da linha 2.x segue a mesma conta (a 2.9.9 é a 1.9.9, e assim por diante). A linha 1.x original, de antes da 2.0.0, virou 0.x pela mesma conta (a 1.6.0 de então é a **0.6.0**), para nenhum número valer por duas versões. Nada muda no comportamento. Uma cópia 2.x se atualiza pelo caminho normal — `claude plugin marketplace update linden-plugins` e `claude plugin update pipeline@linden-plugins --scope <escopo>`, depois `/reload-plugins` — porque o instalador compara com o que o marketplace oferece, não a ordem dos números; a skill `atualizar` continua valendo. Conferido na prática, de 2.12.0 para 1.12.0.
+
+## 1.20.0 — a branch da entrega apagada depois do merge e a lição automatizada fora do `lessons.md` (PR #PR)
+
+Os dois itens em espera cujo sinal de volta veio, medidos nos projetos na revisão do roadmap.
+
+- **Branch da entrega apagada depois do merge** (melhoria; pedido do dono): no `civic-home` a `feat/0.7-controles-topway` ficou viva, local e no GitHub, depois do merge da 0.7, como a da 0.5 antes; a `superpowers:finishing-a-development-branch` não a apaga. O passo 7 do manager passa a apagá-la depois do merge, local e, com o push que o usuário aprovou, a remota, exceto quando uma entrega empilhada ainda a tem como base. Número: branches mergeadas que ficam (deve ser 0).
+- **Lição automatizada fora do `docs/lessons.md`** (melhoria; o `lessons.md` do `homebudgy` passou de 15 linhas, com 28): das 4 lições do ledger com `--check`, 1 continuava no arquivo, que o `dev` e o `reviewer` leem a cada tarefa. O passo 4.5 passa a tirar a linha no mesmo commit em que a lição vira checagem. Número: lições com `--check` ainda no `lessons.md` (deve ser 0).
+
+O prompt cresceu duas frases, as duas ações do manager no fechamento e nas lições, que nenhum script executa.
+
+**Ao atualizar:** nada muda nos ledgers. Uma branch de entrega já mergeada que ficou (como a `feat/0.7-controles-topway` do `civic-home`) pode ser apagada à mão; uma lição do ledger com `--check` que ainda está no `docs/lessons.md` sai na próxima vez que o arquivo for tocado.
 
 ## 1.19.0 — critérios conferidos por tarefa, relatório do `dev` conferido, interface no primeiro ciclo e varredura de segurança do `claude-security` (PR #70)
 
