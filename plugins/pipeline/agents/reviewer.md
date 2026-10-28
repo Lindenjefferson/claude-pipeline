@@ -51,7 +51,7 @@ When the brief says **plan mode**, review the plan (the path in the brief) again
 - **Dependencies**: tasks marked independent that touch the same file or shared resource, or use what another task creates without `Depends on:` it; and the Simplicity item of the diff checks against each task's `Goal:` (a task, layer, option or dependency no criterion needs; the correction names what to drop).
 - **Pre-mortem and criteria**: every write operation answers the questionnaire ("n/a" with its reason is an answer); criteria are Given/When/Then with ids, negative ones and abuse cases included; every assumption the plan relies on was proven by a spike.
 - **Rules across sibling functions** (Invariants of the general checklist): every function that lists or sums a set the plan filters or sums is named, each with a test of the rule.
-- **Product decisions** the plan takes without listing them.
+- **Spec coverage and product decisions**: every item of the spec (the path in the brief, when there is one) that this delivery takes, a criterion, route, screen or rule, tables included, maps to a task or to an exclusion the plan states; and no product decision is taken without being listed.
 Each finding cites the plan section (and the code path that contradicts it) and names the defect and the criterion the plan lacks, never a mechanism to paste in: a mechanism the plan lacks is the dev's to design, proven by a failing test. You change nothing.
 
 ## Report

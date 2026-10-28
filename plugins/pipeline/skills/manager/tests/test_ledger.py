@@ -609,7 +609,8 @@ for name, tasks in (("1", "T1.1, T1.2"), ("R", "TR.1"), ("2", "T2.1")):
     r = run("scope", "--cycle", name, "--tasks", tasks, ledger=SCOPE)
 check("scope records the tasks of one plan cycle", r.returncode == 0 and "2" in r.stdout, r.stderr)
 check("status --json gives the plan cycles in order, the tasks left, and where the delivery is",
-      status(SCOPE)["scope"] == {"cycles": [{"cycle": "1", "tasks": ["T1.1", "T1.2"], "left": ["T1.1", "T1.2"]},
+      {key: value for key, value in status(SCOPE)["scope"].items() if key not in ("tasks", "median_task_seconds")}
+      == {"cycles": [{"cycle": "1", "tasks": ["T1.1", "T1.2"], "left": ["T1.1", "T1.2"]},
                                             {"cycle": "R", "tasks": ["TR.1"], "left": ["TR.1"]},
                                             {"cycle": "2", "tasks": ["T2.1"], "left": ["T2.1"]}],
                                  "current": "1", "position": 1, "total": 3, "tasks_left": 4, "cycles_left": 3},
@@ -853,7 +854,7 @@ claim2 = status(PAUSE)["claims"][1]
 check("a claim with neither option is stored without them",
       r.returncode == 0 and claim2 == {"task": "P2", "at": claim2["at"], "worktree": None, "origin": None,
                                        "tip": None, "head_moved": False, "waiting_minutes": 0,
-                                       "committed": False}, status(PAUSE)["claims"])
+                                       "committed": False, "partial_report": False}, status(PAUSE)["claims"])
 run("release", "--task", "P2", ledger=PAUSE)
 subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "delivery moved"], cwd=repo, check=True,
                capture_output=True)
@@ -924,7 +925,7 @@ check("a claim written in the old shape still works: no worktree, no origin, hea
       state["in_flight"] == ["L1"] and len(state["claims"]) == 1
       and {key: value for key, value in state["claims"][0].items() if key != "waiting_minutes"}
       == {"task": "L1", "at": "2026-10-01T10:01:00+00:00", "worktree": None, "origin": None, "tip": None,
-          "head_moved": False, "committed": False}
+          "head_moved": False, "committed": False, "partial_report": True}
       and state["claims"][0]["waiting_minutes"] > 0
       and state["paused"] is None and state["full_qa"] is None, state)
 check("the old claim's text line has no place suffix, and says how long it has been waiting",
@@ -1832,6 +1833,136 @@ for name in os.listdir(QUALITY) if os.path.isdir(QUALITY) else []:
 r = run("start", "--slug", "d", "--archive", ledger=CARRY)
 check("with no quality report, start carries nothing", r.returncode == 0 and "carried" not in r.stdout
       and status(CARRY)["deferred"] == [], (r.stdout, status(CARRY)["deferred"]))
+
+# runs with no seconds, listed for measure --at
+UNM = ".superpowers/unmeasured-list.jsonl"
+run("start", "--slug", "unmeasured", ledger=UNM)
+add("dev", "DONE", "T1", ledger=UNM)
+add("dev", "DONE", "T2", ledger=UNM, seconds=60)
+add("reviewer", "PASS", ledger=UNM)
+r = run("status", ledger=UNM)
+listed = [line for line in r.stdout.splitlines() if line.startswith("unmeasured:")]
+first = status(UNM)["unmeasured"]
+check("status lists each run with no seconds, with the measure --at that fills it",
+      len(listed) == 2 and listed[0].startswith("unmeasured: dev T1 at ")
+      and f"measure --agent dev --task T1 --at {first[0]['at']}" in listed[0]
+      and listed[1].startswith("unmeasured: reviewer at ") and "--task" not in listed[1], r.stdout)
+check("status --json lists them too, oldest first, and a measured run is not there",
+      [(item["agent"], item["task"]) for item in first] == [("dev", "T1"), ("reviewer", "")], first)
+run("measure", "--agent", "dev", "--task", "T1", "--seconds", "5m", ledger=UNM)
+check("a run measured after its add leaves the list",
+      [item["agent"] for item in status(UNM)["unmeasured"]] == ["reviewer"], status(UNM)["unmeasured"])
+
+# a dev running past the limit is asked for a partial report
+LONG = ".superpowers/long.jsonl"
+run("start", "--slug", "long", ledger=LONG)
+old = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=95)).isoformat(timespec="seconds")
+with open(os.path.join(repo, LONG), "a", encoding="utf-8", newline="\n") as handle:
+    handle.write(json.dumps({"type": "claim", "task": "L1", "at": old}) + "\n")
+run("claim", "--task", "L2", ledger=LONG)
+r = run("status", ledger=LONG)
+state = status(LONG)
+check("a dev claim waiting 90 minutes or more asks for a partial report; a recent one does not",
+      "dev L1 dispatched" in r.stdout and "partial report" in r.stdout.split("dev L1 dispatched")[1].split("\n")[0]
+      and "partial report" not in r.stdout.split("dev L2 dispatched")[1].split("\n")[0]
+      and [claim["partial_report"] for claim in state["claims"]] == [True, False], (r.stdout, state["claims"]))
+
+# the first cycle closes only once qa ran the interface, when the project has a Verificação de interface line
+iface = tempfile.mkdtemp(prefix="ledger_iface_", dir=repo)
+for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t.com"), ("config", "user.name", "t"),
+             ("commit", "-q", "--allow-empty", "-m", "base")):
+    subprocess.run(["git", *args], cwd=iface, check=True, capture_output=True)
+IFACE = os.path.join(iface, ".superpowers", "ledger.jsonl")
+
+
+def iface_line(value):
+    with open(os.path.join(iface, "CLAUDE.md"), "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("# p\n\n## Comandos\n\n- Testes: `npm test`\n"
+                     f"- Verificação de interface (se houver tela): {value}\n\n## Outra\n")
+
+
+iface_line("_(comando)_")
+run("start", "--slug", "iface", ledger=IFACE, cwd=iface)
+add("dev", "DONE", "T1", ledger=IFACE)
+add("reviewer", "PASS", ledger=IFACE)
+add("qa", "PASS", ledger=IFACE)
+check("with the interface line still a placeholder, cycle 1 closes on a qa PASS",
+      status(IFACE)["ready_for_gate"] is True, status(IFACE)["pending"])
+iface_line("`npx maestro test e2e/`")
+state = status(IFACE)
+check("with an interface command, cycle 1 does not close until a qa ran it, and says the machine is a block",
+      state["ready_for_gate"] is False and any("interface" in item and "Preparar uma máquina" in item
+                                               for item in state["pending"])
+      and {"step": "qa", "interface": True} in state["steps"], state["pending"])
+add("dev", "DONE", "T2", ledger=IFACE)
+check("a dev task added before the interface ran stays in cycle 1", status(IFACE)["cycle"] == 1, status(IFACE)["cycle"])
+r = run("add", "--agent", "reviewer", "--verdict", "PASS", "--interface", ledger=IFACE)
+check("--interface is refused on the reviewer", r.returncode != 0 and "--interface" in r.stderr, r.stderr)
+add("reviewer", "PASS", ledger=IFACE)
+r = run("add", "--agent", "qa", "--verdict", "PASS", "--interface", ledger=IFACE)
+state = status(IFACE)
+check("a qa added with --interface closes cycle 1 and is stored on the run",
+      r.returncode == 0 and state["ready_for_gate"] is True and state["qa"][0].get("interface") is True,
+      (r.stderr, state["pending"]))
+add("dev", "DONE", "T3", ledger=IFACE)
+add("reviewer", "PASS", ledger=IFACE)
+add("qa", "PASS", ledger=IFACE)
+state = status(IFACE)
+check("a later cycle closes on a qa PASS with no interface run", state["cycle"] == 2 and state["ready_for_gate"] is True,
+      state["pending"])
+IFACE_FULL = os.path.join(iface, ".superpowers", "full.jsonl")
+run("start", "--slug", "iface-full", ledger=IFACE_FULL, cwd=iface)
+add("dev", "DONE", "T1", ledger=IFACE_FULL)
+add("reviewer", "PASS", ledger=IFACE_FULL)
+run("add", "--agent", "qa", "--verdict", "PASS", "--full", ledger=IFACE_FULL)
+check("a qa of the full suite counts as the interface run", status(IFACE_FULL)["ready_for_gate"] is True,
+      status(IFACE_FULL)["pending"])
+
+# each task of the plan with its Goal, Depends on and state, for the progress table
+PLANNED = ".superpowers/planned.jsonl"
+os.makedirs(os.path.join(repo, "docs", "plans"), exist_ok=True)
+with open(os.path.join(repo, "docs", "plans", "planned.md"), "w", encoding="utf-8", newline="\n") as handle:
+    handle.write("# Plano\n\n## Ciclo 1\n\n### T1 — Primeira\n- **Goal:** spec §1: a pessoa entra.\n"
+                 "- **Depends on:** none.\n- **AC-T1-1** given a.\n\n## T2: Segunda\n\n**Goal:** spec §2: vê o painel.\n\n"
+                 "**Depends on:** T1.\n\n### T3 — Terceira\nGoal: a terceira.\nDepends on: T1, T2 (a tela).\n\n"
+                 "## Errata\n")
+run("start", "--slug", "planned", ledger=PLANNED)
+run("plan", "--path", "docs/plans/planned.md", ledger=PLANNED)
+run("scope", "--cycle", "1", "--tasks", "T1,T2", ledger=PLANNED)
+run("scope", "--cycle", "2", "--tasks", "T3,T4", ledger=PLANNED)
+scope = status(PLANNED)["scope"]
+check("scope gives each task with the Goal and Depends on read from the plan, and its state",
+      scope["tasks"] == [
+          {"task": "T1", "cycle": "1", "goal": "spec §1: a pessoa entra.", "depends": "none.", "state": "todo"},
+          {"task": "T2", "cycle": "1", "goal": "spec §2: vê o painel.", "depends": "T1.", "state": "blocked"},
+          {"task": "T3", "cycle": "2", "goal": "a terceira.", "depends": "T1, T2 (a tela).", "state": "blocked"},
+          {"task": "T4", "cycle": "2", "goal": None, "depends": None, "state": "todo"}]
+      and scope["median_task_seconds"] is None, scope)
+add("dev", "DONE", "T1", ledger=PLANNED, seconds=600)
+run("claim", "--task", "T2", ledger=PLANNED)
+scope = status(PLANNED)["scope"]
+check("a done task, a running one with its minutes, and the median of the measured tasks",
+      [(item["task"], item["state"]) for item in scope["tasks"]]
+      == [("T1", "done"), ("T2", "running"), ("T3", "blocked"), ("T4", "todo")]
+      and scope["tasks"][1]["minutes"] == 0 and scope["median_task_seconds"] == 600, scope)
+
+# the security scan, one review loop counted apart
+SEC = ".superpowers/security.jsonl"
+run("start", "--slug", "security", ledger=SEC)
+add("dev", "DONE", "T1", ledger=SEC)
+add("reviewer", "PASS", ledger=SEC)
+add("qa", "PASS", ledger=SEC)
+SCAN = report_file("security-1.md")
+r = run("add", "--agent", "reviewer", "--task", "security", "--verdict", "FAIL", "--important", "1", "--origin",
+        "execution=1", "--report", SCAN, ledger=SEC)
+state = status(SEC)
+check("a security scan is a review loop: its FAIL asks for the next round on the corrections only",
+      r.returncode == 0 and state["ready_for_gate"] is False
+      and any(step.get("step") == "review" and step.get("task") == "security" for step in state["steps"])
+      and state["cycle"] == 1 and state["metrics"]["reviews"]["security"]["important"] == 1, (r.stderr, state["steps"]))
+r = run("waive", "--agent", "reviewer", "--task", "security", "--reason", "fixed in fix-1, reviewed", ledger=SEC)
+check("waive --task security closes the loop", r.returncode == 0 and status(SEC)["ready_for_gate"] is True,
+      (r.stderr, status(SEC)["pending"]))
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)

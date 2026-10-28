@@ -28,7 +28,7 @@ Cada componente tem **uma** fonte de verdade, o próprio arquivo. Os outros docu
 
 | O quê | Onde |
 |---|---|
-| Fluxo de entrega, passos, regras do manager | [`plugins/pipeline/skills/manager/SKILL.md`](plugins/pipeline/skills/manager/SKILL.md); o que vale só numa situação (modo autônomo, pausa e uso do plano, telas, execução em paralelo, várias sessões), em [`references/`](plugins/pipeline/skills/manager/references/), um arquivo por situação |
+| Fluxo de entrega, passos, regras do manager | [`plugins/pipeline/skills/manager/SKILL.md`](plugins/pipeline/skills/manager/SKILL.md); o que vale só numa situação (modo autônomo, pausa e uso do plano, telas, execução em paralelo, várias sessões, varredura de segurança), em [`references/`](plugins/pipeline/skills/manager/references/), um arquivo por situação |
 | Validar as decisões tomadas em nome do usuário; pedido de feedback ao plugin | [`skills/validar/SKILL.md`](plugins/pipeline/skills/validar/SKILL.md), [`skills/feedback-plugin/SKILL.md`](plugins/pipeline/skills/feedback-plugin/SKILL.md) |
 | Preparação de um projeto e de uma máquina nova, allowlist de comandos, template do `CLAUDE.md` dos projetos | [`plugins/pipeline/skills/kickoff/SKILL.md`](plugins/pipeline/skills/kickoff/SKILL.md) e [`templates/`](plugins/pipeline/skills/kickoff/templates/) |
 | Papel, escopo e relatório de cada agente | [`plugins/pipeline/agents/`](plugins/pipeline/agents/) (`dev`, `reviewer`, `qa`, `discovery`); o que `dev` e `qa` têm em comum (servidor de dev, processos), em [`checklists/agents-shared.md`](plugins/pipeline/checklists/agents-shared.md) |
