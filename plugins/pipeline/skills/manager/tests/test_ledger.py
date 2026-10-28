@@ -1541,6 +1541,17 @@ r = add("dev", "DONE", "N1", ledger=NOORIGIN)
 check("a worktree claim made without --origin is measured from the merge-base",
       r.returncode == 0 and diff_of(NOORIGIN, "N1") == {"files": 1, "added": 3, "removed": 0}, (r.stderr, diff_of(NOORIGIN, "N1")))
 
+FASTFWD = ".superpowers/fastfwd.jsonl"
+fastfwd_tree = os.path.join(worktrees, "fastfwd")
+run("start", "--slug", "fastfwd", ledger=FASTFWD)
+git(repo, "worktree", "add", "-q", "--detach", fastfwd_tree)
+run("claim", "--task", "F1", "--worktree", fastfwd_tree, "--origin", git(fastfwd_tree, "rev-parse", "HEAD"), ledger=FASTFWD)
+put(fastfwd_tree, "f1.txt", "1\n2\n3\n4\n5\n", "F1 commit")
+git(repo, "merge", "-q", "--ff-only", git(fastfwd_tree, "rev-parse", "HEAD"))
+r = add("dev", "DONE", "F1", ledger=FASTFWD)
+check("a worktree task integrated by fast-forward before its add is measured from the claim's origin",
+      r.returncode == 0 and diff_of(FASTFWD, "F1") == {"files": 1, "added": 5, "removed": 0}, (r.stderr, diff_of(FASTFWD, "F1")))
+
 WIP = ".superpowers/wip.jsonl"
 wip_tree = os.path.join(worktrees, "wip")
 run("start", "--slug", "wip", ledger=WIP)
