@@ -205,6 +205,33 @@ r = gate("--base", "main")
 check("a template whose prefix holds digits is no criterion either: no AC-05 is traced",
       "Criteria:   PASS" in r.stdout and "writes AC-05T with a placeholder" in r.stdout
       and "AC-05 " not in r.stdout.replace("AC-05T", ""), r.stdout)
+commit("plan.md", IDS + "The ids carry the prefix `AC-074T`; AC-T9-9 of the old plan is gone.\n"
+       "## Errata\n- 10:00 AC-U1-2 renamed to AC-T1-2.\n", "docs: the plan cites ids in prose and in the errata")
+r = gate("--base", "main")
+check("an id that opens no list item is cited, not defined: a warning naming each, not a criterion with no test",
+      "Criteria:   PASS" in r.stdout and "cited, never defined: AC-074T, AC-T9-9, AC-U1-2" in r.stdout, r.stdout)
+commit("plan.md", "# plan\n- **AC-T1-1** Given a.\n* `AC-T1-2` Given x.\n1. **`AC-T1.3`** Given y.\n- AC-T7-1 Given z.\n"
+       "## Errata\n", "docs: ids defined in bold, code and numbered items")
+r = gate("--base", "main")
+trace = r.stdout.split("Criteria:")[1].split("\n    ")[1] if "Criteria:" in r.stdout else ""
+check("an id opening a list item after ** or a backtick is defined: the one with no test is named",
+      "Criteria:   FAIL" in r.stdout and trace.split("\n")[0].strip() == "criteria with no test: AC-T7-1", r.stdout)
+r = gate("--criteria", "T1")
+check("--criteria <task> traces only that task's criteria, runs nothing else and exits 0 when each has a test",
+      r.returncode == 0 and "Criteria T1: PASS" in r.stdout and "running" not in r.stdout
+      and "Overall" not in r.stdout, r.stdout + r.stderr)
+r = gate("--criteria", "T7")
+check("--criteria <task> exits 1 naming the task's criterion with no test",
+      r.returncode == 1 and "Criteria T7: FAIL" in r.stdout and "AC-T7-1" in r.stdout, r.stdout + r.stderr)
+commit("plan.md", "# plan\n- AC-074T1-1 Given a.\n- AC-074T11-1 Given b.\n- AC-PL-T1-2 Given c.\n## Errata\n",
+       "docs: prefixed ids")
+r = gate("--criteria", "T1")
+check("a task's criteria are the ids with a segment that is the task id, or ends with it after a digit",
+      r.returncode == 1 and "AC-074T1-1" in r.stdout and "AC-PL-T1-2" in r.stdout and "AC-074T11-1" not in r.stdout,
+      r.stdout + r.stderr)
+r = gate("--criteria", "T5")
+check("--criteria for a task the plan defines no criterion of says so and exits 0",
+      r.returncode == 0 and "no criterion of T5" in r.stdout, r.stdout + r.stderr)
 commit("plan.md", IDS + "## Errata\n", "docs: plan without the template")
 
 write("tests/d.test.txt", "test('AC-T1-4 given d')\n")
