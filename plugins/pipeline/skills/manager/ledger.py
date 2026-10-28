@@ -5,9 +5,9 @@
   add     --agent dev --task <id> --verdict <v> [--simpler] [--seconds <duration>] [--tokens N]
   add     --agent reviewer|qa --verdict PASS|FAIL [--critical N --important N --minor N --origin <origin>=N,...]
           [--report <path>] [--seconds <duration>] [--tokens N]
-  add     --agent reviewer --task spec|plan --verdict PASS|FAIL ... [--triage applied=N,refused=N,errata=N]
-                                                              one round of the spec or plan review loop
-  add     --agent qa ... --full                               the qa ran the project's full test command
+  add     --agent reviewer --task spec|plan|security --verdict PASS|FAIL ... [--triage applied=N,refused=N,errata=N]
+                                                              one round of the spec, plan or security review loop
+  add     --agent qa ... --full | --interface                 the qa ran the full test command, or the interface
   claim   --task <id> [--worktree <path>] [--origin <rev>]    a dev run dispatched; refused if the task is in flight or done
   release --task <id>                                         frees a claim whose run was lost
   pause   --text <text>                                       the delivery stops; the text says what comes on return
@@ -37,7 +37,10 @@ pause is refused when it is already paused or a claimed worktree has uncommitted
 "wip: <task> ..."), and until resume status asks for it, so the gate waits; the claims stay held, as each task
 continues from its wip commit. Every pause also shows in notes as "paused: <text>", in ledger order, after resume too.
 add --full on a qa run marks a run of the full suite (every test line of Comandos and the entire interface suite);
-status --json gives the latest as full_qa.
+status --json gives the latest as full_qa. add --interface on a qa run marks one that ran the "Verificação de interface"
+command on at least one path. When the CLAUDE.md at the ledger's root gives that line a command (not a _(...)_
+placeholder), the first cycle closes only once one of its qa runs has --interface or --full: a machine that cannot run
+it is a block to make ready, not a VALIDAR. Later cycles do not need it.
 
 A cycle is a few dev tasks followed by one reviewer pass over their diff and one qa pass; the two run in parallel.
 It closes when the latest reviewer PASS came after the latest dev run, qa PASSed after the cycle's latest regular
@@ -52,9 +55,12 @@ span counting from its timestamp in the cycle's elapsed, which is null when that
 of a run whose completion notification arrived after its add, as its own line naming that run: with one run of that
 agent and task still unmeasured it takes them by itself, and with more than one it refuses and lists their at, which
 --at then names (a waived run takes none, and a run already measured is refused) - guessing would move the numbers of
-every later notification by one run, for the whole delivery. No dispatch ever waits for a notification. status gives each claim in flight its waiting_minutes and, for a claim with no worktree whose delivery
-head moved since, committed: the dev commits straight on the branch, so its work may be in and its report waiting to
-be added. A deferred item with no decision keeps the delivery from the gate. Everything that waits for the user carries --recommend, what the manager would decide and why, so every list of what waits (status, the pane, validar) recommends without being asked: defer requires it, note takes it with --validar and refuses it without. An entry of an earlier version, with no recommendation, reads as before. start --archive moves an existing delivery to
+every later notification by one run, for the whole delivery. No dispatch ever waits for a notification. status lists
+each run still with no seconds (unmeasured: agent, task, at, oldest first, a waived run left out) with the measure --at
+that fills it, so a notification that arrived after a compaction is never lost. status gives each claim in flight its
+waiting_minutes, partial_report (true from 90 minutes on: its line asks for a partial report by SendMessage) and, for a
+claim with no worktree whose delivery head moved since, committed: the dev commits straight on the branch, so its work
+may be in and its report waiting to be added. A deferred item with no decision keeps the delivery from the gate. Everything that waits for the user carries --recommend, what the manager would decide and why, so every list of what waits (status, the pane, validar) recommends without being asked: defer requires it, note takes it with --validar and refuses it without. An entry of an earlier version, with no recommendation, reads as before. start --archive moves an existing delivery to
 ledger-<old-slug>.jsonl next to the ledger first. start also carries each item the latest quality report (the docs/quality-reports/*.md git added last at the ledger's project root, else the last by name) moved to a later delivery, a line of its Deferred section whose decision, after the first arrow, starts with "moved to" in any case, as a deferred item of the new delivery, recommending that decision, so it needs a decision before the gate and is never forgotten. --check exits 1 while anything is pending, so the gate can rely on
 it. A cycle whose reviewer or qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on
 up to three, then the delivery stops. extend, once status asks the user or stops, records the user's decision to go
@@ -69,7 +75,9 @@ return; validate records the decision, and status lists the items still waiting 
 ledger with no mode entry is supervised.
 
 A reviewer run with --task spec or plan is one round of that review loop, before the code: it is no part of any
-cycle, and its findings, time and tokens are counted apart in the metrics. While the latest round is a FAIL, status
+cycle, and its findings, time and tokens are counted apart in the metrics. --task security is the security scan of a
+sensitive delivery, a loop of the same kind run after the last cycle (its open findings, after the 3rd FAIL, are
+deferred with a decision instead of carried to the plan). While the latest round is a FAIL, status
 asks for the next round, on the range from the head the failed round recorded (the corrections only), and every
 later round of the loop needs --triage: what became of each finding of the previous round (applied, refused or carried
 to the errata), counting every one of them once; the metrics sum the refused ones. A loop is the rounds since that
@@ -88,7 +96,11 @@ re-run, a review round with its from and report, a review loop to waive, a defer
 the plan cycles recorded with scope, in the order first recorded (a later scope for a cycle replaces its tasks in place, an empty one removes
 it), each with the tasks that have no DONE run yet; the current cycle (the one holding the task in flight once the
 open cycle has closed, else the latest task); and how many tasks and cycles are left (a cycle whose tasks are done
-counts until it closes). With no scope recorded, scope is null.
+counts until it closes). scope.tasks gives each task of the scope, in order, with its cycle, goal and depends (the
+Goal: and Depends on: lines of its section in the plan, the heading that names the task down to the next heading of
+its level or above; null when the plan or the line is missing) and its state: done, running (with minutes), blocked
+(a task of the scope its depends names is not done) or todo; scope.median_task_seconds is the median time of the
+regular dev tasks done and measured, null before the first. With no scope recorded, scope is null.
 
 status also reads usage.json from the ledger's folder (the subscription windows the mod writes: five_hour and
 seven_day, each {percent, resets_at}; a window past its resets_at, a missing or broken file and unknown fields are
@@ -144,6 +156,7 @@ import json
 import os
 import re
 import shutil
+import statistics
 import subprocess
 import sys
 import time
@@ -160,7 +173,11 @@ SEVERITIES = ("critical", "important", "minor")
 FIX_ROUNDS = {False: 1, True: 3}
 REVIEW_ROUNDS = 3
 TRIAGE = ("applied", "refused", "errata")
-REVIEWS = ("spec", "plan")
+REVIEWS = ("spec", "plan", "security")
+PARTIAL_REPORT_MINUTES = 90
+INTERFACE_LINE = re.compile(r"^- Verifica[çc][ãa]o de interface[^:\n]*:[ \t]*(.*)$", re.MULTILINE | re.IGNORECASE)
+# Set by main from the project's CLAUDE.md: the first cycle closes only once a qa ran the interface.
+NEEDS_INTERFACE = False
 QUALITY_REPORTS = "docs/quality-reports"
 MOVED = re.compile(r"- D\d+ (.*?) -> (moved to .*)", re.IGNORECASE)
 DONE = ("DONE", "DONE_WITH_CONCERNS")
@@ -274,6 +291,25 @@ def report_of(entry):
     return {"report": entry["report"]} if entry.get("report") else {}
 
 
+def interface_line(ledger):
+    """True when the project's CLAUDE.md, at the ledger's root, gives a Verificação de interface command."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(ledger))), "CLAUDE.md")
+    try:
+        text = open(path, encoding="utf-8").read()
+    except OSError:
+        return False
+    section = re.split(r"^## ", text, flags=re.MULTILINE)
+    comandos = next((part for part in section if part.lower().startswith("comandos")), "")
+    match = INTERFACE_LINE.search(comandos)
+    value = match.group(1).strip() if match else ""
+    return bool(value) and not value.startswith("_(")
+
+
+def first(groups):
+    """The interface a cycle needs: only the first one, and only when the project has the line."""
+    return NEEDS_INTERFACE and len(groups) == 1
+
+
 def cycles(entries):
     groups, current, closed = [], [], False
     for entry in runs(entries):
@@ -281,7 +317,7 @@ def cycles(entries):
             groups.append(current)
             current, closed = [], False
         current.append(entry)
-        closed = cycle_state(current)[1] == []
+        closed = cycle_state(current, interface=NEEDS_INTERFACE and not groups)[1] == []
     groups.append(current)
     return groups
 
@@ -295,7 +331,7 @@ def extension(entries, group, task=None):
     return sum(1 for entry in group if position[id(entry)] < marks[-1])
 
 
-def cycle_state(cycle, autonomous=False, extended=None):
+def cycle_state(cycle, autonomous=False, extended=None, interface=False):
     tasks, reviews, checks = {}, [], []
     work = last_dev = last_review = last_qa = needs_qa = -1
     for index, entry in enumerate(cycle):
@@ -338,6 +374,10 @@ def cycle_state(cycle, autonomous=False, extended=None):
              "fix", agent="qa", open=checks[-1]["open"], **report_of(checks[-1]))
     elif last_qa < needs_qa:
         need("qa has not re-run the scenarios the fix touched", "qa", rerun=True)
+    elif interface and not any(entry.get("interface") or entry.get("full") for entry in checks):
+        need("cycle 1 closes only once a qa ran the interface (Verificação de interface) on at least one path: open, "
+             "sign in, a screen with data; add it with --interface. A machine that cannot run it is a block, never a "
+             "VALIDAR: make it ready (Preparar uma máquina) first", "qa", interface=True)
     rounds = FIX_ROUNDS[autonomous] if extended is None else 0
     for agent, done in (("reviewer", reviews), ("qa", checks)):
         failed = sum(1 for index, entry in enumerate(cycle) if index >= (extended or 0) and entry["agent"] == agent
@@ -376,14 +416,17 @@ def review_state(entries, autonomous=False):
         after = "the extra round" if extended is not None else f"{rounds} rounds"
         if rounds < (REVIEW_ROUNDS if extended is None else extended + 1):
             head = last.get("head")
-            text = (f"{task} review round {rounds} FAIL ({last['open']} open{where(last)}): triage every finding "
-                    f"(applied, refused or errata), commit the {task} and dispatch the reviewer on "
+            text = (f"{task} review round {rounds} FAIL ({last['open']} open{where(last)}): "
+                    + ("send each finding to the dev as a fix-N or defer it, then scan " if task == "security" else
+                       f"triage every finding (applied, refused or errata), commit the {task} and dispatch the "
+                       "reviewer on ")
                     + (f"{head[:12]}..HEAD, the corrections only" if head else "the corrections only"))
             steps.append({"step": "review", "task": task, "round": rounds + 1, "open": last["open"],
                           **({"from": head} if head else {}), **report_of(last)})
         elif last.get("critical") == 0:
-            text = (f"{task} review still fails after {after} with no Critical: carry each open finding to the "
-                    + ("plan's Errata" if task == "plan" else "plan's brief")
+            text = (f"{task} review still fails after {after} with no Critical: "
+                    + ("defer each open finding with a decision" if task == "security" else
+                       "carry each open finding to the " + ("plan's Errata" if task == "plan" else "plan's brief"))
                     + f" and waive --task {task}; extend only on the user's word")
             steps.append({"step": "waive", "task": task, "rounds": rounds, "open": last["open"], **report_of(last),
                           **mark})
@@ -633,7 +676,8 @@ def add(args):
     if args.agent == "dev" and not args.task:
         sys.exit("dev runs need --task")
     if args.agent != "dev" and args.task and not (args.agent == "reviewer" and args.task in REVIEWS):
-        sys.exit("--task on a reviewer run is spec or plan (one round of that review loop); qa runs take none")
+        sys.exit("--task on a reviewer run is spec, plan or security (one round of that review loop); qa runs take "
+                 "none")
     if args.agent == "dev" and args.report:
         sys.exit("--report keeps the file of a reviewer or qa report; the dev's report is checked before integrating")
     if args.report and not saved_report(args.report, args.ledger):
@@ -641,6 +685,8 @@ def add(args):
                  "and add the run naming the file you saved")
     if args.full and args.agent != "qa":
         sys.exit("--full marks a qa run of the project's full test command")
+    if args.interface and args.agent != "qa":
+        sys.exit("--interface marks a qa run that ran the interface (Verificação de interface)")
     if args.simpler and not (args.agent == "dev" and args.verdict == "NEEDS_CONTEXT"):
         sys.exit("--simpler marks a dev NEEDS_CONTEXT run that proposes a simpler way (a simpler: proposal)")
     loop = review_loop(entries, args.task) if args.agent == "reviewer" and args.task in REVIEWS else []
@@ -653,8 +699,9 @@ def add(args):
     if args.agent in ("reviewer", "qa") and (args.verdict == "FAIL") != (blocking > 0):
         sys.exit("FAIL needs open Critical/Important findings (--critical or --important > 0) and PASS none")
     if args.agent == "dev" and not FOLLOW_UP.fullmatch(args.task):
-        cycle = cycles(entries)[-1]
-        later = later_cycle(entries, cycle, args.task) if cycle_state(cycle)[1] else None
+        groups = cycles(entries)
+        cycle = groups[-1]
+        later = later_cycle(entries, cycle, args.task) if cycle_state(cycle, interface=first(groups))[1] else None
         if later:
             sys.exit(f"{args.task} is a task of plan cycle {later}: integrate and add it once this cycle closes "
                      "(status says what the cycle still needs), so the next cycle's range starts where this one ends")
@@ -668,6 +715,8 @@ def add(args):
         entry["triage"] = tally("--triage", TRIAGE, args.triage, sum(loop[-1].get(key) or 0 for key in SEVERITIES))
     if args.full:
         entry["full"] = True
+    if args.interface:
+        entry["interface"] = True
     if args.seconds is not None:
         entry["seconds"] = seconds(args.seconds)
     if args.tokens is not None:
@@ -747,7 +796,7 @@ def claim(args):
         sys.exit(f"{args.task} is already claimed ({held[args.task]}): its dev run is in flight; "
                  f"if that run was lost, release --task {args.task}")
     groups = cycles(entries)
-    done = cycle_state(groups[-1])[0]["tasks"].get(args.task)
+    done = cycle_state(groups[-1], interface=first(groups))[0]["tasks"].get(args.task)
     if done and done["verdict"] in DONE:
         sys.exit(f"{args.task} is already done in cycle {len(groups)}: use a new task id (fix-N for a fix round)")
     where = {}
@@ -853,7 +902,7 @@ def measure(args):
     if args.agent == "dev" and not args.task:
         sys.exit("dev runs need --task")
     if args.agent != "dev" and args.task and not (args.agent == "reviewer" and args.task in REVIEWS):
-        sys.exit("--task on a reviewer run is spec or plan (one round of that review loop); qa runs take none")
+        sys.exit("--task on a reviewer run is spec, plan or security (one round of that review loop); qa runs take none")
     numbers = {}
     if args.seconds is not None:
         numbers["seconds"] = seconds(args.seconds)
@@ -915,7 +964,7 @@ def waive(args):
         sys.exit("no delivery started: run start first")
     if args.task:
         if args.agent != "reviewer":
-            sys.exit("--task names a spec or plan review loop, which only the reviewer runs")
+            sys.exit("--task names a spec, plan or security review loop, which only the reviewer runs")
         done = reviews(entries, args.task)
         if not done or done[-1]["verdict"] != "FAIL":
             sys.exit(f"the latest {args.task} review is not a FAIL: nothing to waive")
@@ -946,8 +995,9 @@ def extend(args):
             sys.exit(f"the {args.task} review has not run out of rounds: nothing to extend")
         text = f"extra {args.task} review round: {args.reason}"
     else:
-        cycle = cycles(entries)[-1]
-        state = cycle_state(cycle, autonomous(entries), extension(entries, cycle))[0]
+        groups = cycles(entries)
+        cycle = groups[-1]
+        state = cycle_state(cycle, autonomous(entries), extension(entries, cycle), first(groups))[0]
         if not any(step["step"] in ("stop", "ask") for step in state["steps"]):
             sys.exit("the cycle has not run out of fix rounds: nothing to extend")
         text = f"extra fix round: {args.reason}"
@@ -991,7 +1041,64 @@ def later_cycle(entries, cycle, task):
     return names[target] if current and target is not None and target > current[-1] else None
 
 
-def progress(entries, closed, held):
+def plan_text(entries, ledger):
+    plans = [entry["plan"] for entry in entries if entry["type"] == "plan"] or [entries[0].get("plan")]
+    root = os.path.dirname(os.path.dirname(os.path.abspath(ledger)))
+    for path in ([plans[-1], os.path.join(root, plans[-1])] if plans[-1] else []):
+        try:
+            return open(path, encoding="utf-8").read()
+        except OSError:
+            continue
+    return ""
+
+
+def plan_field(text, task, name):
+    """The task's Goal: or Depends on: line, from its heading to the next heading of the same level or above."""
+    heading = re.search(r"^(#+)[ \t]+[*_`]*" + re.escape(task) + r"(?![\w-]|\.\w)[^\n]*$", text, re.MULTILINE)
+    if not heading:
+        return None
+    level = len(heading.group(1))
+    rest = text[heading.end():]
+    end = re.search(r"^#{1,%d}[ \t]" % level, rest, re.MULTILINE)
+    section = rest[:end.start()] if end else rest
+    field = re.search(r"^[ \t]*(?:[-*+][ \t]+)?[*_]*" + name + r":[*_]*[ \t]*(.+)$", section, re.MULTILINE)
+    return field.group(1).strip() if field else None
+
+
+def plan_tasks(entries, plan, held, ledger):
+    """Each task of the scope with its Goal:, Depends on: and state, for the progress table the manager shows."""
+    text = plan_text(entries, ledger)
+    done = {entry["task"] for entry in runs(entries) if entry["agent"] == "dev" and entry["verdict"] in DONE}
+    known = {task for tasks in plan.values() for task in tasks}
+    found = claims(entries)
+    rows = []
+    for cycle, tasks in plan.items():
+        for task in tasks:
+            depends = plan_field(text, task, "Depends on") if text else None
+            row = {"task": task, "cycle": cycle, "goal": plan_field(text, task, "Goal") if text else None,
+                   "depends": depends}
+            needs = {word.rstrip(".") for word in re.split(r"[^\w.]+", depends or "")} & known
+            if task in done:
+                row["state"] = "done"
+            elif task in held:
+                row["state"], row["minutes"] = "running", waiting(found[task])
+            else:
+                row["state"] = "blocked" if needs - done else "todo"
+            rows.append(row)
+    return rows
+
+
+def median_task_seconds(entries):
+    spent = {}
+    for entry in runs(entries):
+        if entry["agent"] == "dev" and not is_task(entry, FOLLOW_UP) and entry.get("seconds") is not None:
+            spent[entry["task"]] = spent.get(entry["task"], 0) + entry["seconds"]
+    done = {entry["task"] for entry in runs(entries) if entry["agent"] == "dev" and entry["verdict"] in DONE}
+    measured = [seconds for task, seconds in spent.items() if task in done]
+    return statistics.median(measured) if measured else None
+
+
+def progress(entries, closed, held, ledger):
     plan = plan_cycles(entries)
     if not plan:
         return None
@@ -1005,7 +1112,8 @@ def progress(entries, closed, held):
               for cycle, tasks in plan.items()]
     return {"cycles": cycles, "current": current, "position": names.index(current) + 1, "total": len(names),
             "tasks_left": sum(len(item["left"]) for item in cycles),
-            "cycles_left": sum(1 for item in cycles if item["left"] or (item["cycle"] == current and not closed))}
+            "cycles_left": sum(1 for item in cycles if item["left"] or (item["cycle"] == current and not closed)),
+            "tasks": plan_tasks(entries, plan, held, ledger), "median_task_seconds": median_task_seconds(entries)}
 
 
 def autonomous(entries):
@@ -1153,7 +1261,7 @@ def status(args):
         sys.exit("no delivery started")
     groups = cycles(entries)
     auto = autonomous(entries)
-    state, pending = cycle_state(groups[-1], auto, extension(entries, groups[-1]))
+    state, pending = cycle_state(groups[-1], auto, extension(entries, groups[-1]), first(groups))
     closed = not pending
     items = deferred(entries)
     held = in_flight(entries)
@@ -1169,6 +1277,9 @@ def status(args):
         since = (f"; the delivery head is now {head[:12]}" if moved(claim, head) else
                  "; the branch head moved since: its work may already be committed, so check its report, add it and "
                  "go on" if committed(claim, head) else "")
+        if wait is not None and wait >= PARTIAL_REPORT_MINUTES:
+            since += (f"; past {PARTIAL_REPORT_MINUTES} minutes: ask it for a partial report (SendMessage): causes "
+                      "found, commits, open hypothesis, and decide with the user whether it goes on")
         pending.append(f"dev {task} dispatched at {at}, for plan cycle {later}: integrate and add it "
                        f"once this cycle closes, or release --task {task}{since}" if later else
                        f"dev {task} dispatched at {at}, no report yet (add it as soon as it reports, or "
@@ -1191,12 +1302,16 @@ def status(args):
               "cycle": len(groups), "from": cycle_from(entries, groups), "in_flight": list(held), "dispatched": held,
               "claims": [{"task": task, "at": claim["at"], "worktree": claim.get("worktree"),
                           "origin": claim.get("origin"), "tip": tip(claim), "head_moved": moved(claim, head),
-                          "waiting_minutes": waiting(claim), "committed": committed(claim, head)}
+                          "waiting_minutes": waiting(claim), "committed": committed(claim, head),
+                          "partial_report": (waiting(claim) or 0) >= PARTIAL_REPORT_MINUTES}
                          for task, claim in claims(entries).items()],
               "paused": pause_state, "full_qa": full[-1] if full else None,
               "tasks": {task: entry["verdict"] for task, entry in state["tasks"].items()},
               "reviewer": state["reviewer"], "qa": state["qa"], "runs": groups[-1], "pending": pending,
-              "steps": steps, "scope": progress(entries, closed, held),
+              "steps": steps, "scope": progress(entries, closed, held, args.ledger),
+              "unmeasured": [{"agent": entry["agent"], "task": entry.get("task") or "", "at": entry["at"]}
+                             for entry in entries if entry["type"] == "run" and entry.get("seconds") is None
+                             and entry.get("waived") is None],
               "autonomous": auto, "deferred": items,
               "notes": [entry["text"] if entry["type"] == "note" else f"paused: {entry['text']}" for entry in entries
                         if entry["type"] == "pause" or (entry["type"] == "note" and not entry.get("validar"))],
@@ -1234,6 +1349,10 @@ def status(args):
                      else "the window resets"))
         for item in pending:
             print(f"pending: {item}")
+        for item in report["unmeasured"]:
+            task = f" {item['task']}" if item["task"] else ""
+            print(f"unmeasured: {item['agent']}{task} at {item['at']}: with its notification, measure --agent "
+                  f"{item['agent']}{' --task' + task if task else ''} --at {item['at']} --seconds <duration>")
         for text in report["notes"]:
             print(f"note: {text}")
         for item in report["validar"]:
@@ -1451,6 +1570,7 @@ def main():
     command.add_argument("--seconds", help="how long the run took, from its completion notification: 90, 12m, 1h5m or 12m30s")
     command.add_argument("--tokens", type=count, help="the tokens the run used, from its completion notification")
     command.add_argument("--full", action="store_true", help="the qa ran the project's full test command")
+    command.add_argument("--interface", action="store_true", help="the qa ran the interface (Verificação de interface)")
     command.add_argument("--simpler", action="store_true", help="the dev's NEEDS_CONTEXT is a simpler: proposal")
     command.add_argument("--triage", help="applied=N,refused=N,errata=N: the previous round's findings of a spec or plan review")
     command.set_defaults(run=add)
@@ -1485,7 +1605,7 @@ def main():
     command.set_defaults(run=validate)
     command = commands.add_parser("waive")
     command.add_argument("--agent", required=True, choices=("reviewer", "qa"))
-    command.add_argument("--task", default="", choices=("",) + REVIEWS, help="the spec or plan review loop to close")
+    command.add_argument("--task", default="", choices=("",) + REVIEWS, help="the spec, plan or security review loop to close")
     command.add_argument("--reason", required=True)
     command.set_defaults(run=waive)
     command = commands.add_parser("extend")
@@ -1523,6 +1643,8 @@ def main():
     command.set_defaults(run=status)
     args = parser.parse_args()
     args.ledger = args.ledger or default_ledger(args.command)
+    global NEEDS_INTERFACE
+    NEEDS_INTERFACE = interface_line(args.ledger)
     args.run(args)
 
 

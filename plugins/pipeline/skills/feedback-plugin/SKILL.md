@@ -1,6 +1,6 @@
 ---
 name: feedback-plugin
-description: Use at the end of a delivery, or when the user asks for feedback on the pipeline plugin, to write the request for the plugin's own session from what the delivery showed (metrics, frictions with the plugin, lessons that could become general rules), each item with its evidence. Writes .superpowers/pedido-plugin.md and sends nothing. Triggers on "feedback do plugin", "pedido para o plugin", "feedback-plugin".
+description: Use at the end of a delivery, or when the user asks for feedback on the pipeline plugin, to write the request for the plugin's own session from what the delivery showed (metrics, frictions with the plugin, lessons that could become general rules), each item with its evidence. Writes .superpowers/pedido-plugin.md and sends it only when the user asks. Triggers on "feedback do plugin", "pedido para o plugin", "feedback-plugin".
 ---
 
 # Plugin feedback
@@ -19,4 +19,4 @@ The plugin takes delivery feedback only as general rules that hold in any stack.
    - **Items**, numbered: the problem, its evidence and the general rule proposed.
    - **Left out**: what was left out and why, one line each.
    The file leaves the project: evidence is ledger text, paths relative to the project and measured numbers, never product content, real data or credentials.
-4. Tell the user the path, and that they bring it to the plugin's session. Never send it, and never open or change the plugin's repository.
+4. Tell the user the path, and that they bring it to the plugin's session. Never send it on your own: only when the user asks, to the session they name (`SendMessage`, the file's path and a one-line summary). Never open or change the plugin's repository.
