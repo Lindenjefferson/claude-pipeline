@@ -15,6 +15,10 @@
                         scanned too. File names come from -z listings, so a non-ASCII name is seen.
   --fingerprint         prints the fingerprints of the flagged lines read from stdin (a diff, or a
                         file with --path <path>).
+  --range <a>..<b>      scans every commit of the range the same way (each commit's diff, merges on each side, so
+                        a line a later commit removed still counts: the history carries it), against the allowlist
+                        at HEAD; exits 1 on a finding and 2 when git cannot read the range. The gate and the CI use
+                        it for the whole branch, where a commit made with the hook skipped would pass.
 
 The hook stores no path: it finds this scanner through CLAUDE_PIPELINE_HOME or `git config pipeline.home` (the
 plugin root, which the install writes into the repository's config and the plugin's session-start hook keeps on the
@@ -424,6 +428,26 @@ def owned(path):
         return HOOK_MARKER in handle.read()
 
 
+def range_findings(rev_range, cwd):
+    diff = git_checked(["log", "-p", "--diff-merges=separate", "--no-ext-diff", "--no-textconv", "--text",
+                        "--format=", rev_range, "--"] + EXCLUDES, cwd)
+    listing = git_checked(["log", "--name-only", "-z", "--diff-merges=separate", "--diff-filter=d", "--format=",
+                           rev_range], cwd)
+    return scan(diff, names(listing), load_allowlist(cwd, "HEAD"))
+
+
+def scan_range(rev_range):
+    try:
+        findings = range_findings(rev_range, os.getcwd())
+    except HookError as error:
+        sys.stderr.write(f"{error}: {rev_range} is no range git can read here\n")
+        sys.exit(2)
+    for finding in findings:
+        print(finding)
+    print(f"{len(findings)} finding(s) in {rev_range}" if findings else f"no secret in {rev_range}")
+    sys.exit(1 if findings else 0)
+
+
 def install():
     code, hooks_dir = git(["rev-parse", "--git-path", "hooks"], None)
     if code != 0:
@@ -464,8 +488,10 @@ def run():
         install()
     if "--fingerprint" in sys.argv:
         print_fingerprints()
+    if "--range" in sys.argv[:-1]:
+        scan_range(sys.argv[sys.argv.index("--range") + 1])
     sys.stderr.write("usage: pre-commit-secret-scan.py --install-pre-commit | --pre-commit | --fingerprint "
-                     "[--path <file>]\n")
+                     "[--path <file>] | --range <a>..<b>\n")
     sys.exit(2)
 
 

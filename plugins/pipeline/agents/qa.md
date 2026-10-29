@@ -27,6 +27,7 @@ You never fix anything: a bug is a finding for the `dev`.
 Classify each finding's origin — `design`, `assumption`, `plan`, `execution` or `environment`, never another word — as defined in the reviewer's report section (`${CLAUDE_PLUGIN_ROOT}/agents/reviewer.md`).
 ```
 Verdict: PASS | FAIL          (FAIL when a Critical or Important finding is open)
+Commit: <git rev-parse --short HEAD of the tree you tested>
 Commands run: <command> -> <counts>
 Interface: <the Verificação de interface command and the path it ran (open, sign in, a screen with data), at the commit the server served | not run: why | n/a>
 Acceptance criteria: <id: met / not met, the test that proves it, how you checked>

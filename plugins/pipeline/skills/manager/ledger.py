@@ -49,7 +49,10 @@ A fix round (task fix-N) and the cleanup task (task cleanup) stay in the current
 a reviewer pass, and qa again only when a FAIL came before them. Every finding carries its origin (design,
 assumption, plan, execution, environment); --report keeps the path of the file the manager saved the agent's report
 in, so a FAIL still open names it, and is refused when no file is there (the agents have no Write: the manager saves
-the report, then adds the run naming it), read from the current directory or from the ledger's project root; --seconds takes 90, 12m, 1h5m or 12m30s, and --seconds and --tokens are optional, from the
+the report, then adds the run naming it), read from the current directory or from the ledger's project root; a qa --report must hold the Verdict:, Commit:,
+Interface: and Processes: lines of qa.md's report (Verdict the one given, Commit a commit here), and the run
+stores that commit as tested, and stale when it is not the latest dev run's head or later: a qa dispatched before a
+fix counts only for what came before it, so its FAIL still asks for the fix and the re-run is still asked for; --seconds takes 90, 12m, 1h5m or 12m30s, and --seconds and --tokens are optional, from the
 agent's completion notification when it already arrived, never an estimate (a run without them goes unmeasured, its
 span counting from its timestamp in the cycle's elapsed, which is null when that span comes to zero, and 0 is refused). measure fills the numbers
 of a run whose completion notification arrived after its add, as its own line naming that run: with one run of that
@@ -133,7 +136,9 @@ simpler: true. status --json gives metrics.lines: tasks {task: added+removed ove
 (fix-N and cleanup), share (follow_up/total, 2 decimals, null at 0) and unmeasured (dev runs with no diff, as every
 run of an older ledger); and metrics.verdicts: {needs_context, simpler, blocked} over the dev runs (simpler
 proposals are not counted in needs_context; 0 for an older ledger). It is advice, never pending: pending, steps and
-ready_for_gate do not change.
+ready_for_gate do not change. metrics.time.delivery is the delivery's clock: {elapsed, from start to the latest
+measured run with the pauses left out; paused; agents, the union of the measured runs, the time some agent was
+running; share, agents over elapsed}, null before the first measured run.
 
 capacity answers, before a dispatch that prepares or verifies, how many parallel copies fit: the free memory (Windows
 GlobalMemoryStatusEx, Linux MemAvailable; PIPELINE_CAPACITY_MEMORY_GB and PIPELINE_CAPACITY_DISK_GB override the
@@ -186,6 +191,8 @@ FOLLOW_UP = re.compile(r"fix-\d+|cleanup", re.IGNORECASE)
 DURATION = re.compile(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?|(\d+)")
 LEDGER = os.path.join(".superpowers", "ledger.jsonl")
 EARLIEST = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+# The lines of qa.md's report that the ledger reads; a report that lacks one was not pasted as qa wrote it.
+QA_LINES = ("Verdict", "Commit", "Interface", "Processes")
 
 
 def git_head(rev="HEAD", ledger=None, tree=None):
@@ -333,7 +340,7 @@ def extension(entries, group, task=None):
 
 def cycle_state(cycle, autonomous=False, extended=None, interface=False):
     tasks, reviews, checks = {}, [], []
-    work = last_dev = last_review = last_qa = needs_qa = -1
+    work = last_dev = last_review = last_qa = seen_qa = needs_qa = -1
     for index, entry in enumerate(cycle):
         if entry["agent"] == "dev":
             tasks[entry["task"]] = entry
@@ -347,7 +354,9 @@ def cycle_state(cycle, autonomous=False, extended=None, interface=False):
             last_review = index
         elif entry["agent"] == "qa":
             checks.append(entry)
-            last_qa = index
+            seen_qa = index
+            # A qa that tested a commit before the latest dev run (dispatched before the fix) covers what came before it.
+            last_qa = last_dev - 0.5 if entry.get("stale") else index
     pending, steps = [], []
     state = {"tasks": tasks, "reviewer": reviews[-1:], "qa": checks[-1:], "steps": steps}
 
@@ -369,7 +378,7 @@ def cycle_state(cycle, autonomous=False, extended=None, interface=False):
              "fix", agent="reviewer", open=reviews[-1]["open"], **report_of(reviews[-1]))
     if not checks or last_qa < work:
         need("qa has not run on the cycle's tasks", "qa")
-    elif checks[-1]["verdict"] == "FAIL" and last_qa > last_dev:
+    elif checks[-1]["verdict"] == "FAIL" and seen_qa > last_dev:
         need(f"qa FAIL ({checks[-1]['open']} open{where(checks[-1])}): dev fixes every finding in one batch",
              "fix", agent="qa", open=checks[-1]["open"], **report_of(checks[-1]))
     elif last_qa < needs_qa:
@@ -711,6 +720,8 @@ def add(args):
              "head": git_head(ledger=args.ledger) or ""}
     if args.report:
         entry["report"] = args.report
+    if args.report and args.agent == "qa":
+        entry.update(qa_report(args, entries))
     if loop:
         entry["triage"] = tally("--triage", TRIAGE, args.triage, sum(loop[-1].get(key) or 0 for key in SEVERITIES))
     if args.full:
@@ -741,6 +752,33 @@ def add(args):
     label = f"{args.agent}{' ' + args.task if args.task else ''}: {args.verdict}"
     print(f"{label} (round {len(review_loop(read(args.ledger), args.task))})" if is_review(entry)
           else f"{label} (cycle {len(cycles(read(args.ledger)))})")
+
+
+def qa_report(args, entries):
+    """The tested commit of a saved qa report, refused when a line of qa.md's report is missing or disagrees; stale
+    when it is not the latest dev run's head or later (qa was dispatched before that run, as before a fix)."""
+    path = args.report if os.path.isfile(args.report) else os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(args.ledger))), args.report)
+    text = open(path, encoding="utf-8", errors="replace").read()
+    found = {key: value.strip() for key, value in re.findall(
+        r"(?im)^[ \t>*_-]*(" + "|".join(QA_LINES) + r")[*_]*:[*_]*[ \t]*(.*)$", text)}
+    found = {key.capitalize(): value for key, value in found.items()}
+    missing = [key + ":" for key in QA_LINES if key not in found]
+    if missing:
+        sys.exit(f"{args.report} lacks {', '.join(missing)} of qa.md's report: save the report as qa wrote it, or send "
+                 "qa back for the lines it left out")
+    said = found["Verdict"].split()[0].strip("*_`") if found["Verdict"] else ""
+    if said.upper() != args.verdict:
+        sys.exit(f"{args.report} says Verdict: {said or '(nothing)'}, not {args.verdict}")
+    commit = found["Commit"].split()[0].strip("`") if found["Commit"] else ""
+    tested = git_head(commit, args.ledger) if commit else None
+    if not tested:
+        sys.exit(f"{args.report} gives Commit: {commit or '(nothing)'}, which is no commit here")
+    devs = [entry for entry in runs(entries) if entry["agent"] == "dev" and entry.get("head")]
+    where = os.path.dirname(os.path.dirname(os.path.abspath(args.ledger)))
+    stale = bool(devs) and subprocess.run(["git", "merge-base", "--is-ancestor", devs[-1]["head"], tested],
+                                          capture_output=True, cwd=where).returncode == 1
+    return {"tested": tested, **({"stale": True} if stale else {})}
 
 
 def claims(entries):
@@ -1211,9 +1249,42 @@ def metrics(entries):
     measured = [entry for entry in runs(entries) + reviews(entries) if entry.get("waived") is None]
     lessons = [{"text": entry["text"], "check": entry.get("check", "")} for entry in entries
                if entry["type"] == "lesson"]
-    return {"cycles": per_cycle, "reviews": loops, "origins": found, "time": totals(measured, "seconds"),
+    return {"cycles": per_cycle, "reviews": loops, "origins": found,
+            "time": {**totals(measured, "seconds"), "delivery": delivery_clock(entries, measured)},
             "tokens": totals(measured, "tokens"), "lines": line_totals(entries), "verdicts": verdict_counts(entries),
             "lessons": lessons}
+
+
+def delivery_clock(entries, measured):
+    """The delivery's wall clock, from start to its latest run with the pauses left out, against the time at least one
+    agent was running (the union of the measured runs); null before the first measured run."""
+    def at(entry):
+        return datetime.datetime.fromisoformat(entry["at"])
+
+    spans = sorted((at(entry) - datetime.timedelta(seconds=entry["seconds"]), at(entry)) for entry in measured
+                   if entry.get("seconds") and entry.get("at"))
+    if not spans or not entries[0].get("at"):
+        return None
+    begin, end = min(at(entries[0]), spans[0][0]), max(stop for _, stop in spans)
+    paused, since = 0, None
+    for entry in entries:
+        if entry["type"] == "pause" and since is None:
+            since = at(entry)
+        elif entry["type"] == "resume" and since is not None:
+            paused += max((min(at(entry), end) - since).total_seconds(), 0)
+            since = None
+    paused += max((end - since).total_seconds(), 0) if since else 0
+    agents, open_start, open_end = 0, None, None
+    for start, stop in spans:
+        if open_end is None or start > open_end:
+            agents += (open_end - open_start).total_seconds() if open_end else 0
+            open_start, open_end = start, stop
+        else:
+            open_end = max(open_end, stop)
+    agents += (open_end - open_start).total_seconds()
+    clock = int((end - begin).total_seconds() - paused)
+    return {"elapsed": clock, "paused": int(paused), "agents": int(agents),
+            "share": round(agents / clock, 2) if clock > 0 else None}
 
 
 def verdict_counts(entries):
