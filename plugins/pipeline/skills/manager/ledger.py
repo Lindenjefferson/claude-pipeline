@@ -65,7 +65,7 @@ that fills it, so a notification that arrived after a compaction is never lost. 
 waiting_minutes, partial_report (true from 90 minutes on: its line asks for a partial report by SendMessage) and, for a
 claim with no worktree whose delivery head moved since, committed: the dev commits straight on the branch, so its work
 may be in and its report waiting to be added. A deferred item with no decision keeps the delivery from the gate. Everything that waits for the user carries --recommend, what the manager would decide and why, so every list of what waits (status, the pane, validar) recommends without being asked: defer requires it, note takes it with --validar and refuses it without. An entry of an earlier version, with no recommendation, reads as before. start --archive moves an existing delivery to
-ledger-<old-slug>.jsonl next to the ledger first. start also carries each item the latest quality report (the docs/quality-reports/*.md git added last at the ledger's project root, else the last by name) moved to a later delivery, a line of its Deferred section whose decision, after the first arrow, starts with "moved to" in any case, as a deferred item of the new delivery, recommending that decision, so it needs a decision before the gate and is never forgotten. An item whose decision names another delivery (a slug right after "moved to", then a colon or the end) is passed on instead: deferred and resolved with that same decision, so the next report carries it on and only the delivery it names decides it. Its text keeps only the last "(moved here by ...)". --check exits 1 while anything is pending, so the gate can rely on
+ledger-<old-slug>.jsonl next to the ledger first. start also carries each item the latest quality report (the docs/quality-reports/*.md git added last at the ledger's project root, else the last by name) moved to a later delivery, a line of its Deferred section whose decision, after the first arrow, starts with "moved to" in any case, as a deferred item of the new delivery, recommending that decision, so it needs a decision before the gate and is never forgotten. An item whose decision names another delivery (a slug right after "moved to", then a colon) is passed on instead: deferred and resolved with that same decision, so the next report carries it on and only the delivery it names decides it. Its text keeps only the last "(moved here by ...)". --check exits 1 while anything is pending, so the gate can rely on
 it. A cycle whose reviewer or qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on
 up to three, then the delivery stops. extend, once status asks the user or stops, records the user's decision to go
 on (a note, VALIDAR in autonomous mode): the current cycle gets one more fix round, and a reviewer or qa FAIL after
@@ -88,8 +88,15 @@ review's latest PASS (a waiver included), so a document reviewed again after a c
 the 3rd FAIL with no Critical open, in either mode, status says waive (carry the open findings to the plan's Errata, or
 to the plan's brief for a spec, and waive --task) without asking the user; with a Critical open it asks the user, or
 stops the delivery in autonomous mode. waive --task closes the loop. sensitive --reason marks a delivery of a
-sensitive domain: until a security round is added (or waived), status asks for the scan (step security, with the
-reason), so the gate waits for it.
+sensitive domain: once the cycle is closed and until a security round is added (or waived), status asks for the scan
+(step security, with the reason), so the gate waits for it.
+
+status --json gives settings: {unfilled, together}. unfilled lists, in file order, each "- " line still holding a
+template placeholder _(...)_ in the sections that change speed or cost: Execução em paralelo of CLAUDE.md, and
+Execução em paralelo and Uso da conta of CLAUDE.local.md, at the ledger's root ({file, section, line}, line being the
+text before its colon); a missing CLAUDE.local.md is one {file, section: null, line: null}, a missing CLAUDE.md
+nothing. together, while the parallel section of CLAUDE.md is unfilled, is how many tasks of the current plan cycle
+are running or ready (no dependency left), when two or more; else null. It is advice, never pending.
 
 status --json also gives the pending items as data and where the delivery is in its plan. claims: one {task, at,
 worktree, origin, tip, head_moved} per task in flight; paused: {text, at} or null; full_qa: the latest qa run added with
@@ -194,7 +201,7 @@ INTERFACE_LINE = re.compile(r"^- Verifica[çc][ãa]o de interface[^:\n]*:[ \t]*(
 NEEDS_INTERFACE = False
 QUALITY_REPORTS = "docs/quality-reports"
 MOVED = re.compile(r"- D\d+ (.*?) -> (moved to .*)", re.IGNORECASE)
-MOVED_TO = re.compile(r"moved to ([a-z0-9][\w.-]*)(?::|$)", re.IGNORECASE)
+MOVED_TO = re.compile(r"moved to ([a-z0-9][\w.-]*):", re.IGNORECASE)
 MOVED_HERE = re.compile(r"(?:\s*\(moved here by [^)]*\))+$")
 DONE = ("DONE", "DONE_WITH_CONCERNS")
 FIX_TASK = re.compile(r"fix-\d+", re.IGNORECASE)
@@ -488,22 +495,24 @@ def start(args):
     write(args.ledger, {"type": "start", "slug": args.slug, "base": base, "plan": args.plan})
     print(f"started {args.slug} at {base[:12]}")
     report, moved = carried(args.ledger)
-    passed = 0
+    passed = []
     for number, (text, decision) in enumerate(moved, 1):
-        text = f"{MOVED_HERE.sub('', text)} (moved here by {report})"
+        bare = MOVED_HERE.sub("", text)
+        text = f"{bare} (moved here by {report})"
         target = MOVED_TO.match(decision)
         if target and target.group(1).lower() != args.slug.lower():
             write(args.ledger, {"type": "defer", "id": f"D{number}", "text": text, "recommend": decision})
             write(args.ledger, {"type": "resolve", "id": f"D{number}", "decision": decision})
-            passed += 1
+            passed.append(f"- D{number} -> {target.group(1)}: {bare}")
         else:
             write(args.ledger, {"type": "defer", "id": f"D{number}", "text": text,
                                 "recommend": f"decide whether this delivery takes it: {decision}"})
-    if len(moved) > passed:
-        print(f"carried {len(moved) - passed} items moved to a later delivery from {report}: each needs a decision "
+    if len(moved) > len(passed):
+        print(f"carried {len(moved) - len(passed)} items moved to a later delivery from {report}: each needs a decision "
               "before the gate (resolve --id)")
     if passed:
-        print(f"passed on {passed} item{'' if passed == 1 else 's'} moved to another delivery, resolved as moved")
+        print(f"passed on {len(passed)} item{'' if len(passed) == 1 else 's'} moved to another delivery, resolved as "
+              "moved:\n" + "\n".join(passed))
 
 
 def carried(ledger):
@@ -1451,7 +1460,7 @@ def status(args):
     steps += [step for _, step in kept] + [{"step": "decide", "id": item["id"], "text": item["text"],
                                             **advice_of(item)} for item in items if not item["decision"]]
     marks = [entry["reason"] for entry in entries if entry["type"] == "sensitive"]
-    if marks and not reviews(entries, "security"):
+    if marks and closed and not reviews(entries, "security"):
         pending.append(f"security scan has not run, and the delivery touches a sensitive domain ({marks[-1]}): run "
                        "it once the last cycle closes (references/security.md)")
         steps.append({"step": "security", "reason": marks[-1]})
@@ -1484,6 +1493,7 @@ def status(args):
                         if entry["type"] == "pause" or (entry["type"] == "note" and not entry.get("validar"))],
               "validar": validar(entries),
               "metrics": metrics(entries), "usage": usage, "night": night(entries), "ready_for_gate": not pending}
+    report["settings"] = settings(args.ledger, report["scope"])
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:
@@ -1516,6 +1526,15 @@ def status(args):
                      else "the window resets"))
         if report["night"]:
             print(night_line(report["night"], pause_state))
+        unfilled = report["settings"]["unfilled"]
+        if unfilled:
+            print("settings: unfilled, " + "; ".join(
+                f"{item['file']} is missing" if item["line"] is None else f"{item['file']} {item['section']}: {item['line']}"
+                for item in unfilled) + ": ask the user now, with a recommendation, and write the answer in the line "
+                "(autonomous mode: PushNotification and go on)")
+        if report["settings"]["together"]:
+            print(f"settings: {report['settings']['together']} tasks could run together, but Execução em paralelo of "
+                  "CLAUDE.md is unfilled: they run one at a time")
         for item in pending:
             print(f"pending: {item}")
         for item in report["unmeasured"]:
@@ -1538,6 +1557,38 @@ def status(args):
 NUMBER = r"\d+(?:[.,]\d+)?"
 HEAVY_WORDS = {"uma": 1, "um": 1, "one": 1, "duas": 2, "dois": 2, "two": 2, "tres": 3, "three": 3, "quatro": 4,
                "four": 4}
+
+
+SETTINGS = {"CLAUDE.md": ("execucao em paralelo",), "CLAUDE.local.md": ("execucao em paralelo", "uso da conta")}
+
+
+def settings(ledger, scope):
+    """The lines of the sections that change speed or cost still holding a placeholder, and the tasks that could run
+    together while the parallel section of CLAUDE.md is unfilled."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(ledger)))
+    unfilled = []
+    for name, sections in SETTINGS.items():
+        try:
+            with open(os.path.join(root, name), encoding="utf-8") as handle:
+                rows = handle.read().splitlines()
+        except (OSError, ValueError):
+            if name == "CLAUDE.local.md" and os.path.isfile(os.path.join(root, "CLAUDE.md")):
+                unfilled.append({"file": name, "section": None, "line": None})
+            continue
+        section = None
+        for row in rows:
+            if row.startswith("#"):
+                title = row.lstrip("# ").strip()
+                section = title if plain_text(title) in sections else None
+            elif section and row.lstrip().startswith("- ") and "_(" in row:
+                label = row.strip().lstrip("-* ").partition(":")[0].strip()
+                unfilled.append({"file": name, "section": section, "line": label})
+    together = None
+    if scope and any(item["file"] == "CLAUDE.md" for item in unfilled):
+        ready = [task for task in scope["tasks"] if task["cycle"] == scope["current"]
+                 and task["state"] in ("todo", "running")]
+        together = len(ready) if len(ready) > 1 else None
+    return {"unfilled": unfilled, "together": together}
 
 
 def plain_text(text):

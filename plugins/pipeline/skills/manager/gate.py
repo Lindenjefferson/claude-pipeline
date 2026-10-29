@@ -9,8 +9,8 @@ anywhere else is cited, a warning ("cited, never defined") and never traced, and
 item is read as before, every id a criterion. A task's criteria, for --criteria, are those with a segment that is the
 task id or ends with it right after a digit (AC-T3-2, AC-PL-T3-2 and AC-074T3-2 are T3's; AC-T31-2 is not).
 
-Checks, in order: nothing is pending in the ledger (the current cycle is closed and every deferred item has a final
-decision); the tree is clean; the documentation the kickoff prepared stays whole (with a docs/README.md: docs/arquitetura.md, the patterns every task follows, exists and, once a module doc docs/modulos/NN-*.md is tracked, holds no _(...)_ placeholder; the index names every tracked module doc; every entry of docs/ is in the map (README.md, arquitetura.md, operacao.md
+Checks, in order: nothing is pending in the ledger (the current cycle is closed, every deferred item has a final
+decision and a delivery marked sensitive had its security scan); the tree is clean; the documentation the kickoff prepared stays whole (with a docs/README.md: docs/arquitetura.md, the patterns every task follows, exists and, once a module doc docs/modulos/NN-*.md is tracked, holds no _(...)_ placeholder; the index names every tracked module doc; every entry of docs/ is in the map (README.md, arquitetura.md, operacao.md
 or operacao/, lessons.md, modulos/ with module docs only, discovery/, specs/, plans/, mockups/, quality-reports/, or a
 folder or file the index names); and no relative link of README.md, docs/README.md or docs/arquitetura.md points to a missing file); the files of the
 "Versão" line of "Comandos" (space-separated) hold one version x.y.z (after a version, versionName or __version__ key,

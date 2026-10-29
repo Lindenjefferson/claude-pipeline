@@ -144,6 +144,7 @@ function said(step) {
     case 'waive': return `dispensar a ${agent} (${plural(step.open, 'achado aberto vai', 'achados abertos vão')} para a Errata)`
     case 'decide': return `decidir ${step.id}: ${step.text}`
     case 'resume': return `retomar a entrega (pausada: ${step.text})`
+    case 'security': return `varredura de segurança (${step.reason})`
     default: return step.step
   }
 }
