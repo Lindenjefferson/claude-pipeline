@@ -139,5 +139,23 @@ check("a secret on a line that starts with ++ is blocked", r.returncode != 0 and
 sh(repo, "git", "reset", "-q")
 os.remove(os.path.join(repo, "plus.txt"))
 
+# --range scans every commit of a range, as the gate and the CI read a branch: a commit made with the hook skipped
+start = sh(repo, "git", "rev-parse", "HEAD").stdout.strip()
+write(repo, "skipped.txt", SECRET_LINE)
+sh(repo, "git", "add", "skipped.txt")
+sh(repo, "git", "commit", "-q", "--no-verify", "-m", "the hook skipped")
+r = sh(repo, sys.executable, HOOK, "--range", f"{start}..HEAD", check=False)
+check("--range finds a secret a commit in the range added past the hook",
+      r.returncode == 1 and "skipped.txt" in r.stdout + r.stderr, r.stdout + r.stderr)
+sh(repo, "git", "rm", "-q", "skipped.txt")
+sh(repo, "git", "commit", "-q", "--no-verify", "-m", "removed again")
+r = sh(repo, sys.executable, HOOK, "--range", f"{start}..HEAD", check=False)
+check("--range still flags it after a later commit removed it: the history would carry it",
+      r.returncode == 1 and "skipped.txt" in r.stdout + r.stderr, r.stdout + r.stderr)
+r = sh(repo, sys.executable, HOOK, "--range", "HEAD..HEAD", check=False)
+check("--range of a clean range passes", r.returncode == 0, r.stdout + r.stderr)
+r = sh(repo, sys.executable, HOOK, "--range", "nope..HEAD", check=False)
+check("--range of a range git cannot read is an error, never a pass", r.returncode == 2, r.stdout + r.stderr)
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)
