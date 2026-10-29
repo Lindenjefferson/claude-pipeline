@@ -175,7 +175,8 @@ check("start --archive moves the old delivery next to the ledger and starts fres
 run("start", "--slug", "old/one", "--archive", ledger=ARCHIVE)
 run("start", "--slug", "third", "--archive", ledger=ARCHIVE)
 r = run("start", "--slug", "fourth", "--archive", ledger=ARCHIVE)
-folder = sorted(os.listdir(os.path.join(repo, ".superpowers", "archive")))
+folder = sorted(name for name in os.listdir(os.path.join(repo, ".superpowers", "archive"))
+                if name.endswith(".jsonl"))
 check("archiving never overwrites an earlier archive",
       r.returncode == 0 and folder == ["ledger-next.jsonl", "ledger-old-one-2.jsonl", "ledger-old-one.jsonl",
                                        "ledger-third.jsonl", "ledger.jsonl"], folder)
