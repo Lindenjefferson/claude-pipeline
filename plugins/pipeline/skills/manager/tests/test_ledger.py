@@ -2161,5 +2161,52 @@ check("a missing CLAUDE.local.md is listed once, as missing",
       {"file": "CLAUDE.local.md", "section": None, "line": None} in status(CFG)["settings"]["unfilled"],
       status(CFG)["settings"])
 
+# Copies left after their task was integrated: worktrees, folders and branches status asks to tear down.
+left_root = tempfile.mkdtemp(prefix="ledger_left_")
+atexit.register(shutil.rmtree, left_root, True)
+proj = os.path.join(left_root, "proj")
+copies = os.path.join(left_root, "_temp", "proj-worktrees")
+os.makedirs(proj)
+os.makedirs(copies)
+for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t.com"), ("config", "user.name", "t"),
+             ("commit", "-q", "--allow-empty", "-m", "base"), ("switch", "-q", "-c", "feat/x")):
+    git(proj, *args)
+git(proj, "branch", "old-merged")
+run("start", "--slug", "left", cwd=proj)
+done_tree, open_tree, held_tree = (os.path.join(copies, name) for name in ("done", "open", "held"))
+inner_tree = os.path.join(proj, ".claude", "worktrees", "agent-1")
+git(proj, "worktree", "add", "-q", "-b", "task-done", done_tree)
+git(done_tree, "commit", "-q", "--allow-empty", "-m", "done task")
+git(proj, "merge", "-q", "--ff-only", "task-done")
+git(proj, "worktree", "add", "-q", "-b", "task-open", open_tree)
+git(open_tree, "commit", "-q", "--allow-empty", "-m", "open task")
+git(proj, "worktree", "add", "-q", "--detach", held_tree)
+git(proj, "worktree", "add", "-q", "--detach", inner_tree)
+run("claim", "--task", "H1", "--worktree", held_tree, "--origin", "HEAD", cwd=proj)
+os.makedirs(os.path.join(copies, "half", "node_modules"))
+r = run("status", "--json", cwd=proj)
+left = json.loads(r.stdout).get("leftovers") if r.returncode == 0 else None
+norm = lambda path: os.path.normcase(os.path.abspath(path))
+found = {(item["kind"], norm(item["path"]) if item.get("path") else item.get("branch")) for item in left or []}
+check("status lists an integrated worktree of the copies folder, one in .claude/worktrees, a copy folder with no .git "
+      "and the integrated branch, and nothing else",
+      found == {("worktree", norm(done_tree)), ("worktree", norm(inner_tree)), ("folder", norm(os.path.join(copies, "half"))),
+                ("branch", "task-done")}, left)
+check("a claimed worktree, a task not integrated, the delivery branch and a branch older than the base are no leftover",
+      not any(item.get("branch") in ("task-open", "feat/x", "main", "old-merged") or
+              norm(item.get("path") or "") in (norm(open_tree), norm(held_tree)) for item in left or []), left)
+state = json.loads(r.stdout) if r.returncode == 0 else {"pending": [], "steps": []}
+check("each leftover is pending, with the action, so the gate is not ready",
+      any("leftover" in item and "done" in item and "remove" in item for item in state["pending"])
+      and any(item["step"] == "leftover" for item in state["steps"]) and not state.get("ready_for_gate", True),
+      state["pending"])
+check("status --check exits 1 while a copy is left", run("status", "--check", cwd=proj).returncode == 1)
+git(proj, "worktree", "remove", "--force", done_tree)
+git(proj, "worktree", "remove", "--force", inner_tree)
+git(proj, "branch", "-D", "task-done")
+shutil.rmtree(os.path.join(copies, "half"))
+check("once the copies are torn down and the branch deleted, nothing is left over",
+      json.loads(run("status", "--json", cwd=proj).stdout).get("leftovers") == [])
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)
