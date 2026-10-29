@@ -2208,5 +2208,55 @@ shutil.rmtree(os.path.join(copies, "half"))
 check("once the copies are torn down and the branch deleted, nothing is left over",
       json.loads(run("status", "--json", cwd=proj).stdout).get("leftovers") == [])
 
+# The free disk against the delivery's highest reading and the declared floor: advice in status, never pending.
+disk_root = tempfile.mkdtemp(prefix="ledger_disk_")
+atexit.register(shutil.rmtree, disk_root, True)
+os.makedirs(os.path.join(disk_root, ".superpowers"))
+DISK = os.path.join(disk_root, ".superpowers", "ledger.jsonl")
+with open(DISK, "w", encoding="utf-8") as handle:
+    handle.write(json.dumps({"type": "start", "slug": "disk", "base": "abc"}) + "\n")
+with open(os.path.join(disk_root, "CLAUDE.local.md"), "w", encoding="utf-8") as handle:
+    handle.write("# p\n\n## Execução em paralelo\n\n- Quanto uma cópia ocupa no pico: memória `4` GB, disco `5` GB\n"
+                 "- Disco livre mínimo: `20`\n")
+
+
+def disk_at(free):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PIPELINE_CAPACITY")}
+    env["PIPELINE_CAPACITY_DISK_GB"] = free
+    result = subprocess.run([sys.executable, LEDGER, "--ledger", DISK, "status", "--json"], capture_output=True,
+                            text=True, encoding="utf-8", env=env, cwd=disk_root)
+    text = subprocess.run([sys.executable, LEDGER, "--ledger", DISK, "status"], capture_output=True, text=True,
+                          encoding="utf-8", env=env, cwd=disk_root).stdout
+    return (json.loads(result.stdout) if result.returncode == 0 else {}), text
+
+
+def disk_of(state):
+    return state.get("disk") or {}
+
+
+state, _ = disk_at("100")
+check("status gives the free disk and the delivery's highest reading, with no warning at the first one",
+      disk_of(state).get("free_gb") == 100 and disk_of(state).get("high_gb") == 100
+      and disk_of(state).get("warning") is None, state.get("disk"))
+state, text = disk_at("97")
+check("a drop within one copy's disk peak is no warning", disk_of(state).get("warning") is None, disk_of(state))
+state, text = disk_at("90")
+check("a drop since the highest reading larger than the copies in flight (at least one) times the disk peak warns, "
+      "pointing at what verification writes outside the worktree",
+      disk_of(state).get("dropped_gb") == 10 and "outside the worktree" in (disk_of(state).get("warning") or "")
+      and "disk:" in text, (disk_of(state), text))
+check("the disk warning is advice, never pending", not any("disk" in item for item in state.get("pending", [])), state.get("pending", []))
+state, _ = disk_at("15")
+check("below the declared disk floor, status warns naming it", "floor 20" in (disk_of(state).get("warning") or ""),
+      disk_of(state))
+with open(DISK, "w", encoding="utf-8") as handle:
+    handle.write(json.dumps({"type": "start", "slug": "next", "base": "abc"}) + "\n")
+state, _ = disk_at("50")
+check("a new delivery starts its own highest reading", disk_of(state).get("high_gb") == 50, disk_of(state))
+os.remove(os.path.join(disk_root, "CLAUDE.local.md"))
+state, _ = disk_at("30")
+check("with no disk peak nor floor declared, the reading is kept and nothing warns",
+      disk_of(state).get("warning") is None and disk_of(state).get("high_gb") == 50, disk_of(state))
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)
