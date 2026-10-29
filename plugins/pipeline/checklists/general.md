@@ -28,7 +28,7 @@ The items are in this index and in three slices, each read when the product has 
 ## Audit and errors
 - **Sensitive writes leave a trail** — a disputed change to money, roles, permissions, memberships or invites cannot be explained without one. Verify: each such write records who, when, before and after, in a queryable store (not a console log), ordered by the event's own timestamp rather than the transaction's, and append-only for every role, administrative ones included.
 - **No swallowed errors on write paths** — a silent failure looks like success to the user. Verify: every `catch` on a write logs with context or returns the error to the caller.
-- **A failure the user can report leaves a record the operator finds** — without it a reported bug starts with a round of instrumenting. Verify: each error on a user-facing action logs what failed and on which record, never a secret, where `docs/operacao.md` says to read; a backup counts only once a restore of it is proven.
+- **A failure the user can report leaves a record the operator finds** — without it a reported bug starts with a round of instrumenting. Verify: each error on a user-facing action logs what failed and on which record, never a secret, where `docs/operacao.md` says to read, and a failure nobody reports (the product down, errors piling up) is noticed by a check from outside the host that tells someone; a backup counts only once a restore of it is proven.
 - **Files are UTF-8** — Latin-1 text breaks tests and diffs on other machines. Verify: new and changed text files decode as UTF-8.
 
 ## Untrusted text

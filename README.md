@@ -74,7 +74,7 @@ Para atualizar, veja "Atualização" abaixo. Para desenvolver o plugin, use um c
 
 ## O que fica no seu projeto
 
-Vai para o git, no mesmo slug da entrega: a spec (`docs/specs/<slug>.md`, nas entregas grandes), o plano (`docs/plans/<slug>.md`), o mockup das telas (`docs/mockups/<slug>.html`) e o relatório de qualidade do gate (`docs/quality-reports/`). Ficam também a doc de cada módulo em `docs/`, com o índice em `docs/README.md`, os padrões que todo código segue e o mapa dos módulos em `docs/arquitetura.md`, o roteiro de publicar, guardar e reverter em `docs/operacao.md`, as lições em `docs/lessons.md`, os achados do `discovery` em `docs/discovery/` e as convenções do projeto no `CLAUDE.md`. Ficam fora do git: `.superpowers/`, com o ledger e os relatórios de cada agente, e o `CLAUDE.local.md`, com o que vale só para este computador.
+Vai para o git, no mesmo slug da entrega: a spec (`docs/specs/<slug>.md`, nas entregas grandes), o plano (`docs/plans/<slug>.md`), o mockup das telas (`docs/mockups/<slug>.html`) e o relatório de qualidade do gate (`docs/quality-reports/`). Ficam também a doc de cada módulo em `docs/modulos/`, com o índice em `docs/README.md`, os padrões que todo código segue e o mapa dos módulos em `docs/arquitetura.md`, o roteiro de publicar, guardar e reverter em `docs/operacao.md`, as lições em `docs/lessons.md`, os achados do `discovery` em `docs/discovery/` e as convenções do projeto no `CLAUDE.md`. Ficam fora do git: `.superpowers/`, com o ledger e os relatórios de cada agente, e o `CLAUDE.local.md`, com o que vale só para este computador.
 
 ## O que esperar de uma entrega
 
