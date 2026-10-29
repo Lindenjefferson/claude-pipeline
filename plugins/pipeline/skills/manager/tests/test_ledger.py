@@ -2032,5 +2032,75 @@ delivery = status(CLOCK)["metrics"]["time"].get("delivery")
 check("metrics.time.delivery gives the elapsed time with the pauses out and the union of the agents' runs",
       delivery == {"elapsed": 3600, "paused": 3600, "agents": 2100, "share": 0.58}, delivery)
 
+# The time the user is back (mode autonomous --until): what still fits before it, and when the night is over
+NIGHT = ".superpowers/night.jsonl"
+past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=3)).isoformat(timespec="seconds")
+with open(os.path.join(repo, NIGHT), "w", encoding="utf-8", newline="\n") as handle:
+    for entry in ({"type": "start", "slug": "night", "base": "abc", "at": past},
+                  {"type": "run", "agent": "dev", "task": "T1", "verdict": "DONE", "open": 0, "head": "",
+                   "seconds": 600, "at": past},
+                  {"type": "run", "agent": "dev", "task": "T2", "verdict": "DONE", "open": 0, "head": "",
+                   "seconds": 1200, "at": past},
+                  {"type": "run", "agent": "reviewer", "verdict": "PASS", "open": 0, "head": "", "seconds": 120,
+                   "at": past},
+                  {"type": "run", "agent": "qa", "verdict": "PASS", "open": 0, "head": "", "seconds": 3000,
+                   "at": past},
+                  {"type": "run", "agent": "qa", "verdict": "PASS", "open": 0, "head": "", "seconds": 7200,
+                   "full": True, "at": past}):
+        handle.write(json.dumps(entry) + "\n")
+check("without --until, autonomous mode has no night", run("mode", "autonomous", ledger=NIGHT).returncode == 0
+      and status(NIGHT)["night"] is None, status(NIGHT).get("night"))
+check("--until is refused in supervised mode", run("mode", "supervised", "--until", "08:30", ledger=NIGHT).returncode != 0)
+check("an --until that is no time is refused", run("mode", "autonomous", "--until", "soon", ledger=NIGHT).returncode != 0)
+check("an --until already past is refused", run("mode", "autonomous", "--until", past, ledger=NIGHT).returncode != 0)
+back = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
+r = run("mode", "autonomous", "--until", back.isoformat(timespec="seconds"), ledger=NIGHT)
+add("dev", "DONE", "T3", ledger=NIGHT, seconds=300)
+night, after = status(NIGHT)["night"], status(NIGHT)
+check("mode autonomous --until records the time the user is back",
+      r.returncode == 0 and night and datetime.datetime.fromisoformat(night["until"]) == back.replace(microsecond=0),
+      (r.stdout, r.stderr, night))
+check("night gives the seconds left and each agent's expected time, from this delivery's measured runs",
+      night and 3400 <= night["seconds_left"] <= 3600
+      and night["expected"] == {"dev": 600, "reviewer": 120, "qa": 3000, "qa_full": 7200}, night)
+check("night says which runs fit before the user is back",
+      night and night["fits"] == {"dev": True, "reviewer": True, "qa": True, "qa_full": False} and not night["over"],
+      night)
+check("night counts what was done since the time was set, for the morning summary",
+      night and night["done_since"] == {"tasks": ["T3"], "runs": 1}, night)
+DAY = ".superpowers/day.jsonl"
+with open(os.path.join(repo, NIGHT), encoding="utf-8") as source:
+    rows = [json.loads(row) for row in source]
+with open(os.path.join(repo, DAY), "w", encoding="utf-8", newline="\n") as handle:
+    for entry in rows:
+        entry.pop("until", None)
+        handle.write(json.dumps(entry) + "\n")
+day = status(DAY)
+check("the night is advice, never pending", after["pending"] == day["pending"] and after["steps"] == day["steps"]
+      and after["ready_for_gate"] == day["ready_for_gate"], (day["pending"], after["pending"]))
+text = run("status", ledger=NIGHT).stdout
+line = next((row for row in text.splitlines() if row.startswith("night:")), "")
+check("status names the run that does not fit and says not to dispatch it",
+      "does not fit" in line and "qa --full" in line.split("does not fit")[1]
+      and "qa --full" not in line.split("does not fit")[0] and "do not dispatch" in line, text)
+hhmm = (datetime.datetime.now() - datetime.timedelta(minutes=2)).strftime("%H:%M")
+run("mode", "autonomous", "--until", hhmm, ledger=NIGHT)
+left = status(NIGHT)["night"]["seconds_left"]
+check("an --until of HH:MM already past today is tomorrow at that time", 23 * 3600 < left <= 24 * 3600, left)
+with open(os.path.join(repo, NIGHT), "a", encoding="utf-8", newline="\n") as handle:
+    soon = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=90)).isoformat(timespec="seconds")
+    handle.write(json.dumps({"type": "mode", "mode": "autonomous", "until": soon, "at": past}) + "\n")
+night = status(NIGHT)["night"]
+check("when no run fits before the user is back, the night is over", night["over"] and not any(night["fits"].values()),
+      night)
+with open(os.path.join(repo, NIGHT), "a", encoding="utf-8", newline="\n") as handle:
+    handle.write(json.dumps({"type": "mode", "mode": "autonomous", "until": past, "at": past}) + "\n")
+night, text = status(NIGHT)["night"], run("status", ledger=NIGHT).stdout
+check("past the time the user is back, the night is over and status says to pause with the morning summary",
+      night["over"] and night["seconds_left"] == 0 and "night over" in text and "pause" in text.split("night over")[1],
+      text)
+run("mode", "supervised", ledger=NIGHT)
+check("mode supervised ends the night", status(NIGHT)["night"] is None)
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)
