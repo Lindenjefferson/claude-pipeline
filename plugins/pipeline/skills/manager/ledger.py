@@ -2,10 +2,10 @@
 """Delivery ledger: one JSON line per agent run, grouped in cycles, so the manager sees what is pending.
 
   start   --slug <slug> [--base <rev>] [--plan <path>] [--archive]       once per delivery
-  add     --agent dev --task <id> --verdict <v> [--simpler] [--seconds <duration>] [--tokens N]
+  add     --agent dev --task <id> --verdict <v> [--seconds <duration>] [--tokens N]
   add     --agent reviewer|qa --verdict PASS|FAIL [--critical N --important N --minor N --origin <origin>=N,...]
           [--report <path>] [--seconds <duration>] [--tokens N]
-  add     --agent reviewer --task spec|plan|security --verdict PASS|FAIL ... [--triage applied=N,refused=N,errata=N]
+  add     --agent reviewer --task spec|plan|security --verdict PASS|FAIL ...
                                                               one round of the spec, plan or security review loop
   add     --agent qa ... --full | --interface                 the qa ran the full test command, or the interface
   claim   --task <id> [--worktree <path>] [--origin <rev>]    a dev run dispatched; refused if the task is in flight or done
@@ -21,6 +21,7 @@
   scope   --cycle <name> --tasks <id,id,...>                  the tasks of one plan cycle, in plan order
   mode    autonomous [--until <HH:MM or ISO time>]|supervised  the user turned autonomous mode on, or is back
   defer   --text <text> --recommend <text>                    an item left for later; prints its id (D1, D2...)
+  sensitive --reason <text>                                   the delivery touches a sensitive domain (step 0)
   resolve --id <id> --decision <text>                         the final decision on a deferred item
   lesson  --text <rule> [--check <test or lint rule>]         a lesson, automated when --check names the check
   status  [--json] [--check]                                  the current cycle, what it still needs, and metrics
@@ -64,7 +65,7 @@ that fills it, so a notification that arrived after a compaction is never lost. 
 waiting_minutes, partial_report (true from 90 minutes on: its line asks for a partial report by SendMessage) and, for a
 claim with no worktree whose delivery head moved since, committed: the dev commits straight on the branch, so its work
 may be in and its report waiting to be added. A deferred item with no decision keeps the delivery from the gate. Everything that waits for the user carries --recommend, what the manager would decide and why, so every list of what waits (status, the pane, validar) recommends without being asked: defer requires it, note takes it with --validar and refuses it without. An entry of an earlier version, with no recommendation, reads as before. start --archive moves an existing delivery to
-ledger-<old-slug>.jsonl next to the ledger first. start also carries each item the latest quality report (the docs/quality-reports/*.md git added last at the ledger's project root, else the last by name) moved to a later delivery, a line of its Deferred section whose decision, after the first arrow, starts with "moved to" in any case, as a deferred item of the new delivery, recommending that decision, so it needs a decision before the gate and is never forgotten. --check exits 1 while anything is pending, so the gate can rely on
+ledger-<old-slug>.jsonl next to the ledger first. start also carries each item the latest quality report (the docs/quality-reports/*.md git added last at the ledger's project root, else the last by name) moved to a later delivery, a line of its Deferred section whose decision, after the first arrow, starts with "moved to" in any case, as a deferred item of the new delivery, recommending that decision, so it needs a decision before the gate and is never forgotten. An item whose decision names another delivery (a slug right after "moved to", then a colon or the end) is passed on instead: deferred and resolved with that same decision, so the next report carries it on and only the delivery it names decides it. Its text keeps only the last "(moved here by ...)". --check exits 1 while anything is pending, so the gate can rely on
 it. A cycle whose reviewer or qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on
 up to three, then the delivery stops. extend, once status asks the user or stops, records the user's decision to go
 on (a note, VALIDAR in autonomous mode): the current cycle gets one more fix round, and a reviewer or qa FAIL after
@@ -81,13 +82,14 @@ A reviewer run with --task spec or plan is one round of that review loop, before
 cycle, and its findings, time and tokens are counted apart in the metrics. --task security is the security scan of a
 sensitive delivery, a loop of the same kind run after the last cycle (its open findings, after the 3rd FAIL, are
 deferred with a decision instead of carried to the plan). While the latest round is a FAIL, status
-asks for the next round, on the range from the head the failed round recorded (the corrections only), and every
-later round of the loop needs --triage: what became of each finding of the previous round (applied, refused or carried
-to the errata), counting every one of them once; the metrics sum the refused ones. A loop is the rounds since that
+asks for the next round, on the range from the head the failed round recorded (the corrections only). A loop is the
+rounds since that
 review's latest PASS (a waiver included), so a document reviewed again after a change of scope starts at round 1. After
 the 3rd FAIL with no Critical open, in either mode, status says waive (carry the open findings to the plan's Errata, or
 to the plan's brief for a spec, and waive --task) without asking the user; with a Critical open it asks the user, or
-stops the delivery in autonomous mode. waive --task closes the loop.
+stops the delivery in autonomous mode. waive --task closes the loop. sensitive --reason marks a delivery of a
+sensitive domain: until a security round is added (or waived), status asks for the scan (step security, with the
+reason), so the gate waits for it.
 
 status --json also gives the pending items as data and where the delivery is in its plan. claims: one {task, at,
 worktree, origin, tip, head_moved} per task in flight; paused: {text, at} or null; full_qa: the latest qa run added with
@@ -140,12 +142,10 @@ same task starts at that stored tip when it is an ancestor of the new one and la
 commits count once. A run with no worktree (or one that is gone) is measured from the head its live claim stored at
 dispatch (claim stores head, the delivery head), so the spec, plan and errata commits are never charged; with no
 claim head (an older ledger, or a run with no claim) from the head the previous run of any agent stored, the
-delivery base for the first. On any git failure nothing is stored and the add goes on. add --agent dev --verdict
-NEEDS_CONTEXT --simpler marks a simpler: proposal (any other agent or verdict refuses the flag) and stores
-simpler: true. status --json gives metrics.lines: tasks {task: added+removed over its dev runs}, total, follow_up
+delivery base for the first. On any git failure nothing is stored and the add goes on.
+status --json gives metrics.lines: tasks {task: added+removed over its dev runs}, total, follow_up
 (fix-N and cleanup), share (follow_up/total, 2 decimals, null at 0) and unmeasured (dev runs with no diff, as every
-run of an older ledger); and metrics.verdicts: {needs_context, simpler, blocked} over the dev runs (simpler
-proposals are not counted in needs_context; 0 for an older ledger). It is advice, never pending: pending, steps and
+run of an older ledger); and metrics.verdicts: {needs_context, blocked} over the dev runs. It is advice, never pending: pending, steps and
 ready_for_gate do not change. metrics.time.delivery is the delivery's clock: {elapsed, from start to the latest
 measured run with the pauses left out; paused; agents, the union of the measured runs, the time some agent was
 running; share, agents over elapsed}, null before the first measured run.
@@ -187,7 +187,6 @@ ORIGINS = ("design", "assumption", "plan", "execution", "environment")
 SEVERITIES = ("critical", "important", "minor")
 FIX_ROUNDS = {False: 1, True: 3}
 REVIEW_ROUNDS = 3
-TRIAGE = ("applied", "refused", "errata")
 REVIEWS = ("spec", "plan", "security")
 PARTIAL_REPORT_MINUTES = 90
 INTERFACE_LINE = re.compile(r"^- Verifica[çc][ãa]o de interface[^:\n]*:[ \t]*(.*)$", re.MULTILINE | re.IGNORECASE)
@@ -195,6 +194,8 @@ INTERFACE_LINE = re.compile(r"^- Verifica[çc][ãa]o de interface[^:\n]*:[ \t]*(
 NEEDS_INTERFACE = False
 QUALITY_REPORTS = "docs/quality-reports"
 MOVED = re.compile(r"- D\d+ (.*?) -> (moved to .*)", re.IGNORECASE)
+MOVED_TO = re.compile(r"moved to ([a-z0-9][\w.-]*)(?::|$)", re.IGNORECASE)
+MOVED_HERE = re.compile(r"(?:\s*\(moved here by [^)]*\))+$")
 DONE = ("DONE", "DONE_WITH_CONCERNS")
 FIX_TASK = re.compile(r"fix-\d+", re.IGNORECASE)
 FOLLOW_UP = re.compile(r"fix-\d+|cleanup", re.IGNORECASE)
@@ -487,12 +488,22 @@ def start(args):
     write(args.ledger, {"type": "start", "slug": args.slug, "base": base, "plan": args.plan})
     print(f"started {args.slug} at {base[:12]}")
     report, moved = carried(args.ledger)
+    passed = 0
     for number, (text, decision) in enumerate(moved, 1):
-        write(args.ledger, {"type": "defer", "id": f"D{number}", "text": f"{text} (moved here by {report})",
-                            "recommend": f"decide whether this delivery takes it: {decision}"})
-    if moved:
-        print(f"carried {len(moved)} items moved to a later delivery from {report}: each needs a decision "
+        text = f"{MOVED_HERE.sub('', text)} (moved here by {report})"
+        target = MOVED_TO.match(decision)
+        if target and target.group(1).lower() != args.slug.lower():
+            write(args.ledger, {"type": "defer", "id": f"D{number}", "text": text, "recommend": decision})
+            write(args.ledger, {"type": "resolve", "id": f"D{number}", "decision": decision})
+            passed += 1
+        else:
+            write(args.ledger, {"type": "defer", "id": f"D{number}", "text": text,
+                                "recommend": f"decide whether this delivery takes it: {decision}"})
+    if len(moved) > passed:
+        print(f"carried {len(moved) - passed} items moved to a later delivery from {report}: each needs a decision "
               "before the gate (resolve --id)")
+    if passed:
+        print(f"passed on {passed} item{'' if passed == 1 else 's'} moved to another delivery, resolved as moved")
 
 
 def carried(ledger):
@@ -530,7 +541,7 @@ def seconds(text):
 
 
 def tally(flag, names, text, total):
-    """<name>=N,... counts that must add up to total, every finding counted once (--origin, --triage)."""
+    """<name>=N,... counts that must add up to total, every finding counted once (--origin)."""
     counts = {}
     for item in filter(None, (part.strip() for part in (text or "").split(","))):
         name, _, number = (piece.strip() for piece in item.partition("="))
@@ -706,14 +717,6 @@ def add(args):
         sys.exit("--full marks a qa run of the project's full test command")
     if args.interface and args.agent != "qa":
         sys.exit("--interface marks a qa run that ran the interface (Verificação de interface)")
-    if args.simpler and not (args.agent == "dev" and args.verdict == "NEEDS_CONTEXT"):
-        sys.exit("--simpler marks a dev NEEDS_CONTEXT run that proposes a simpler way (a simpler: proposal)")
-    loop = review_loop(entries, args.task) if args.agent == "reviewer" and args.task in REVIEWS else []
-    if loop and args.triage is None:
-        sys.exit(f"round {len(loop) + 1} of the {args.task} review needs --triage applied=N,refused=N,errata=N: what "
-                 f"became of each finding of round {len(loop)}, so the next round reviews only the corrections")
-    if args.triage is not None and not loop:
-        sys.exit("--triage counts the findings of the previous round of a spec or plan review that failed")
     blocking = args.critical + args.important
     if args.agent in ("reviewer", "qa") and (args.verdict == "FAIL") != (blocking > 0):
         sys.exit("FAIL needs open Critical/Important findings (--critical or --important > 0) and PASS none")
@@ -732,8 +735,6 @@ def add(args):
         entry["report"] = args.report
     if args.report and args.agent == "qa":
         entry.update(qa_report(args, entries))
-    if loop:
-        entry["triage"] = tally("--triage", TRIAGE, args.triage, sum(loop[-1].get(key) or 0 for key in SEVERITIES))
     if args.full:
         entry["full"] = True
     if args.interface:
@@ -753,8 +754,6 @@ def add(args):
             entry["diff"] = size
             if end:
                 entry["tip"] = end
-        if args.simpler:
-            entry["simpler"] = True
     windows = usage_windows(args.ledger)[0]
     if windows:
         entry["usage"] = {name: item["percent"] for name, item in windows.items()}
@@ -1263,6 +1262,13 @@ def deferred(entries):
     return list(items.values())
 
 
+def sensitive(args):
+    if not read(args.ledger):
+        sys.exit("no delivery started: run start first")
+    write(args.ledger, {"type": "sensitive", "reason": args.reason})
+    print("sensitive: the gate waits for the security scan (references/security.md)")
+
+
 def defer(args):
     entries = read(args.ledger)
     if not entries:
@@ -1326,10 +1332,9 @@ def metrics(entries):
     for entry in reviews(entries):
         if entry.get("waived") is not None:
             continue
-        loop = loops.setdefault(entry["task"], {"rounds": 0, **{key: 0 for key in SEVERITIES}, "refused": 0, "seconds": 0,
+        loop = loops.setdefault(entry["task"], {"rounds": 0, **{key: 0 for key in SEVERITIES}, "seconds": 0,
                                                 "tokens": 0})
         loop["rounds"] += 1
-        loop["refused"] += (entry.get("triage") or {}).get("refused", 0)
         for key in SEVERITIES + ("seconds", "tokens"):
             loop[key] += entry.get(key) or 0
         classify(entry, found)
@@ -1376,9 +1381,8 @@ def delivery_clock(entries, measured):
 
 def verdict_counts(entries):
     devs = [entry for entry in runs(entries) if entry["agent"] == "dev"]
-    simpler = sum(1 for entry in devs if entry.get("simpler"))
-    return {"needs_context": sum(1 for entry in devs if entry["verdict"] == "NEEDS_CONTEXT") - simpler,
-            "simpler": simpler, "blocked": sum(1 for entry in devs if entry["verdict"] == "BLOCKED")}
+    return {"needs_context": sum(1 for entry in devs if entry["verdict"] == "NEEDS_CONTEXT"),
+            "blocked": sum(1 for entry in devs if entry["verdict"] == "BLOCKED")}
 
 
 def line_totals(entries):
@@ -1446,6 +1450,11 @@ def status(args):
                 for item in items if not item["decision"]]
     steps += [step for _, step in kept] + [{"step": "decide", "id": item["id"], "text": item["text"],
                                             **advice_of(item)} for item in items if not item["decision"]]
+    marks = [entry["reason"] for entry in entries if entry["type"] == "sensitive"]
+    if marks and not reviews(entries, "security"):
+        pending.append(f"security scan has not run, and the delivery touches a sensitive domain ({marks[-1]}): run "
+                       "it once the last cycle closes (references/security.md)")
+        steps.append({"step": "security", "reason": marks[-1]})
     pause_state = paused(entries)
     if pause_state:
         pending.insert(0, f"delivery paused since {pause_state['at']}: {pause_state['text']} "
@@ -1731,8 +1740,6 @@ def main():
     command.add_argument("--tokens", type=count, help="the tokens the run used, from its completion notification")
     command.add_argument("--full", action="store_true", help="the qa ran the project's full test command")
     command.add_argument("--interface", action="store_true", help="the qa ran the interface (Verificação de interface)")
-    command.add_argument("--simpler", action="store_true", help="the dev's NEEDS_CONTEXT is a simpler: proposal")
-    command.add_argument("--triage", help="applied=N,refused=N,errata=N: the previous round's findings of a spec or plan review")
     command.set_defaults(run=add)
     for name, run in (("claim", claim), ("release", release)):
         command = commands.add_parser(name)
@@ -1787,6 +1794,9 @@ def main():
     command.add_argument("--text", required=True)
     command.add_argument("--recommend", required=True, help="what you would decide and why, read with the item")
     command.set_defaults(run=defer)
+    command = commands.add_parser("sensitive")
+    command.add_argument("--reason", required=True, help="what makes the delivery sensitive (step 0)")
+    command.set_defaults(run=sensitive)
     command = commands.add_parser("resolve")
     command.add_argument("--id", required=True)
     command.add_argument("--decision", required=True)
