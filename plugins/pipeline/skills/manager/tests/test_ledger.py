@@ -33,10 +33,18 @@ def add(agent, verdict, task=None, open_count=0, ledger=None, seconds=None):
     return run(*(args + (["--task", task] if task else [])), ledger=ledger)
 
 
-def report_file(name):
+def head():
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
+
+
+def report_file(name, verdict="PASS", commit=None, lines=None):
+    """A saved report; a qa report needs these lines, so every one written here has them unless lines says otherwise."""
     path = f".superpowers/reports/{name}"
     os.makedirs(os.path.join(repo, ".superpowers", "reports"), exist_ok=True)
-    open(os.path.join(repo, path), "w", encoding="utf-8").close()
+    body = lines if lines is not None else [f"Verdict: {verdict}", f"Commit: {(commit or head())[:7]}",
+                                            "Interface: n/a", "Processes: none left running"]
+    with open(os.path.join(repo, path), "w", encoding="utf-8") as handle:
+        handle.write("\n".join(body) + "\n")
     return path
 
 
@@ -654,7 +662,7 @@ r = run("add", "--agent", "reviewer", "--verdict", "FAIL", "--important", "2", "
         "reports/1-reviewer.md", ledger=REPORTS)
 check("--report is refused when no file was saved there: the agents cannot write it, the manager does",
       r.returncode != 0 and "no file" in r.stderr and not status(REPORTS)["reviewer"], (r.stderr, status(REPORTS)))
-REVIEW_REPORT, QA_REPORT = report_file("1-reviewer.md"), report_file("1-qa.md")
+REVIEW_REPORT, QA_REPORT = report_file("1-reviewer.md"), report_file("1-qa.md", "FAIL")
 r = run("add", "--agent", "reviewer", "--verdict", "FAIL", "--important", "2", "--origin", "execution=2", "--report",
         REVIEW_REPORT, ledger=REPORTS)
 run("add", "--agent", "qa", "--verdict", "FAIL", "--important", "1", "--origin", "execution=1", "--report",
@@ -1963,6 +1971,66 @@ check("a security scan is a review loop: its FAIL asks for the next round on the
 r = run("waive", "--agent", "reviewer", "--task", "security", "--reason", "fixed in fix-1, reviewed", ledger=SEC)
 check("waive --task security closes the loop", r.returncode == 0 and status(SEC)["ready_for_gate"] is True,
       (r.stderr, status(SEC)["pending"]))
+
+# A qa report is checked on add, and a qa that tested a commit before the fix does not count as its re-run
+EARLY = ".superpowers/early.jsonl"
+run("start", "--slug", "early", ledger=EARLY)
+subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "E1"], cwd=repo, check=True, capture_output=True)
+add("dev", "DONE", "E1", ledger=EARLY)
+for name, lines, words in (
+        ("no-interface.md", ["Verdict: PASS", f"Commit: {head()[:7]}", "Processes: none left running"], "Interface:"),
+        ("no-lines.md", ["all good, 12 passed"], "Verdict:"),
+        ("other-verdict.md", ["Verdict: FAIL", f"Commit: {head()[:7]}", "Interface: n/a", "Processes: none"],
+         "FAIL"),
+        ("no-commit.md", ["Verdict: PASS", "Commit: zzzzzzz", "Interface: n/a", "Processes: none"], "zzzzzzz")):
+    r = run("add", "--agent", "qa", "--verdict", "PASS", "--report", report_file(name, lines=lines), ledger=EARLY)
+    check(f"add --agent qa --report refuses a report that lacks what qa.md asks ({name})",
+          r.returncode != 0 and words in r.stderr and not status(EARLY)["qa"], r.stderr)
+run("add", "--agent", "reviewer", "--verdict", "FAIL", "--important", "1", "--origin", "execution=1", ledger=EARLY)
+before = head()
+subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "fix-1"], cwd=repo, check=True, capture_output=True)
+add("dev", "DONE", "fix-1", ledger=EARLY)
+r = run("add", "--agent", "qa", "--verdict", "PASS", "--report", report_file("early-qa.md", commit=before),
+        ledger=EARLY)
+state = status(EARLY)
+check("a qa that tested the commit before the fix is stored as such and does not count as the fix's re-run",
+      r.returncode == 0 and state["qa"][0].get("tested", "").startswith(before[:7]) and state["qa"][0].get("stale")
+      and "qa has not re-run the scenarios the fix touched" in state["pending"], (r.stderr, state["pending"]))
+run("add", "--agent", "qa", "--verdict", "PASS", "--report", report_file("early-qa-2.md"), ledger=EARLY)
+check("a qa that tested the fix's commit counts as its re-run",
+      "qa has not re-run the scenarios the fix touched" not in status(EARLY)["pending"], status(EARLY)["pending"])
+
+LATE = ".superpowers/late-qa.jsonl"
+run("start", "--slug", "late-qa", ledger=LATE)
+add("dev", "DONE", "L1", ledger=LATE)
+run("add", "--agent", "reviewer", "--verdict", "FAIL", "--important", "1", "--origin", "execution=1", ledger=LATE)
+before = head()
+subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "fix-1 of the reviewer's findings"], cwd=repo, check=True,
+               capture_output=True)
+add("dev", "DONE", "fix-1", ledger=LATE)
+run("add", "--agent", "qa", "--verdict", "FAIL", "--important", "2", "--origin", "execution=2", "--report",
+    report_file("late-qa.md", "FAIL", commit=before), ledger=LATE)
+state = status(LATE)
+check("qa's FAIL arriving after the fix began asks for the second part of the same fix round",
+      {"step": "fix", "agent": "qa", "open": 2, "report": ".superpowers/reports/late-qa.md"} in state["steps"]
+      and not any(item.startswith("qa still fails") for item in state["pending"]), (state["steps"], state["pending"]))
+
+# The delivery's own clock: wall-clock with the pauses left out, against the time some agent was running
+CLOCK = ".superpowers/clock.jsonl"
+with open(os.path.join(repo, CLOCK), "w", encoding="utf-8", newline="\n") as handle:
+    for entry in ({"type": "start", "slug": "clock", "base": "abc", "at": "2026-10-01T10:00:00+00:00"},
+                  {"type": "run", "agent": "dev", "task": "T1", "verdict": "DONE", "open": 0, "head": "",
+                   "seconds": 1200, "at": "2026-10-01T10:30:00+00:00"},
+                  {"type": "pause", "text": "window", "at": "2026-10-01T10:40:00+00:00"},
+                  {"type": "resume", "at": "2026-10-01T11:40:00+00:00"},
+                  {"type": "run", "agent": "qa", "verdict": "PASS", "open": 0, "head": "", "seconds": 900,
+                   "at": "2026-10-01T12:00:00+00:00"},
+                  {"type": "run", "agent": "reviewer", "verdict": "PASS", "open": 0, "head": "", "seconds": 600,
+                   "at": "2026-10-01T12:00:00+00:00"}):
+        handle.write(json.dumps(entry) + "\n")
+delivery = status(CLOCK)["metrics"]["time"].get("delivery")
+check("metrics.time.delivery gives the elapsed time with the pauses out and the union of the agents' runs",
+      delivery == {"elapsed": 3600, "paused": 3600, "agents": 2100, "share": 0.58}, delivery)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)

@@ -843,5 +843,26 @@ r = gate("--base", released)
 check("Version is SKIP when the delivery changed only documentation",
       re.search(r"Version:\s+SKIP", r.stdout) and "only documentation" in r.stdout, r.stdout)
 
+# The report keeps the gate's warnings and the delivery's clock, so the next feedback-plugin can count them
+repo = os.path.join(base_dir, "repo6")
+os.makedirs(repo)
+sh("git", "init", "-q", "-b", "main")
+sh("git", "config", "user.email", "t@t.com")
+sh("git", "config", "user.name", "t")
+write(".gitignore", ".superpowers/\n")
+sh("git", "add", ".gitignore")
+commit("CLAUDE.md", f"# p\n\n## Comandos\n\n{TESTS}- Tempo máximo (minutos): `muito`\n", "base")
+ledger_cmd("start", "--slug", "w", "--base", "main")
+ledger_cmd("add", "--agent", "dev", "--task", "T1", "--verdict", "DONE", "--seconds", "10m")
+ledger_cmd("add", "--agent", "reviewer", "--verdict", "PASS", "--seconds", "2m")
+ledger_cmd("add", "--agent", "qa", "--verdict", "PASS", "--seconds", "3m")
+r = gate("--report", "w")
+name = [entry for entry in os.listdir(os.path.join(repo, "docs", "quality-reports"))] if r.returncode == 0 else []
+text = open(os.path.join(repo, "docs", "quality-reports", name[0]), encoding="utf-8").read() if name else ""
+check("the quality report lists the gate's warnings", "## Warnings" in text and "Tempo máximo" in text,
+      (r.stdout, text))
+check("the quality report gives the delivery's clock: elapsed, pauses out, and the share with an agent running",
+      re.search(r"- Delivery: \S+ elapsed, \S+ paused, an agent running \S+ \(\d+%\)", text), text)
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)
