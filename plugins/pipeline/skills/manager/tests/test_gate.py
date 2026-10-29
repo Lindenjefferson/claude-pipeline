@@ -695,11 +695,13 @@ commit("docs/arquitetura.md", "# Arquitetura\n\n## Erros\n\n_(como o código tra
 r = gate("--base", "main")
 check("Docs passes with the patterns still a template while no module exists",
       re.search(r"Docs:\s+PASS", r.stdout), r.stdout)
-commit("docs/01-core.md", "# Módulo 1 — Core\n", "docs: core")
+os.makedirs(os.path.join(repo, "docs", "modulos"))
+commit("docs/modulos/01-core.md", "# Módulo 1 — Core\n", "docs: core")
 r = gate("--base", "main")
 check("Docs FAILs naming a module doc the index does not list",
       re.search(r"Docs:\s+FAIL", r.stdout) and "01-core.md" in r.stdout and "docs/README.md" in r.stdout, r.stdout)
-commit("docs/README.md", "# Docs\n\n- [Arquitetura](arquitetura.md)\n- [Core](01-core.md#proposito)\n", "docs: index")
+commit("docs/README.md", "# Docs\n\n- [Arquitetura](arquitetura.md)\n- [Core](modulos/01-core.md#proposito)\n",
+       "docs: index")
 r = gate("--base", "main")
 check("Docs FAILs while a module exists and docs/arquitetura.md still holds a placeholder",
       re.search(r"Docs:\s+FAIL", r.stdout) and "placeholder" in r.stdout and "docs/arquitetura.md" in r.stdout,
@@ -713,24 +715,154 @@ commit("README.md", "# p\n\nVeja [a doc](docs/README.md) e [o guia](docs/guia.md
 r = gate("--base", "main")
 check("Docs FAILs naming a dead relative link of the root README",
       re.search(r"Docs:\s+FAIL", r.stdout) and "README.md -> docs/guia.md" in r.stdout, r.stdout)
-commit("docs/a(1).md", "x\n", "docs: a file with parentheses")
-commit("README.md", "# p\n\nVeja [a doc](docs/README.md) e [a cópia](docs/a(1).md).\n", "docs: readme fixed")
+os.makedirs(os.path.join(repo, "docs", "specs"))
+commit("docs/specs/a(1).md", "x\n", "docs: a file with parentheses")
+commit("README.md", "# p\n\nVeja [a doc](docs/README.md) e [a cópia](docs/specs/a(1).md).\n", "docs: readme fixed")
+for folder in ("quality-reports", "discovery", "operacao", "plans", "mockups"):
+    os.makedirs(os.path.join(repo, "docs", folder))
+commit("docs/quality-reports/2026-10-01-x.md", "# x\n", "docs: report")
+commit("docs/discovery/.gitkeep", "", "docs: discovery")
+commit("docs/operacao/publicar.md", "# Publicar\n", "docs: operation guide")
+commit("docs/lessons.md", "- a lesson\n", "docs: lessons")
 r = gate("--base", "main")
-check("Docs reads a link whose path holds parentheses as one link, not a dead one",
+check("Docs reads a link whose path holds parentheses as one link, not a dead one, and takes every folder of the map",
       re.search(r"Docs:\s+PASS", r.stdout), r.stdout)
-commit("docs/03-configuração.md", "# Módulo 3 — Configuração\n", "docs: accented module")
+commit("docs/modulos/03-configuração.md", "# Módulo 3 — Configuração\n", "docs: accented module")
 r = gate("--base", "main")
 check("Docs FAILs naming an accented module doc the index does not list (git quotes such paths by default)",
       re.search(r"Docs:\s+FAIL", r.stdout) and "03-configuração.md" in r.stdout, r.stdout)
-os.makedirs(os.path.join(repo, "docs", "modules"))
-os.makedirs(os.path.join(repo, "docs", "notas"))
-commit("docs/modules/04-extra.md", "# Módulo 4 — Extra\n", "docs: a module in a subfolder the project chose")
-commit("docs/notas/2026-10-01-reuniao.md", "# Reunião\n", "docs: a dated note, not a module")
+commit("docs/README.md", "# Docs\n\n- [Arquitetura](arquitetura.md)\n- [Core](modulos/01-core.md)\n"
+       "- [Configuração](modulos/03-configuração.md)\n", "docs: index both")
+commit("docs/04-extra.md", "# Módulo 4 — Extra\n", "docs: a module at the root of docs/")
 r = gate("--base", "main")
-check("Docs also reads module docs in one subfolder of docs/, whatever the project named it",
-      re.search(r"Docs:\s+FAIL", r.stdout) and "04-extra.md" in r.stdout, r.stdout)
-check("Docs does not take a dated file in a subfolder (a quality report, a note) for a module doc",
-      "2026-10-01-reuniao.md" not in r.stdout, r.stdout)
+check("Docs FAILs on a module doc outside docs/modulos/, saying where it goes",
+      re.search(r"Docs:\s+FAIL", r.stdout) and "docs/04-extra.md" in r.stdout and "docs/modulos/" in r.stdout,
+      r.stdout)
+sh("git", "rm", "-q", "docs/04-extra.md")
+sh("git", "commit", "-q", "--no-verify", "-m", "docs: drop it")
+os.makedirs(os.path.join(repo, "docs", "superpowers", "plans"))
+os.makedirs(os.path.join(repo, "docs", "referencias"))
+commit("docs/superpowers/plans/2026-09-30-fatia-1.md", "# plan\n", "docs: a plan where superpowers puts it")
+commit("docs/referencias/LEIA-ME.md", "# refs\n", "docs: a folder of the project")
+r = gate("--base", "main")
+check("Docs FAILs naming each entry of docs/ outside the map",
+      re.search(r"Docs:\s+FAIL", r.stdout) and "docs/superpowers" in r.stdout and "docs/referencias" in r.stdout,
+      r.stdout)
+commit("docs/README.md", "# Docs\n\n- [Arquitetura](arquitetura.md)\n- [Core](modulos/01-core.md)\n"
+       "- [Configuração](modulos/03-configuração.md)\n\n## Outras pastas\n\n- `referencias/` — material de fora.\n",
+       "docs: the index names the project's folder")
+r = gate("--base", "main")
+check("Docs takes a folder the index names, and still FAILs on the one it does not",
+      re.search(r"Docs:\s+FAIL", r.stdout) and "docs/superpowers" in r.stdout and "docs/referencias" not in r.stdout,
+      r.stdout)
+sh("git", "rm", "-q", "-r", "docs/superpowers")
+sh("git", "commit", "-q", "--no-verify", "-m", "docs: plans moved")
+commit("docs/plans/z.md", "# plan\n- AC-T1-1 Given a.\n", "docs: plan z")
+ledger_cmd("start", "--slug", "z", "--base", "main", "--plan", "docs/specs/a(1).md")
+r = gate("--base", "main")
+check("Artifacts FAILs on a plan outside docs/plans/<slug>.md in a project the kickoff prepared",
+      re.search(r"Artifacts:\s+FAIL", r.stdout) and "docs/plans/z.md" in r.stdout, r.stdout)
+os.makedirs(os.path.join(repo, "docs", "modulos", "img"))
+commit("docs/modulos/img/tela.png", "png\n", "docs: an image of a module doc")
+ledger_cmd("start", "--slug", "z", "--base", "main", "--plan", "docs/plans/z.md", "--archive")
+r = gate("--base", "main")
+check("Artifacts passes with the plan at docs/plans/<slug>.md", re.search(r"Artifacts:\s+PASS", r.stdout), r.stdout)
+check("Docs passes once every entry of docs/ is in the map", re.search(r"Docs:\s+PASS", r.stdout), r.stdout)
+
+# Version: the files the "Versão" line names hold one x.y.z, above the base's
+repo = os.path.join(base_dir, "repo5")
+os.makedirs(repo)
+sh("git", "init", "-q", "-b", "main")
+sh("git", "config", "user.email", "t@t.com")
+sh("git", "config", "user.name", "t")
+TESTS = f"- Testes: `{PY} -c \"print('ok')\"`\n"
+commit("CLAUDE.md", f"# p\n\n## Comandos\n\n{TESTS}", "base")
+r = gate("--base", "main")
+check("Version is SKIP with no Versão line in a project the kickoff never prepared",
+      re.search(r"Version:\s+SKIP", r.stdout), r.stdout)
+os.makedirs(os.path.join(repo, "docs"))
+commit("docs/README.md", "# Docs\n", "docs: index")
+r = gate("--base", "main")
+check("Version FAILs with no Versão line in a project the kickoff prepared",
+      re.search(r"Version:\s+FAIL", r.stdout) and "Versão" in r.stdout, r.stdout)
+sh("git", "switch", "-q", "-c", "feat/v")
+PACKAGE = '{{\n  "dependencies": {{"some-version": "9.9.9", "semver": "^7.5.0"}},\n  "version": "{}"\n}}\n'
+GRADLE = 'android {{\n    kotlinVersion = "1.9.0"\n    versionCode = 3\n    versionName = "{}"\n}}\n'
+commit("package.json", PACKAGE.format("0.1.0"), "chore: package")
+os.makedirs(os.path.join(repo, "app"))
+commit("app/build.gradle", GRADLE.format("0.1.0"), "chore: gradle")
+commit("CLAUDE.md", f"# p\n\n## Comandos\n\n{TESTS}- Versão (os arquivos que a guardam): `package.json app/build.gradle`\n",
+       "docs: version line")
+r = gate("--base", "main")
+check("Version PASSes on the first delivery, with no version at the base (dependency and kotlinVersion keys ignored)",
+      re.search(r"Version:\s+PASS", r.stdout) and "v0.1.0" in r.stdout, r.stdout)
+first = sh("git", "rev-parse", "HEAD").strip()
+commit("x.txt", "x\n", "feat: x")
+r = gate("--base", first)
+check("Version FAILs when the delivery did not raise it, naming the base's version",
+      re.search(r"Version:\s+FAIL", r.stdout) and "0.1.0" in r.stdout, r.stdout)
+commit("package.json", PACKAGE.format("0.2.0"), "chore: 0.2.0")
+r = gate("--base", first)
+check("Version FAILs when the files disagree, naming each with its version",
+      re.search(r"Version:\s+FAIL", r.stdout) and "package.json 0.2.0" in r.stdout
+      and "app/build.gradle 0.1.0" in r.stdout, r.stdout)
+commit("app/build.gradle", GRADLE.format("0.10.0"), "chore: 0.10.0")
+commit("package.json", PACKAGE.format("0.10.0"), "chore: 0.10.0")
+r = gate("--base", first)
+check("Version PASSes above the base, compared as numbers (0.10.0 > 0.1.0), and the gate line names it",
+      re.search(r"Version:\s+PASS", r.stdout) and "v0.10.0" in r.stdout, r.stdout)
+commit("app/build.gradle", GRADLE.format("0.0.9"), "chore: down")
+commit("package.json", PACKAGE.format("0.0.9"), "chore: down")
+r = gate("--base", first)
+check("Version FAILs below the base", re.search(r"Version:\s+FAIL", r.stdout) and "0.0.9" in r.stdout, r.stdout)
+commit("package.json", '{"name": "p"}\n', "chore: no version")
+r = gate("--base", first)
+check("Version FAILs naming a file with no version in it",
+      re.search(r"Version:\s+FAIL", r.stdout) and "package.json" in r.stdout, r.stdout)
+commit("VERSION", "1.0.0\n", "chore: version file")
+commit("CLAUDE.md", f"# p\n\n## Comandos\n\n{TESTS}- Versão: `VERSION`\n", "docs: version file")
+r = gate("--base", first)
+check("Version reads a file that holds only the version", re.search(r"Version:\s+PASS", r.stdout), r.stdout)
+commit("pubspec.yaml", "name: p\nversion: 2.0.0+4\n", "chore: pubspec")
+commit("app.csproj", "<Project>\n  <PropertyGroup>\n    <Version>2.0.0</Version>\n  </PropertyGroup>\n</Project>\n",
+       "chore: csproj")
+commit("CLAUDE.md", f"# p\n\n## Comandos\n\n{TESTS}- Versão: `pubspec.yaml app.csproj`\n", "docs: yaml and xml")
+r = gate("--base", first)
+check("Version reads an unquoted YAML value with a build number and an XML element",
+      re.search(r"Version:\s+PASS", r.stdout) and "v2.0.0" in r.stdout, r.stdout)
+released = sh("git", "rev-parse", "HEAD").strip()
+commit("pubspec.yaml", "name: p\nversion: 2.1.0-rc.1\n", "chore: pre-release")
+commit("app.csproj", "<Project>\n  <PropertyGroup>\n    <Version>2.1.0-rc.1</Version>\n  </PropertyGroup>\n</Project>\n",
+       "chore: pre-release")
+r = gate("--base", released)
+check("Version FAILs on a pre-release, which it never reads as the final version",
+      re.search(r"Version:\s+FAIL", r.stdout) and "pre-release" in r.stdout, r.stdout)
+sh("git", "reset", "-q", "--hard", released)
+commit("docs/nota.md", "# nota\n", "docs: only documentation")
+r = gate("--base", released)
+check("Version is SKIP when the delivery changed only documentation",
+      re.search(r"Version:\s+SKIP", r.stdout) and "only documentation" in r.stdout, r.stdout)
+
+# The report keeps the gate's warnings and the delivery's clock, so the next feedback-plugin can count them
+repo = os.path.join(base_dir, "repo6")
+os.makedirs(repo)
+sh("git", "init", "-q", "-b", "main")
+sh("git", "config", "user.email", "t@t.com")
+sh("git", "config", "user.name", "t")
+write(".gitignore", ".superpowers/\n")
+sh("git", "add", ".gitignore")
+commit("CLAUDE.md", f"# p\n\n## Comandos\n\n{TESTS}- Tempo máximo (minutos): `muito`\n", "base")
+ledger_cmd("start", "--slug", "w", "--base", "main")
+ledger_cmd("add", "--agent", "dev", "--task", "T1", "--verdict", "DONE", "--seconds", "10m")
+ledger_cmd("add", "--agent", "reviewer", "--verdict", "PASS", "--seconds", "2m")
+ledger_cmd("add", "--agent", "qa", "--verdict", "PASS", "--seconds", "3m")
+r = gate("--report", "w")
+name = [entry for entry in os.listdir(os.path.join(repo, "docs", "quality-reports"))] if r.returncode == 0 else []
+text = open(os.path.join(repo, "docs", "quality-reports", name[0]), encoding="utf-8").read() if name else ""
+check("the quality report lists the gate's warnings", "## Warnings" in text and "Tempo máximo" in text,
+      (r.stdout, text))
+check("the quality report gives the delivery's clock: elapsed, pauses out, and the share with an agent running",
+      re.search(r"- Delivery: \S+ elapsed, \S+ paused, an agent running \S+ \(\d+%\)", text), text)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)

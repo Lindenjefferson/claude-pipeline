@@ -5,7 +5,7 @@
 ## Documentação: `/docs`, não comentário no código
 
 - **Não escrever comentários nem docstrings em classes, funções ou componentes** para explicar o que fazem. O código deve se explicar por nomes e estrutura.
-- A documentação vive em [`docs/`](docs/README.md), um arquivo por módulo (`docs/NN-nome-do-modulo.md`), seguindo o template de `docs/README.md`.
+- A documentação vive em [`docs/`](docs/README.md), um arquivo por módulo (`docs/modulos/NN-nome-do-modulo.md`), seguindo o template de `docs/README.md`.
 - Os padrões que todo código segue (camadas, nomes, erros, logs, testes, o mapa dos módulos e as decisões) ficam em [`docs/arquitetura.md`](docs/arquitetura.md), e publicar, backup, restauração e reversão em [`docs/operacao.md`](docs/operacao.md). Um padrão novo entra lá na tarefa que o adota; o `reviewer` aponta o código que diverge, e o `gate.py` confere o índice e os links.
 - **Toda rodada de código que criar, alterar ou remover algo de um módulo atualiza o `docs/` daquele módulo na mesma rodada** (arquivos-chave, classes/funções principais, decisões de design com o porquê, fluxo de dados, dependências e **Status**). O agente `dev` faz isso na mesma tarefa.
 - A documentação da API pública (quando o projeto é uma biblioteca ou expõe uma API a outros programas), no formato da ferramenta de documentação da linguagem, não conta como comentário: segue a convenção da linguagem.
@@ -25,6 +25,7 @@ Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o
 - Testes afetados (um arquivo ou filtro, para o `dev`): _(comando)_
 - Arquivos de teste (globs separados por espaço; o `gate.py` procura neles o id de cada critério de aceite): _(globs)_
 - Auditoria (vulnerabilidades das dependências; opcional): _(comando)_
+- Versão (os arquivos que guardam a versão do produto, separados por espaço; todos com o mesmo `x.y.z`, sem sufixo de pré-lançamento, que o `gate.py` exige acima do da branch principal): _(ex.: `package.json`)_
 - Tempo máximo de cada comando do gate, em minutos (padrão 15): _(número entre crases, só quando um comando passa disso)_
 - Verificação de interface (se houver tela): _(comando)_
 - Servidor para a verificação de interface (o mesmo que o runner sobe, com as variáveis do ambiente de teste; quem sobe o servidor à mão usa este): _(comando)_
@@ -72,4 +73,5 @@ A skill `manager` conduz cada entrega, do tamanho do pedido ao `gate.py` (o flux
 - Variáveis de ambiente e segredos nunca são commitados.
 - O que vale só para este computador (quanto uma cópia ocupa aqui, caminhos e limites da máquina) vai no `CLAUDE.local.md`, que fica fora do git; nunca neste arquivo.
 - Antes de escrever ou corrigir um comando de scaffold ou instalação (aqui, numa spec ou num plano), conferir a versão e as flags atuais no gerenciador de pacotes do stack, no `--help` e na documentação atual; nunca de memória.
+- Se houver tela: toda mudança de tela, mockup ou layout, dentro ou fora de uma entrega (brainstorming, pedido avulso, `fix-N`), carrega a skill `frontend-design` antes de desenhar e termina com uma captura de cada formato de tela, conferida antes de ir ao usuário. Toda pergunta ao usuário sobre o que ele vai ver (layout, caminho de cliques, agrupamento, estados de uma tela), na spec, no plano, num `fix-N` ou num pedido avulso, vai como desenho com as opções clicáveis no visual companion do `superpowers`, não em texto; a escolha vai para a spec ou o plano, e, numa tela com mock, para o `docs/mockups/<slug>.html`.
 - _(adicionar aqui as regras de stack decididas no brainstorming: acesso a dados, testes, migrations, deploy)_
