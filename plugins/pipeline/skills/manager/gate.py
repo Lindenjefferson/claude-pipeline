@@ -50,7 +50,7 @@ merge base with the default branch. With --report, the gate writes and stages do
 (checks, commits, ledger mode and notes, the VALIDAR list with the user's decision or pending, deferred decisions, a
 changed "Comandos" section and the delivery metrics: findings per cycle and origin, fix rounds, time per cycle, task
 and agent, tokens per agent and task, lines changed per dev task with the share of fix and cleanup, lessons added
-and automated) before running the commands, so the project's own tests check it too (the metrics also give each spec
+and automated, the delivery's clock and the gate's warnings) before running the commands, so the project's own tests check it too (the metrics also give each spec
 or plan review loop its rounds, findings and the findings refused in triage); READY rewrites
 its check lines, NOT READY removes it, and a draft of the same report left staged by a run that was killed is removed
 first."""
@@ -100,6 +100,15 @@ VERSION_LABELS = ("versão", "versao", "version")
 VERSION_KEY = re.compile(r"""(?im)^[ \t]*[<"']?(?:version|versionName|__version__)[>"']?[ \t]*[:=]?[ \t]*["']?v?"""
                          r"""(\d+\.\d+\.\d+)(-[\w.]+)?(?![\w.])""")
 VERSION_ONLY = re.compile(r"\s*v?(\d+\.\d+\.\d+)(-[\w.]+)?\s*")
+
+
+WARNINGS = []
+
+
+def warn(text):
+    """Print a warning and keep it for the quality report, where the next feedback-plugin can count it."""
+    print("warning: " + text, flush=True)
+    WARNINGS.append(text)
 
 
 def git(*args):
@@ -183,7 +192,7 @@ def time_limit():
         seconds = 0
     if 1 <= seconds <= DAY:
         return seconds
-    print(f"warning: invalid Tempo máximo '{value}' in CLAUDE.md (Comandos); using {MINUTES} minutes", flush=True)
+    warn(f"invalid Tempo máximo '{value}' in CLAUDE.md (Comandos); using {MINUTES} minutes")
     return MINUTES * 60
 
 
@@ -223,12 +232,7 @@ def secret_findings(base):
     spec = importlib.util.spec_from_file_location("secretscan", SCANNER)
     scanner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(scanner)
-    cwd = os.getcwd()
-    diff = scanner.git_checked(["log", "-p", "--diff-merges=separate", "--no-ext-diff", "--no-textconv", "--text",
-                                "--format=", f"{base}..HEAD", "--"] + scanner.EXCLUDES, cwd)
-    names = scanner.git_checked(["log", "--name-only", "-z", "--diff-merges=separate", "--diff-filter=d", "--format=",
-                                 f"{base}..HEAD"], cwd)
-    return scanner.scan(diff, scanner.names(names), scanner.load_allowlist(cwd, "HEAD"))
+    return scanner.range_findings(f"{base}..HEAD", os.getcwd())
 
 
 def glob_regex(pattern):
@@ -346,8 +350,8 @@ def version(base):
         changed = [name for name in git("diff", "--name-only", base, "HEAD")[1].split() if name]
         if changed and all(name.startswith("docs/") or name.endswith(".md") for name in changed):
             return True, f"only documentation changed since the base (version {now})", now
-        return False, (f"the version is {now}, not above the base's {old}: the delivery's last dev task raises it "
-                       "(manager step 5)"), now
+        return False, (f"the version is {now}, not above the base's {old}: the manager raises it before the gate "
+                       "(manager step 6)"), now
     return True, "", now
 
 
@@ -429,14 +433,14 @@ def traceability(plan, base="", task=None):
     ids = sorted(set(CRITERION.findall(text)))
     templates = sorted(set(CRITERION_ANY.findall(text)) - set(ids))
     if templates:
-        print(f"warning: {plan} writes {', '.join(templates)} with a placeholder right after it, so each is an id "
-              "template, not a criterion, and the gate traces no test for it", flush=True)
+        warn(f"{plan} writes {', '.join(templates)} with a placeholder right after it, so each is an id "
+              "template, not a criterion, and the gate traces no test for it")
     defined = sorted(set(DEFINED.findall(text)))
     if defined:
         cited = [item for item in ids if item not in defined]
         if cited:
-            print(f"warning: {plan}: cited, never defined: {', '.join(cited)} (a criterion is the id that opens a "
-                  "list item; the gate traces no test for these)", flush=True)
+            warn(f"{plan}: cited, never defined: {', '.join(cited)} (a criterion is the id that opens a "
+                  "list item; the gate traces no test for these)")
         ids = defined
     if task:
         ids = [item for item in ids if of_task(item, task)]
@@ -456,13 +460,12 @@ def traceability(plan, base="", task=None):
             try:
                 regex = glob_regex(pattern)
             except re.error:
-                print(f"warning: invalid test glob '{pattern}' (Arquivos de teste in CLAUDE.md)", flush=True)
+                warn(f"invalid test glob '{pattern}' (Arquivos de teste in CLAUDE.md)")
                 continue
             tests.append(regex)
             matched = [name for name in tracked if regex.match(name)]
             if not matched:
-                print(f"warning: test glob '{pattern}' matches no tracked file (Arquivos de teste in CLAUDE.md)",
-                      flush=True)
+                warn(f"test glob '{pattern}' matches no tracked file (Arquivos de teste in CLAUDE.md)")
             names += [name for name in matched if name not in names]
     else:
         names = [name for name in names if not name.lower().endswith(".md")]
@@ -474,10 +477,9 @@ def traceability(plan, base="", task=None):
     if tests and base:
         late = born_with_code(base, repo_path(plan), ids, patterns, tests, folders)
         if late:
-            print("warning: test and code in the same commit for "
+            warn("test and code in the same commit for "
                   + ", ".join(f"{item} ({sha})" for item, sha in late)
-                  + "; a test written first has a commit of its own, and no warning does not prove that order",
-                  flush=True)
+                  + "; a test written first has a commit of its own, and no warning does not prove that order")
     return not missing, ("criteria with no test: " + ", ".join(missing)) if missing else ""
 
 
@@ -547,6 +549,11 @@ def time_lines(metrics):
     unmeasured = time["unmeasured"]
     lines = ["## Time", "", "Agent time adds up every run; elapsed is wall-clock, so parallel runs count once. "
              f"{unmeasured} run{'' if unmeasured == 1 else 's'} unmeasured.", ""]
+    clock = time.get("delivery")
+    if clock:
+        share = f" ({round(clock['share'] * 100)}%)" if clock.get("share") is not None else ""
+        lines.append(f"- Delivery: {duration(clock['elapsed'])} elapsed, {duration(clock['paused'])} paused, "
+                     f"an agent running {duration(clock['agents'])}{share}")
     for cycle in metrics["cycles"]:
         agents = ", ".join(f"{agent} {duration(seconds)}" for agent, seconds in cycle["agents"].items())
         elapsed = f", {duration(cycle['elapsed'])} elapsed" if cycle.get("elapsed") is not None else ""
@@ -648,6 +655,8 @@ def write_report(slug, base, head, checks, ledger, changed, unrun, number=None):
         lines += [""] + metrics_lines(ledger.get("metrics"))
     if unrun:
         lines += ["## Test lines not run", ""] + [f"- {label}" for label in unrun] + [""]
+    if WARNINGS:
+        lines += ["## Warnings", ""] + [f"- {text}" for text in dict.fromkeys(WARNINGS)] + [""]
     if changed:
         lines += ["## Comandos changed", "", "```diff"] + changed + ["```", ""]
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
@@ -703,7 +712,7 @@ def main():
     checks.append(("Ledger", not pending, pending))
 
     if args.report and git("diff", "--cached", "--name-only", "--", report_path(args.report))[1].strip():
-        print(f"warning: removing {report_path(args.report)}, a draft left by a gate run that did not finish", flush=True)
+        warn(f"removing {report_path(args.report)}, a draft left by a gate run that did not finish")
         drop_report(report_path(args.report), git("cat-file", "-e", f"HEAD:{report_path(args.report)}")[0] == 0)
     dirty = git("status", "--porcelain")[1].strip()
     checks.append(("Clean tree", not dirty, dirty))
@@ -739,7 +748,7 @@ def main():
         before = tracked_changes()
         shell, seconds = bash(), time_limit()
         if not shell:
-            print("warning: no Git Bash found; the commands run in cmd.exe", flush=True)
+            warn("no Git Bash found; the commands run in cmd.exe")
         for name in ORDER + [name for name in commands if name not in ORDER]:
             if name not in commands:
                 checks.append((name, name != "Testes", "not configured in CLAUDE.md (Comandos)"))
