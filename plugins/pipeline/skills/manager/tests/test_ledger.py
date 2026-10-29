@@ -691,7 +691,7 @@ check("a reviewer task other than spec or plan is refused",
       run("add", "--agent", "reviewer", "--task", "T1", "--verdict", "PASS", ledger=LOOP).returncode != 0)
 
 
-def review(verdict, task="plan", open_count=0, ledger=LOOP, report=None, critical=0, minor=0, triage=None):
+def review(verdict, task="plan", open_count=0, ledger=LOOP, report=None, critical=0, minor=0):
     args = ["add", "--agent", "reviewer", "--task", task, "--verdict", verdict]
     if open_count:
         args += ["--important", str(open_count)]
@@ -701,8 +701,6 @@ def review(verdict, task="plan", open_count=0, ledger=LOOP, report=None, critica
         args += ["--minor", str(minor)]
     if open_count + critical + minor:
         args += ["--origin", f"plan={open_count + critical + minor}"]
-    if triage:
-        args += ["--triage", triage]
     return run(*(args + (["--report", report] if report else [])), "--seconds", "5m", ledger=ledger)
 
 
@@ -719,17 +717,11 @@ check("a plan review FAIL is a review step with its round and the range of the n
                                  f"{LOOP_HEAD[:12]}..HEAD, the corrections only", (r.stderr, state["steps"], state["pending"]))
 check("status --check fails while the plan review is open", run("status", "--check", ledger=LOOP).returncode == 1)
 r = review("FAIL", open_count=1)
-check("the next round is refused without the triage of the previous round's findings",
-      r.returncode != 0 and "--triage applied=N,refused=N,errata=N" in r.stderr and len(status(LOOP)["metrics"]["reviews"])
-      and status(LOOP)["metrics"]["reviews"]["plan"]["rounds"] == 1, r.stderr)
-r = review("FAIL", open_count=1, triage="applied=2")
-check("a triage that leaves a finding out is refused: the previous round had 3",
-      r.returncode != 0 and "3 findings" in r.stderr, r.stderr)
-r = review("FAIL", open_count=1, triage="applied=1,kept=2")
-check("a triage outside applied, refused and errata is refused", r.returncode != 0 and "kept" in r.stderr, r.stderr)
-r = review("FAIL", open_count=1, triage="applied=1,refused=1,errata=1")
-check("the triage of every finding of the previous round lets the next round in", r.returncode == 0, r.stderr)
-review("FAIL", open_count=1, triage="applied=1")
+check("the next round is added with no triage counts", r.returncode == 0
+      and status(LOOP)["metrics"]["reviews"]["plan"]["rounds"] == 2, r.stderr)
+check("--triage is gone", run("add", "--agent", "reviewer", "--task", "plan", "--verdict", "PASS", "--triage",
+                              "applied=1", ledger=LOOP).returncode != 0)
+review("FAIL", open_count=1)
 state = status(LOOP)
 check("supervised: three rounds with no Critical open go on without asking: carry the open findings and waive",
       state["steps"][0] == {"step": "waive", "task": "plan", "rounds": 3, "open": 1}
@@ -743,14 +735,11 @@ state = status(LOOP)
 check("the waiver closes the loop and the cycle steps stay",
       state["steps"] == [{"step": "dev"}] and state["pending"] == ["no dev task yet"]
       and state["validar"][-1]["text"] == "waived reviewer plan FAIL: 1 Important carried to the Errata", state)
-check("plan reviews are counted in the metrics by rounds, findings, refused findings and time, apart from the cycles",
-      state["metrics"]["reviews"] == {"plan": {"rounds": 3, "critical": 0, "important": 4, "minor": 1, "refused": 1,
+check("plan reviews are counted in the metrics by rounds, findings and time, apart from the cycles",
+      state["metrics"]["reviews"] == {"plan": {"rounds": 3, "critical": 0, "important": 4, "minor": 1,
                                                "seconds": 900, "tokens": 0}}
       and state["metrics"]["time"]["agents"] == {"reviewer": 900} and state["metrics"]["origins"]["plan"] == 5
       and state["metrics"]["cycles"][0]["seconds"] == 0, state["metrics"])
-r = review("FAIL", open_count=1, triage="applied=1")
-check("--triage on the first round of a review is refused: there is no previous round to triage",
-      r.returncode != 0 and "--triage" in r.stderr, r.stderr)
 r = review("FAIL", open_count=1)
 check("a review after a PASS (a change of scope) is a new loop: its counter starts again at round 1",
       status(LOOP)["steps"][0]["round"] == 2 and "(round 1)" in r.stdout, (r.stdout, status(LOOP)["steps"]))
@@ -773,7 +762,7 @@ check("extend --task of a review loop that never failed is refused",
       r.returncode != 0 and "nothing to extend" in r.stderr, r.stderr)
 review("FAIL", critical=1, ledger=EXT)
 for _ in range(2):
-    review("FAIL", critical=1, ledger=EXT, triage="applied=1")
+    review("FAIL", critical=1, ledger=EXT)
 check("supervised: a Critical still open after three rounds asks the user",
       status(EXT)["steps"][0] == {"step": "ask", "task": "plan", "rounds": 3}
       and status(EXT)["pending"][0] == "plan review still fails after 3 rounds: ask the user", status(EXT)["steps"])
@@ -784,7 +773,7 @@ check("extend --task records the user's extra review round and the loop goes on"
       and state["notes"][-1] == "extra plan review round: user wants the corrections checked", (r.stderr, state))
 check("a review extension does not extend the cycle's fix rounds",
       run("extend", "--reason", "y", ledger=EXT).returncode != 0)
-review("FAIL", critical=1, ledger=EXT, triage="applied=1")
+review("FAIL", critical=1, ledger=EXT)
 state = status(EXT)
 check("the extra round failing asks the user again, naming it as the extra one",
       state["steps"][0] == {"step": "ask", "task": "plan", "rounds": 4, "extended": True}
@@ -797,7 +786,7 @@ check("the user may authorize another round after the extra one",
       r.returncode == 0 and status(EXT)["steps"][0]["step"] == "review", (r.stderr, status(EXT)["steps"]))
 check("the note of an extension in autonomous mode is a VALIDAR item",
       status(EXT)["validar"][-1]["text"] == "extra plan review round: one more", status(EXT)["validar"])
-review("FAIL", open_count=1, ledger=EXT, triage="applied=1")
+review("FAIL", open_count=1, ledger=EXT)
 check("the extra round with no Critical left is waived, not asked",
       status(EXT)["steps"][0] == {"step": "waive", "task": "plan", "rounds": 5, "open": 1, "extended": True},
       status(EXT)["steps"])
@@ -1586,21 +1575,18 @@ check("a stored tip that is not an ancestor of the tip is ignored",
 
 SIMP = ".superpowers/simpler.jsonl"
 run("start", "--slug", "simpler", ledger=SIMP)
-for agent, verdict in (("reviewer", "PASS"), ("dev", "DONE"), ("dev", "BLOCKED")):
-    r = run("add", "--agent", agent, "--verdict", verdict, "--simpler", *(["--task", "S9"] if agent == "dev" else []),
-            ledger=SIMP)
-    check(f"--simpler is refused on {agent} {verdict}", r.returncode != 0 and "--simpler" in r.stderr, r.stderr)
-check("a refused --simpler writes nothing", ledger_lines(SIMP) == 1)
 r = run("add", "--agent", "dev", "--verdict", "NEEDS_CONTEXT", "--simpler", "--task", "S1", ledger=SIMP)
-check("--simpler on a dev NEEDS_CONTEXT is stored", r.returncode == 0 and ledger_entries(SIMP)[-1].get("simpler") is True,
-      (r.stderr, ledger_entries(SIMP)[-1]))
+check("--simpler is gone: add refuses it and writes nothing", r.returncode != 0 and ledger_lines(SIMP) == 1, r.stderr)
+with open(os.path.join(repo, SIMP), "a", encoding="utf-8", newline="\n") as handle:
+    handle.write(json.dumps({"type": "run", "agent": "dev", "task": "S1", "verdict": "NEEDS_CONTEXT", "open": 0,
+                             "head": "", "simpler": True, "at": "2026-10-01T10:00:00+00:00"}) + "\n")
 add("dev", "NEEDS_CONTEXT", "S2", ledger=SIMP)
 add("dev", "BLOCKED", "S3", ledger=SIMP)
 add("dev", "NEEDS_CONTEXT", "S4", ledger=SIMP)
 add("dev", "DONE", "S5", ledger=SIMP)
 found = status(SIMP)["metrics"].get("verdicts")
-check("metrics.verdicts counts the questions, the simpler proposals and the blocks over the dev runs",
-      found == {"needs_context": 2, "simpler": 1, "blocked": 1}, found)
+check("metrics.verdicts counts the questions and the blocks over the dev runs; an older simpler run is a question",
+      found == {"needs_context": 3, "blocked": 1}, found)
 
 BROKEN = ".superpowers/broken.jsonl"
 run("start", "--slug", "broken", ledger=BROKEN)
@@ -1667,8 +1653,8 @@ cycle = status(UNMEASURED)["metrics"]["cycles"][0]
 check("a cycle whose runs carry no --seconds still reports its wall-clock elapsed, from the run timestamps",
       cycle["seconds"] == 0 and cycle["elapsed"] == 3600, cycle)
 
-check("an old ledger counts 0 simpler proposals, and its needs-context runs",
-      status(LINES)["metrics"].get("verdicts") == {"needs_context": 1, "simpler": 0, "blocked": 0},
+check("an old ledger counts its needs-context runs",
+      status(LINES)["metrics"].get("verdicts") == {"needs_context": 1, "blocked": 0},
       status(LINES)["metrics"].get("verdicts"))
 
 MEASURE = ".superpowers/measure.jsonl"
@@ -1803,21 +1789,30 @@ with open(os.path.join(QUALITY, "2026-09-01-a.md"), "w", encoding="utf-8", newli
     handle.write("# a\n\n## Deferred\n\n- D1 old thing -> moved to b: later\n")
 with open(os.path.join(QUALITY, "2026-10-01-b.md"), "w", encoding="utf-8", newline="\n") as handle:
     handle.write("# b\n\n## Deferred\n\n- D1 export csv -> moved to c: needs the API\n- D2 typo -> fixed in fix-1\n"
-                 "- D3 a -> b mapping -> moved to the car test: needs the car\n\n## Metrics\n\n- D9 not deferred -> moved to x\n")
+                 "- D3 a -> b mapping -> moved to the car test: needs the car\n"
+                 "- D4 old csv (moved here by docs/quality-reports/2026-09-01-a.md) -> moved to z-later: not yet\n"
+                 "- D5 vague -> moved to backlog\n"
+                 "\n## Metrics\n\n- D9 not deferred -> moved to x\n")
 r = run("start", "--slug", "c", ledger=CARRY)
 state = status(CARRY)
 LATEST = "docs/quality-reports/2026-10-01-b.md"
-check("start carries the items the latest quality report moved to a later delivery, each needing a decision",
-      r.returncode == 0 and "carried 2 items moved to a later delivery from " + LATEST in r.stdout
+check("start carries the items the latest quality report moved to this delivery or to no named one, each needing "
+      "a decision, and passes on, resolved, one moved to another delivery, its chain of reports cut to the last",
+      r.returncode == 0 and "carried 3 items moved to a later delivery from " + LATEST in r.stdout
+      and "passed on 1 item moved to another delivery" in r.stdout and "- D3 -> z-later: old csv" in r.stdout
       and state["deferred"] == [{"id": "D1", "text": f"export csv (moved here by {LATEST})", "decision": None,
                                  "recommend": "decide whether this delivery takes it: moved to c: needs the API"},
                                 {"id": "D2", "text": f"a -> b mapping (moved here by {LATEST})", "decision": None,
-                                 "recommend": "decide whether this delivery takes it: moved to the car test: needs the car"}]
+                                 "recommend": "decide whether this delivery takes it: moved to the car test: needs the car"},
+                                {"id": "D3", "text": f"old csv (moved here by {LATEST})",
+                                 "decision": "moved to z-later: not yet", "recommend": "moved to z-later: not yet"},
+                                {"id": "D4", "text": f"vague (moved here by {LATEST})", "decision": None,
+                                 "recommend": "decide whether this delivery takes it: moved to backlog"}]
       and {"step": "decide", "id": "D1", "text": f"export csv (moved here by {LATEST})",
            "recommend": "decide whether this delivery takes it: moved to c: needs the API"} in state["steps"],
       (r.stdout, state["deferred"], state["steps"]))
 check("a carried item numbers the next deferred item after it",
-      "deferred D3" in run("defer", "--text", "x", "--recommend", "y", ledger=CARRY).stdout)
+      "deferred D5" in run("defer", "--text", "x", "--recommend", "y", ledger=CARRY).stdout)
 with open(os.path.join(QUALITY, "2026-10-01-zeta.md"), "w", encoding="utf-8", newline="\n") as handle:
     handle.write("# zeta\n\n## Deferred\n\n- D1 stale -> moved to alpha: older\n")
 with open(os.path.join(QUALITY, "2026-10-01-alpha.md"), "w", encoding="utf-8", newline="\n") as handle:
@@ -1972,6 +1967,24 @@ r = run("waive", "--agent", "reviewer", "--task", "security", "--reason", "fixed
 check("waive --task security closes the loop", r.returncode == 0 and status(SEC)["ready_for_gate"] is True,
       (r.stderr, status(SEC)["pending"]))
 
+SENS = ".superpowers/sensitive.jsonl"
+run("start", "--slug", "sensitive", ledger=SENS)
+check("sensitive needs a reason", run("sensitive", ledger=SENS).returncode != 0)
+r = run("sensitive", "--reason", "writes money", ledger=SENS)
+add("dev", "DONE", "T1", ledger=SENS)
+check("the scan is no step while the cycle is open", not any(step["step"] == "security" for step in status(SENS)["steps"]),
+      status(SENS)["steps"])
+add("reviewer", "PASS", ledger=SENS)
+add("qa", "PASS", ledger=SENS)
+state = status(SENS)
+check("a delivery marked sensitive is not ready for the gate until its security scan ran",
+      r.returncode == 0 and state["ready_for_gate"] is False
+      and any("security scan" in item and "writes money" in item for item in state["pending"])
+      and {"step": "security", "reason": "writes money"} in state["steps"], (r.stderr, state["pending"], state["steps"]))
+run("add", "--agent", "reviewer", "--task", "security", "--verdict", "PASS", "--report", report_file("scan.md"),
+    ledger=SENS)
+check("its security scan's PASS makes it ready", status(SENS)["ready_for_gate"] is True, status(SENS)["pending"])
+
 # A qa report is checked on add, and a qa that tested a commit before the fix does not count as its re-run
 EARLY = ".superpowers/early.jsonl"
 run("start", "--slug", "early", ledger=EARLY)
@@ -2101,6 +2114,52 @@ check("past the time the user is back, the night is over and status says to paus
       text)
 run("mode", "supervised", ledger=NIGHT)
 check("mode supervised ends the night", status(NIGHT)["night"] is None)
+
+# The settings that change speed or cost, still a template placeholder, are listed for the user
+cfg = tempfile.mkdtemp(prefix="ledger_cfg_", dir=repo)
+for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t.com"), ("config", "user.name", "t"),
+             ("commit", "-q", "--allow-empty", "-m", "base")):
+    subprocess.run(["git", *args], cwd=cfg, check=True, capture_output=True)
+CFG = os.path.join(cfg, ".superpowers", "ledger.jsonl")
+
+
+def cfg_files(parallel):
+    with open(os.path.join(cfg, "CLAUDE.md"), "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("# p\n\n## Execução em paralelo\n\nText.\n\n"
+                     + ("- Como rodar N cópias ao mesmo tempo: `PORT`\n- Pasta de saída dos testes: `OUT`\n" if parallel
+                        else "- Como rodar N cópias ao mesmo tempo: _(porta)_\n- Pasta de saída dos testes: `OUT`\n")
+                     + "\n## Outra\n\n- Algo: _(x)_\n")
+    with open(os.path.join(cfg, "CLAUDE.local.md"), "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("# p\n\n## Execução em paralelo\n\n- Memória livre mínima para despachar uma cópia ou um `qa`: "
+                     "_(GB)_\n\n## Uso da conta\n\n- Economia a partir de quanto uso, em %: `70`\n"
+                     "- Sempre econômico: _(padrão não)_\n")
+
+
+cfg_files(parallel=False)
+run("start", "--slug", "cfg", ledger=CFG, cwd=cfg)
+run("scope", "--cycle", "1", "--tasks", "A1,A2,A3", ledger=CFG, cwd=cfg)
+settings = status(CFG)["settings"]
+check("status lists each line of the speed and cost sections still holding a placeholder, in file order",
+      settings["unfilled"] == [
+          {"file": "CLAUDE.md", "section": "Execução em paralelo", "line": "Como rodar N cópias ao mesmo tempo"},
+          {"file": "CLAUDE.local.md", "section": "Execução em paralelo",
+           "line": "Memória livre mínima para despachar uma cópia ou um `qa`"},
+          {"file": "CLAUDE.local.md", "section": "Uso da conta", "line": "Sempre econômico"}], settings)
+check("with the parallel section of CLAUDE.md unfilled, status counts the tasks of the cycle that could run together",
+      settings["together"] == 3, settings)
+text = run("status", ledger=CFG, cwd=cfg).stdout
+check("the text asks to take the unfilled settings to the user now, and says the tasks run one at a time",
+      "settings:" in text and "ask the user" in text and "3 tasks could run together" in text, text)
+check("the settings are advice, never pending",
+      not any("settings" in item or "Execução" in item for item in status(CFG)["pending"]), status(CFG)["pending"])
+cfg_files(parallel=True)
+settings = status(CFG)["settings"]
+check("the parallel section filled: no count of tasks together, and its lines leave the list",
+      settings["together"] is None and all(item["file"] == "CLAUDE.local.md" for item in settings["unfilled"]), settings)
+os.remove(os.path.join(cfg, "CLAUDE.local.md"))
+check("a missing CLAUDE.local.md is listed once, as missing",
+      {"file": "CLAUDE.local.md", "section": None, "line": None} in status(CFG)["settings"]["unfilled"],
+      status(CFG)["settings"])
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)

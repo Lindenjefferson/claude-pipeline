@@ -9,8 +9,8 @@ anywhere else is cited, a warning ("cited, never defined") and never traced, and
 item is read as before, every id a criterion. A task's criteria, for --criteria, are those with a segment that is the
 task id or ends with it right after a digit (AC-T3-2, AC-PL-T3-2 and AC-074T3-2 are T3's; AC-T31-2 is not).
 
-Checks, in order: nothing is pending in the ledger (the current cycle is closed and every deferred item has a final
-decision); the tree is clean; the documentation the kickoff prepared stays whole (with a docs/README.md: docs/arquitetura.md, the patterns every task follows, exists and, once a module doc docs/modulos/NN-*.md is tracked, holds no _(...)_ placeholder; the index names every tracked module doc; every entry of docs/ is in the map (README.md, arquitetura.md, operacao.md
+Checks, in order: nothing is pending in the ledger (the current cycle is closed, every deferred item has a final
+decision and a delivery marked sensitive had its security scan); the tree is clean; the documentation the kickoff prepared stays whole (with a docs/README.md: docs/arquitetura.md, the patterns every task follows, exists and, once a module doc docs/modulos/NN-*.md is tracked, holds no _(...)_ placeholder; the index names every tracked module doc; every entry of docs/ is in the map (README.md, arquitetura.md, operacao.md
 or operacao/, lessons.md, modulos/ with module docs only, discovery/, specs/, plans/, mockups/, quality-reports/, or a
 folder or file the index names); and no relative link of README.md, docs/README.md or docs/arquitetura.md points to a missing file); the files of the
 "Versão" line of "Comandos" (space-separated) hold one version x.y.z (after a version, versionName or __version__ key,
@@ -51,7 +51,7 @@ merge base with the default branch. With --report, the gate writes and stages do
 changed "Comandos" section and the delivery metrics: findings per cycle and origin, fix rounds, time per cycle, task
 and agent, tokens per agent and task, lines changed per dev task with the share of fix and cleanup, lessons added
 and automated, the delivery's clock and the gate's warnings) before running the commands, so the project's own tests check it too (the metrics also give each spec
-or plan review loop its rounds, findings and the findings refused in triage); READY rewrites
+or plan review loop its rounds and findings); READY rewrites
 its check lines, NOT READY removes it, and a draft of the same report left staged by a run that was killed is removed
 first."""
 import argparse
@@ -589,10 +589,9 @@ def lines_line(metrics):
 
 def question_line(metrics):
     found = metrics.get("verdicts") or {}
-    if not any(found.get(key) for key in ("needs_context", "simpler", "blocked")):
+    if not any(found.get(key) for key in ("needs_context", "blocked")):
         return []
-    return [f"- Dev questions: {found.get('needs_context', 0)} needs-context, {found.get('simpler', 0)} simpler "
-            f"proposals, {found.get('blocked', 0)} blocked", ""]
+    return [f"- Dev questions: {found.get('needs_context', 0)} needs-context, {found.get('blocked', 0)} blocked", ""]
 
 
 def metrics_lines(metrics):
@@ -607,8 +606,7 @@ def metrics_lines(metrics):
                      + f"; {rounds} fix round{'' if rounds == 1 else 's'}")
     for task, loop in (metrics.get("reviews") or {}).items():
         lines.append(f"- {task.capitalize()} review: {loop['rounds']} round{'' if loop['rounds'] == 1 else 's'}, "
-                     f"{loop['critical']} Critical, {loop['important']} Important, {loop['minor']} Minor"
-                     + (f"; {loop['refused']} refused in triage" if loop.get("refused") else ""))
+                     f"{loop['critical']} Critical, {loop['important']} Important, {loop['minor']} Minor")
     origins = dict(metrics.get("origins") or {})
     if origins:
         unclassified = origins.pop("unclassified", 0)

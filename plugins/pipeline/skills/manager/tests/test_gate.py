@@ -127,8 +127,7 @@ check("a fix round after the closed cycle needs its review: NOT READY",
 ledger("--agent", "reviewer", "--verdict", "PASS", "--minor", "2", "--origin", "execution=2")
 ledger("--agent", "reviewer", "--task", "plan", "--verdict", "FAIL", "--important", "1", "--minor", "1", "--origin",
        "plan=2")
-ledger("--agent", "reviewer", "--task", "plan", "--verdict", "PASS", "--minor", "1", "--origin", "plan=1", "--triage",
-       "applied=1,refused=1")
+ledger("--agent", "reviewer", "--task", "plan", "--verdict", "PASS", "--minor", "1", "--origin", "plan=1")
 subprocess.run([sys.executable, LEDGER, "lesson", "--text", "lock before checking", "--check", "tests/race.sql"],
                cwd=repo, check=True, capture_output=True)
 r = gate("--base", "main")
@@ -142,7 +141,7 @@ check("--report writes and stages the quality report on READY",
 text = open(os.path.join(repo, "docs", "quality-reports", report[0]), encoding="utf-8").read() if report else ""
 check("the report carries the delivery metrics from the ledger",
       "## Metrics" in text and "- Cycle 1: 0 Critical, 0 Important, 2 Minor; 1 fix round" in text
-      and "- Plan review: 2 rounds, 0 Critical, 1 Important, 2 Minor; 1 refused in triage" in text
+      and "- Plan review: 2 rounds, 0 Critical, 1 Important, 2 Minor" in text
       and "Lessons: 1 (1 automated)" in text and "- lock before checking (check: tests/race.sql)" in text, text)
 check("the report shows the lines changed per dev task, with the share of fix and cleanup",
       re.search(r"- Lines changed: .*fix-1 \d+ \(fix and cleanup \d+%", text) is not None, text)
@@ -366,10 +365,10 @@ check("a share of 0 prints as 0% and no unmeasured text",
       "- Lines changed: T1 8 (fix and cleanup 0%)" in lines_text, lines_text)
 
 lines_text = chr(10).join(gate_module.metrics_lines({**base_metrics, "verdicts": {
-    "needs_context": 2, "simpler": 1, "blocked": 0}}))
-check("the dev questions line counts needs-context, simpler proposals and blocked",
-      "- Dev questions: 2 needs-context, 1 simpler proposals, 0 blocked" in lines_text, lines_text)
-for verdicts in ({"needs_context": 0, "simpler": 0, "blocked": 0}, None):
+    "needs_context": 2, "blocked": 0}}))
+check("the dev questions line counts needs-context and blocked",
+      "- Dev questions: 2 needs-context, 0 blocked" in lines_text, lines_text)
+for verdicts in ({"needs_context": 0, "blocked": 0}, None):
     lines_text = chr(10).join(gate_module.metrics_lines({**base_metrics, **({"verdicts": verdicts} if verdicts else {})}))
     check(f"no dev questions line with {verdicts or 'no verdicts'}", "Dev questions" not in lines_text, lines_text)
 

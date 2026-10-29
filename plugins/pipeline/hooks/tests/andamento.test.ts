@@ -202,6 +202,12 @@ test('a paused delivery says so in the title and spells out the resume step', ()
   expect(shown({ ...paused, paused: null, steps: [] })).toEqual(['etapa 5, ciclo 2, modo autônomo'])
 })
 
+test('the security scan step of a sensitive delivery is spelled out', () => {
+  const sensitive = { ...STATUS, dispatched: {}, scope: null, validar: [], reviewer: [],
+                      steps: [{ step: 'security', reason: 'writes money' }] }
+  expect(paneLines(sensitive, [], NOW)).toContain('- varredura de segurança (writes money)')
+})
+
 test('with a delivery open, the band is drawn under the prompt, below the hint line Claude Code keeps drawing', async ($, on) => {
   const clock = stubs(on, STATUS)
   await start($, clock)
