@@ -6,7 +6,7 @@ Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão 
 
 **A numeração voltou para 1.x** (decisão do usuário, com o plugin só em instalação local). A 2.12.0 passou a ser a **1.12.0**, e cada versão da linha 2.x segue a mesma conta (a 2.9.9 é a 1.9.9, e assim por diante). A linha 1.x original, de antes da 2.0.0, virou 0.x pela mesma conta (a 1.6.0 de então é a **0.6.0**), para nenhum número valer por duas versões. Nada muda no comportamento. Uma cópia 2.x se atualiza pelo caminho normal — `claude plugin marketplace update linden-plugins` e `claude plugin update pipeline@linden-plugins --scope <escopo>`, depois `/reload-plugins` — porque o instalador compara com o que o marketplace oferece, não a ordem dos números; a skill `atualizar` continua valendo. Conferido na prática, de 2.12.0 para 1.12.0.
 
-## 1.24.0 — o lixo que o fluxo deixa no PC: cópia integrada sem desmontar, o que a verificação grava fora da worktree, aviso de queda de disco (PR #?)
+## 1.24.0 — o lixo que o fluxo deixa no PC: cópia integrada sem desmontar, o que a verificação grava fora da worktree, aviso de queda de disco (PR #75)
 
 Varredura de disco no `homebudgy` e no `homebudgy-app` (1.23.0) e revisão do Fable, aceitas pelo dono: o Maestro deixou 77 a 81 GB de cópias do APK no `%TEMP%` em dois dias, e o disco caiu de 90 para 53 GB livres numa onda paralela sem ninguém ver; o fluxo deixou mais ~10 GB de cópias. O que é de stack (Maestro, Supabase, Expo) ficou no `docs/lessons.md` de cada projeto, e o que existe hoje para limpar, na memória de cada projeto, para tratar ao retomá-lo.
 
