@@ -30,6 +30,11 @@
 A claim is written when the dev is dispatched and freed by the dev's add (or release); status lists the tasks in
 flight and the gate waits for them, so a manager resuming after a compaction sees which runs it still owes a report.
 claim refuses a task that is in flight or already DONE in the current cycle, so one task never runs twice by mistake.
+status lists each copy left over, pending (step leftover, with its action) until it is gone, so the gate waits: a
+worktree under ../_temp/<project>-worktrees/ (project being the main worktree's folder) or .claude/worktrees/ with no
+claim and its HEAD in the delivery head, a folder of ../_temp/<project>-worktrees/ with no .git, and a local branch
+integrated in this delivery (in the head, not in the base) that is neither the current one nor a claimed worktree's;
+status --json gives them as leftovers: {kind worktree|folder|branch, path, branch, action}.
 --worktree (an existing directory) and --origin (a commit, resolved to its hash there) are kept with the claim; status
 shows them and, when the delivery head is no longer the origin, names the head (a fact: it moves with every
 integration). A claim's tip is its worktree's current HEAD (null with no worktree or folder): resume prints
@@ -843,6 +848,45 @@ def committed(entry, head):
     return bool(not entry.get("worktree") and entry.get("head") and head and entry["head"] != head)
 
 
+def leftovers(entries, ledger, head):
+    """Copies left after their task was integrated: worktrees and folders of the copies, and their branches."""
+    where = os.path.dirname(os.path.abspath(ledger))
+    common = git_ok(where, "rev-parse", "--path-format=absolute", "--git-common-dir") if os.path.isdir(where) else None
+    if not common or not head:
+        return []
+    root = os.path.dirname(common)
+    norm = lambda path: os.path.normcase(os.path.abspath(path))
+    copies = os.path.normpath(os.path.join(os.path.dirname(root), "_temp", os.path.basename(root) + "-worktrees"))
+    homes = (norm(copies) + os.sep, norm(os.path.join(root, ".claude", "worktrees")) + os.sep)
+    held = {norm(entry["worktree"]) for entry in claims(entries).values() if entry.get("worktree")}
+    integrated = lambda rev: git_ok(root, "merge-base", "--is-ancestor", rev, head) is not None
+    found, trees, busy = [], set(), set()
+    for block in (git_ok(root, "worktree", "list", "--porcelain") or "").split("\n\n"):
+        fields = dict(line.partition(" ")[::2] for line in block.splitlines())
+        if "worktree" not in fields:
+            continue
+        path = norm(fields["worktree"])
+        trees.add(path)
+        if path in held:
+            busy.add(fields.get("branch", "")[11:])
+        if path.startswith(homes) and path not in held and integrated(fields.get("HEAD", "")):
+            found.append({"kind": "worktree", "path": os.path.normpath(fields["worktree"]),
+                          "branch": fields.get("branch", "")[11:] or None, "action": "tear the copy down as Execução em paralelo says, then git worktree remove it"})
+    for name in sorted(os.listdir(copies)) if os.path.isdir(copies) else []:
+        path = os.path.join(copies, name)
+        if os.path.isdir(path) and norm(path) not in trees and not os.path.exists(os.path.join(path, ".git")):
+            found.append({"kind": "folder", "path": path, "branch": None,
+                          "action": "stop what still runs from it (by the PID of its port), then delete the folder"})
+    base = entries[0].get("base")
+    current = git_ok(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    for line in (git_ok(root, "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads") or "").splitlines():
+        name, _, commit = line.partition(" ")
+        if name != current and name not in busy and integrated(commit) and not (
+                base and git_ok(root, "merge-base", "--is-ancestor", commit, base) is not None):
+            found.append({"kind": "branch", "path": None, "branch": name, "action": "git branch -d it"})
+    return found
+
+
 def claim(args):
     entries = read(args.ledger)
     if not entries:
@@ -1464,6 +1508,10 @@ def status(args):
         pending.append(f"security scan has not run, and the delivery touches a sensitive domain ({marks[-1]}): run "
                        "it once the last cycle closes (references/security.md)")
         steps.append({"step": "security", "reason": marks[-1]})
+    left = leftovers(entries, args.ledger, head)
+    pending += [f"leftover {item['kind']} {item['path'] or item['branch']}, already integrated or abandoned: "
+                f"{item['action']}" for item in left]
+    steps += [{"step": "leftover", **item} for item in left]
     pause_state = paused(entries)
     if pause_state:
         pending.insert(0, f"delivery paused since {pause_state['at']}: {pause_state['text']} "
@@ -1481,7 +1529,7 @@ def status(args):
                           "waiting_minutes": waiting(claim), "committed": committed(claim, head),
                           "partial_report": (waiting(claim) or 0) >= PARTIAL_REPORT_MINUTES}
                          for task, claim in claims(entries).items()],
-              "paused": pause_state, "full_qa": full[-1] if full else None,
+              "paused": pause_state, "full_qa": full[-1] if full else None, "leftovers": left,
               "tasks": {task: entry["verdict"] for task, entry in state["tasks"].items()},
               "reviewer": state["reviewer"], "qa": state["qa"], "runs": groups[-1], "pending": pending,
               "steps": steps, "scope": progress(entries, closed, held, args.ledger),
