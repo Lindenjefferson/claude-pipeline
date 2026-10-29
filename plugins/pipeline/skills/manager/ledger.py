@@ -19,7 +19,7 @@
   extend  --reason <text> [--task spec|plan]                  the user lets the fixes, or that review loop, go on
   plan    --path <path>                                       the approved plan, when start ran before it existed
   scope   --cycle <name> --tasks <id,id,...>                  the tasks of one plan cycle, in plan order
-  mode    autonomous|supervised                               the user turned autonomous mode on, or is back
+  mode    autonomous [--until <HH:MM or ISO time>]|supervised  the user turned autonomous mode on, or is back
   defer   --text <text> --recommend <text>                    an item left for later; prints its id (D1, D2...)
   resolve --id <id> --decision <text>                         the final decision on a deferred item
   lesson  --text <rule> [--check <test or lint rule>]         a lesson, automated when --check names the check
@@ -104,6 +104,16 @@ Goal: and Depends on: lines of its section in the plan, the heading that names t
 its level or above; null when the plan or the line is missing) and its state: done, running (with minutes), blocked
 (a task of the scope its depends names is not done) or todo; scope.median_task_seconds is the median time of the
 regular dev tasks done and measured, null before the first. With no scope recorded, scope is null.
+
+mode autonomous --until records the time the user is back: HH:MM is the next time this machine's clock shows it
+(tomorrow when it is past today), or an ISO time with its offset; a time already past, or --until in supervised mode,
+is refused. While the latest mode entry carries it, status --json gives night: {until, seconds_left, expected, fits,
+over, done_since}, else null. expected is each run's expected seconds from this delivery's measured runs, null before
+the first: dev is scope's median_task_seconds, reviewer and qa the median of their cycle runs (qa without --full), and
+qa_full the latest qa --full; fits says whether it ends before until (null when unknown). over is true once until is
+reached or when no run fits; done_since is {tasks, runs}: the dev tasks done and the runs added since that mode entry,
+for the morning summary. The text names what does not fit, not to be dispatched, and, once over, says to pause. It is
+advice, never pending, like usage.
 
 status also reads usage.json from the ledger's folder (the subscription windows the mod writes: five_hour and
 seven_day, each {percent, resets_at}; a window past its resets_at, a missing or broken file and unknown fields are
@@ -1159,11 +1169,88 @@ def autonomous(entries):
     return bool(modes) and modes[-1] == "autonomous"
 
 
+def until_time(text):
+    """--until: HH:MM, the next time this machine's clock shows it, or an ISO time with its offset; never a past one."""
+    now = datetime.datetime.now().astimezone()
+    clock = re.fullmatch(r"(\d{1,2}):(\d{2})", text.strip())
+    try:
+        if clock:
+            at = now.replace(hour=int(clock.group(1)), minute=int(clock.group(2)), second=0, microsecond=0)
+            at += datetime.timedelta(days=1 if at <= now else 0)
+        else:
+            at = datetime.datetime.fromisoformat(text.strip())
+    except ValueError:
+        at = None
+    if at is None or at.tzinfo is None:
+        sys.exit(f"--until takes HH:MM or an ISO time with its offset, not {text!r}")
+    if at <= now:
+        sys.exit(f"--until {text} is already past")
+    return at.isoformat(timespec="seconds")
+
+
 def mode(args):
+    if args.until and args.mode != "autonomous":
+        sys.exit("--until is the time the user is back, for autonomous mode only")
     if not read(args.ledger):
         sys.exit("no delivery started: run start first")
-    write(args.ledger, {"type": "mode", "mode": args.mode})
-    print(f"mode {args.mode}")
+    until = until_time(args.until) if args.until else None
+    write(args.ledger, {"type": "mode", "mode": args.mode, **({"until": until} if until else {})})
+    print(f"mode {args.mode}" + (f" until {until}" if until else ""))
+
+
+NIGHT_RUNS = {"dev": "dev", "reviewer": "reviewer", "qa": "qa", "qa_full": "qa --full"}
+
+
+def night(entries):
+    """The time the user is back, while the latest mode entry is autonomous with one: which runs still fit before it."""
+    modes = [index for index, entry in enumerate(entries) if entry["type"] == "mode"]
+    latest = entries[modes[-1]] if modes else {}
+    if latest.get("mode") != "autonomous" or not latest.get("until"):
+        return None
+    try:
+        until = datetime.datetime.fromisoformat(latest["until"])
+    except (TypeError, ValueError):
+        return None
+    left = max(0, int((until - datetime.datetime.now(datetime.timezone.utc)).total_seconds()))
+    measured = [entry for entry in runs(entries) if entry.get("seconds") is not None]
+    middle = lambda agent: [entry["seconds"] for entry in measured if entry["agent"] == agent and not entry.get("full")]
+    full = [entry["seconds"] for entry in measured if entry["agent"] == "qa" and entry.get("full")]
+    dev = median_task_seconds(entries)
+    expected = {"dev": dev, "reviewer": middle("reviewer"), "qa": middle("qa"), "qa_full": full[-1:]}
+    expected = {"dev": None if dev is None else int(dev),
+                **{agent: int(statistics.median(values)) if values else None
+                   for agent, values in expected.items() if agent != "dev"}}
+    fits = {agent: None if value is None else value <= left for agent, value in expected.items()}
+    since = [entry for entry in entries[modes[-1] + 1:] if entry["type"] == "run"]
+    return {"until": latest["until"], "seconds_left": left, "expected": expected, "fits": fits,
+            "over": left == 0 or all(value is False for value in fits.values()),
+            "done_since": {"tasks": [entry["task"] for entry in since
+                                     if entry["agent"] == "dev" and entry["verdict"] in DONE],
+                           "runs": len(since)}}
+
+
+def span(seconds):
+    return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
+
+
+def night_line(night, paused):
+    """status's text line for the night: what fits before the user is back, or, once over, the pause."""
+    if night["over"]:
+        done = night["done_since"]
+        return (f"night over (the user is back at {night['until']}"
+                + ("" if not night["seconds_left"] else ", and no run fits before it") + "): "
+                + ("the delivery is paused" if paused else
+                   "dispatch nothing new; stop what runs and pause as pause.md says, its text the morning summary "
+                   f"(done since the time was set: {', '.join(done['tasks']) or 'no task'}, {done['runs']} runs), "
+                   "and delete the heartbeat"))
+    groups = {True: [], False: [], None: []}
+    for agent, label in NIGHT_RUNS.items():
+        value = night["expected"][agent]
+        groups[night["fits"][agent]].append(label + ("" if value is None else f" ~{span(value)}"))
+    return (f"night: until {night['until']} (in {span(night['seconds_left'])})"
+            + (f"; fits: {', '.join(groups[True])}" if groups[True] else "")
+            + (f"; does not fit (do not dispatch): {', '.join(groups[False])}" if groups[False] else "")
+            + (f"; unknown: {', '.join(groups[None])}" if groups[None] else ""))
 
 
 def deferred(entries):
@@ -1387,7 +1474,7 @@ def status(args):
               "notes": [entry["text"] if entry["type"] == "note" else f"paused: {entry['text']}" for entry in entries
                         if entry["type"] == "pause" or (entry["type"] == "note" and not entry.get("validar"))],
               "validar": validar(entries),
-              "metrics": metrics(entries), "usage": usage, "ready_for_gate": not pending}
+              "metrics": metrics(entries), "usage": usage, "night": night(entries), "ready_for_gate": not pending}
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:
@@ -1418,6 +1505,8 @@ def status(args):
                   + "): dispatch nothing new; pause at the next safe point until "
                   + (f"{wait['resets_at']} (in {left // 3600}h{left % 3600 // 60:02d}m)" if left is not None
                      else "the window resets"))
+        if report["night"]:
+            print(night_line(report["night"], pause_state))
         for item in pending:
             print(f"pending: {item}")
         for item in report["unmeasured"]:
@@ -1692,6 +1781,7 @@ def main():
     command.set_defaults(run=scope)
     command = commands.add_parser("mode")
     command.add_argument("mode", choices=("autonomous", "supervised"))
+    command.add_argument("--until", help="the time the user is back: HH:MM or an ISO time with its offset")
     command.set_defaults(run=mode)
     command = commands.add_parser("defer")
     command.add_argument("--text", required=True)
