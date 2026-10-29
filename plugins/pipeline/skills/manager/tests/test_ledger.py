@@ -1791,25 +1791,28 @@ with open(os.path.join(QUALITY, "2026-10-01-b.md"), "w", encoding="utf-8", newli
     handle.write("# b\n\n## Deferred\n\n- D1 export csv -> moved to c: needs the API\n- D2 typo -> fixed in fix-1\n"
                  "- D3 a -> b mapping -> moved to the car test: needs the car\n"
                  "- D4 old csv (moved here by docs/quality-reports/2026-09-01-a.md) -> moved to z-later: not yet\n"
+                 "- D5 vague -> moved to backlog\n"
                  "\n## Metrics\n\n- D9 not deferred -> moved to x\n")
 r = run("start", "--slug", "c", ledger=CARRY)
 state = status(CARRY)
 LATEST = "docs/quality-reports/2026-10-01-b.md"
 check("start carries the items the latest quality report moved to this delivery or to no named one, each needing "
       "a decision, and passes on, resolved, one moved to another delivery, its chain of reports cut to the last",
-      r.returncode == 0 and "carried 2 items moved to a later delivery from " + LATEST in r.stdout
-      and "passed on 1 item moved to another delivery" in r.stdout
+      r.returncode == 0 and "carried 3 items moved to a later delivery from " + LATEST in r.stdout
+      and "passed on 1 item moved to another delivery" in r.stdout and "- D3 -> z-later: old csv" in r.stdout
       and state["deferred"] == [{"id": "D1", "text": f"export csv (moved here by {LATEST})", "decision": None,
                                  "recommend": "decide whether this delivery takes it: moved to c: needs the API"},
                                 {"id": "D2", "text": f"a -> b mapping (moved here by {LATEST})", "decision": None,
                                  "recommend": "decide whether this delivery takes it: moved to the car test: needs the car"},
                                 {"id": "D3", "text": f"old csv (moved here by {LATEST})",
-                                 "decision": "moved to z-later: not yet", "recommend": "moved to z-later: not yet"}]
+                                 "decision": "moved to z-later: not yet", "recommend": "moved to z-later: not yet"},
+                                {"id": "D4", "text": f"vague (moved here by {LATEST})", "decision": None,
+                                 "recommend": "decide whether this delivery takes it: moved to backlog"}]
       and {"step": "decide", "id": "D1", "text": f"export csv (moved here by {LATEST})",
            "recommend": "decide whether this delivery takes it: moved to c: needs the API"} in state["steps"],
       (r.stdout, state["deferred"], state["steps"]))
 check("a carried item numbers the next deferred item after it",
-      "deferred D4" in run("defer", "--text", "x", "--recommend", "y", ledger=CARRY).stdout)
+      "deferred D5" in run("defer", "--text", "x", "--recommend", "y", ledger=CARRY).stdout)
 with open(os.path.join(QUALITY, "2026-10-01-zeta.md"), "w", encoding="utf-8", newline="\n") as handle:
     handle.write("# zeta\n\n## Deferred\n\n- D1 stale -> moved to alpha: older\n")
 with open(os.path.join(QUALITY, "2026-10-01-alpha.md"), "w", encoding="utf-8", newline="\n") as handle:
@@ -1969,6 +1972,8 @@ run("start", "--slug", "sensitive", ledger=SENS)
 check("sensitive needs a reason", run("sensitive", ledger=SENS).returncode != 0)
 r = run("sensitive", "--reason", "writes money", ledger=SENS)
 add("dev", "DONE", "T1", ledger=SENS)
+check("the scan is no step while the cycle is open", not any(step["step"] == "security" for step in status(SENS)["steps"]),
+      status(SENS)["steps"])
 add("reviewer", "PASS", ledger=SENS)
 add("qa", "PASS", ledger=SENS)
 state = status(SENS)
@@ -2109,6 +2114,52 @@ check("past the time the user is back, the night is over and status says to paus
       text)
 run("mode", "supervised", ledger=NIGHT)
 check("mode supervised ends the night", status(NIGHT)["night"] is None)
+
+# The settings that change speed or cost, still a template placeholder, are listed for the user
+cfg = tempfile.mkdtemp(prefix="ledger_cfg_", dir=repo)
+for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t.com"), ("config", "user.name", "t"),
+             ("commit", "-q", "--allow-empty", "-m", "base")):
+    subprocess.run(["git", *args], cwd=cfg, check=True, capture_output=True)
+CFG = os.path.join(cfg, ".superpowers", "ledger.jsonl")
+
+
+def cfg_files(parallel):
+    with open(os.path.join(cfg, "CLAUDE.md"), "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("# p\n\n## Execução em paralelo\n\nText.\n\n"
+                     + ("- Como rodar N cópias ao mesmo tempo: `PORT`\n- Pasta de saída dos testes: `OUT`\n" if parallel
+                        else "- Como rodar N cópias ao mesmo tempo: _(porta)_\n- Pasta de saída dos testes: `OUT`\n")
+                     + "\n## Outra\n\n- Algo: _(x)_\n")
+    with open(os.path.join(cfg, "CLAUDE.local.md"), "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("# p\n\n## Execução em paralelo\n\n- Memória livre mínima para despachar uma cópia ou um `qa`: "
+                     "_(GB)_\n\n## Uso da conta\n\n- Economia a partir de quanto uso, em %: `70`\n"
+                     "- Sempre econômico: _(padrão não)_\n")
+
+
+cfg_files(parallel=False)
+run("start", "--slug", "cfg", ledger=CFG, cwd=cfg)
+run("scope", "--cycle", "1", "--tasks", "A1,A2,A3", ledger=CFG, cwd=cfg)
+settings = status(CFG)["settings"]
+check("status lists each line of the speed and cost sections still holding a placeholder, in file order",
+      settings["unfilled"] == [
+          {"file": "CLAUDE.md", "section": "Execução em paralelo", "line": "Como rodar N cópias ao mesmo tempo"},
+          {"file": "CLAUDE.local.md", "section": "Execução em paralelo",
+           "line": "Memória livre mínima para despachar uma cópia ou um `qa`"},
+          {"file": "CLAUDE.local.md", "section": "Uso da conta", "line": "Sempre econômico"}], settings)
+check("with the parallel section of CLAUDE.md unfilled, status counts the tasks of the cycle that could run together",
+      settings["together"] == 3, settings)
+text = run("status", ledger=CFG, cwd=cfg).stdout
+check("the text asks to take the unfilled settings to the user now, and says the tasks run one at a time",
+      "settings:" in text and "ask the user" in text and "3 tasks could run together" in text, text)
+check("the settings are advice, never pending",
+      not any("settings" in item or "Execução" in item for item in status(CFG)["pending"]), status(CFG)["pending"])
+cfg_files(parallel=True)
+settings = status(CFG)["settings"]
+check("the parallel section filled: no count of tasks together, and its lines leave the list",
+      settings["together"] is None and all(item["file"] == "CLAUDE.local.md" for item in settings["unfilled"]), settings)
+os.remove(os.path.join(cfg, "CLAUDE.local.md"))
+check("a missing CLAUDE.local.md is listed once, as missing",
+      {"file": "CLAUDE.local.md", "section": None, "line": None} in status(CFG)["settings"]["unfilled"],
+      status(CFG)["settings"])
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)
