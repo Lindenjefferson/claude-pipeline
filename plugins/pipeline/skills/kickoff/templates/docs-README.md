@@ -10,11 +10,14 @@ Esta pasta é a documentação viva do código: registra **o que existe e por qu
 
 ## Outras pastas
 
+Só estas, e a pasta própria do projeto que este índice nomear aqui: o `gate.py` recusa o resto de `docs/`.
+
+- `modulos/` — um documento por módulo (`NN-nome.md`), listado no índice acima.
 - [`arquitetura.md`](arquitetura.md) — os padrões que todo código segue e o mapa dos módulos; o `dev` lê antes de cada tarefa.
 - [`operacao.md`](operacao.md) — publicar, backup e restauração, reverter e onde ler os logs.
 - [`discovery/`](discovery/) — achados estruturados das fontes brutas (gerados pelo agente `discovery`).
 - `specs/` — uma spec por entrega grande (`<slug>.md`), decidida antes de codar.
-- `plans/` — um plano por entrega (`<slug>.md`), o que o `manager` executa e o `gate.py` rastreia.
+- `plans/` — um plano por entrega (`<slug>.md`), o que o `manager` executa e o `gate.py` rastreia (e recusa em outro lugar).
 - `mockups/` — um mockup por entrega com tela (`<slug>.html`), feito na rodada de design.
 
 Os três usam o **mesmo slug da entrega**, e cada pasta aparece na primeira entrega que a tem.
@@ -24,7 +27,7 @@ Os três usam o **mesmo slug da entrega**, e cada pasta aparece na primeira entr
 ## Diferença em relação à especificação
 
 - Arquivos de especificação (decididos antes de codar) não mudam a cada PR, só quando uma decisão muda.
-- `docs/*.md` documenta o **código real**, atualizado a cada rodada que toca aquele módulo. Se spec e código divergirem, o código manda e o doc do módulo reflete isso (com uma nota se a divergência for intencional).
+- `docs/modulos/` documenta o **código real**, atualizado a cada rodada que toca aquele módulo. Se spec e código divergirem, o código manda e o doc do módulo reflete isso (com uma nota se a divergência for intencional).
 
 ## Template de cada arquivo de módulo
 

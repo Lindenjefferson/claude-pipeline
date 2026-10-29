@@ -1,6 +1,6 @@
 # Spec checklist
 
-A spec answers every section below. Write "not applicable" with the reason instead of leaving a section out. The reviewer, in spec mode, treats a missing answer as a finding. The plan answers sections 1 and 2 for every write operation even when there is no spec.
+A spec answers every section below. Write "not applicable" with the reason instead of leaving a section out. The reviewer, in spec mode, treats a missing answer as a finding. The plan answers sections 1 and 2 for every write operation even when there is no spec, and section 12 whenever the work collects, keeps or shares personal data.
 
 ## 1. Pre-mortem per write operation
 For every operation that creates, changes or deletes data that another actor or a later read uses (a record, a file, saved state), answer each question; a question about something the product does not have (accounts, a server, a second user) is answered "n/a" with the reason; every answer becomes acceptance criteria, positive and negative, written as Given/When/Then:
@@ -70,3 +70,7 @@ A table: code | when it happens | status or return | user-facing message | logge
 - The constraints the choice depends on (platform and devices, data, offline use, where it runs, cost, users, what the user knows) and the candidates considered, each with its pros and cons against them (the `discovery` lays them out).
 - The stack the user chose and why, with its versions and the official source and date each was checked on (never from memory), and the Claude Code extensions suggested for it, each with its source; the plan shows the stack at approval 1 as the user's own decision, and the user picks the extensions from these and the recommender's once the stack is scaffolded.
 - The verification it needs (tests, type check, lint, interface tests when there are screens).
+- Where it is published (a store, a login provider, a host) and what each channel requires before the first publish (a privacy policy URL, a data form, account deletion, signing, a build number), each requirement with the task or the `docs/operacao.md` procedure that proves it.
+
+## 12. Personal data (when the product collects, keeps or shares data about real people)
+For each kind of data: what it is and whose (the user's, or a third party the user names); what it is for; where it is kept (region, every service it passes through); how long, and what removes it when that ends; how the person exports it, corrects it and deletes it (backups included, or what stays and why); how consent or acceptance is recorded (which version of the text, when, by whom, fixed on the server); and what happens in a leak (who notices, who is told, how fast). Each answer becomes an acceptance criterion or a `docs/operacao.md` procedure, so every sentence the privacy text publishes has the code, test or procedure that makes it true. Whether a law applies, the legal basis and the published text are the user's decisions (with a lawyer when needed): list them as questions with the sources, never as conclusions; in autonomous mode they are `note --validar`, and the text is not presented as final before the user decides.
