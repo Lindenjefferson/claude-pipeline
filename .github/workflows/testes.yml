@@ -1,8 +1,8 @@
 name: testes
 
-# Os quatro comandos de "Testar e validar" do CLAUDE.md, nos dois sistemas que o plugin diz suportar.
-# A premissa "o plugin não entrega o que não cumpre": o kickoff exige build, tipos, lint e testes de qualquer
-# projeto, então este repositório também roda o que exige.
+# Os quatro comandos de "Testar e validar" do CLAUDE.md, nos dois sistemas que o plugin diz suportar, e a varredura
+# de segredos que o gate faz em <base>..HEAD de todo projeto. A premissa "o plugin não entrega o que não cumpre": o gate
+# só exige Testes (Build, Typecheck e Lint quando o projeto os tem), e aqui o que existe são as suítes e o manifesto.
 
 on:
   push:
@@ -42,6 +42,19 @@ jobs:
             fi
           done
           exit $status
+
+  segredos:
+    name: segredos no histórico da branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: o mesmo scanner que o gate roda, em cada commit do PR ou do push
+        shell: bash
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 plugins/pipeline/hooks/pre-commit-secret-scan.py --range "$BASE..HEAD"
 
   plugin:
     name: mod e manifesto pelo CLI

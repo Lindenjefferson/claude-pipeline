@@ -10,7 +10,12 @@ item is read as before, every id a criterion. A task's criteria, for --criteria,
 task id or ends with it right after a digit (AC-T3-2, AC-PL-T3-2 and AC-074T3-2 are T3's; AC-T31-2 is not).
 
 Checks, in order: nothing is pending in the ledger (the current cycle is closed and every deferred item has a final
-decision); the tree is clean; the documentation the kickoff prepared stays whole (with a docs/README.md: docs/arquitetura.md, the patterns every task follows, exists and, once a module doc docs/NN-*.md (in docs/ or one subfolder of it) is tracked, holds no _(...)_ placeholder; the index names every tracked module doc; and no relative link of README.md, docs/README.md or docs/arquitetura.md points to a missing file); every acceptance-criterion id of the plan recorded in the ledger (tokens like AC-T3-2)
+decision); the tree is clean; the documentation the kickoff prepared stays whole (with a docs/README.md: docs/arquitetura.md, the patterns every task follows, exists and, once a module doc docs/modulos/NN-*.md is tracked, holds no _(...)_ placeholder; the index names every tracked module doc; every entry of docs/ is in the map (README.md, arquitetura.md, operacao.md
+or operacao/, lessons.md, modulos/ with module docs only, discovery/, specs/, plans/, mockups/, quality-reports/, or a
+folder or file the index names); and no relative link of README.md, docs/README.md or docs/arquitetura.md points to a missing file); the files of the
+"Versão" line of "Comandos" (space-separated) hold one version x.y.z (after a version, versionName or __version__ key,
+quoted, bare or an XML element, or alone in the file; a pre-release fails) above the one they held at <base> (none there passes, and so does a delivery that changed only
+documentation; with no line, a project with docs/README.md fails and any other skips), named on the GATE line and in the report header; every acceptance-criterion id of the plan recorded in the ledger (tokens like AC-T3-2)
 appears in a tracked test file, as written or, for a test named by an identifier, in any case with _ for - and .
 (ac_t3_2, test_AC_T3_2; a longer id such as AC-T3-21, AC-T3-2.1 or ac_t3_2_1 is another id); the plan names no path inside .superpowers/, the agent workspace the kickoff
 ignores, since no clone would have it (the globs on the
@@ -45,7 +50,7 @@ merge base with the default branch. With --report, the gate writes and stages do
 (checks, commits, ledger mode and notes, the VALIDAR list with the user's decision or pending, deferred decisions, a
 changed "Comandos" section and the delivery metrics: findings per cycle and origin, fix rounds, time per cycle, task
 and agent, tokens per agent and task, lines changed per dev task with the share of fix and cleanup, lessons added
-and automated) before running the commands, so the project's own tests check it too (the metrics also give each spec
+and automated, the delivery's clock and the gate's warnings) before running the commands, so the project's own tests check it too (the metrics also give each spec
 or plan review loop its rounds, findings and the findings refused in triage); READY rewrites
 its check lines, NOT READY removes it, and a draft of the same report left staged by a run that was killed is removed
 first."""
@@ -81,10 +86,29 @@ MINUTES = 15
 DAY = 24 * 60 * 60
 REPORTS = "docs/quality-reports"
 PATTERNS = "docs/arquitetura.md"
-MODULE_DOC = re.compile(r"docs/(?:[^/]+/)?\d{1,3}-[^/]+\.md")
+MODULE_NAME = re.compile(r"\d{1,3}-[^/]+\.md")
+MODULE_DOC = re.compile(r"docs/modulos/" + MODULE_NAME.pattern)
+# What docs/ holds, beside a folder or file the index names: the kickoff's templates and the delivery's slug folders.
+DOCS_MAP = {"README.md", "arquitetura.md", "operacao.md", "operacao", "lessons.md", "modulos", "discovery", "specs",
+            "plans", "mockups", "quality-reports"}
 LINK = re.compile(r"\]\(((?:[^()\s]|\([^()\s]*\))+)\)")
 LESSONS = "docs/lessons.md"
 SECRETS_ALLOW = ".pipeline-secrets-allow"
+VERSION_LABELS = ("versão", "versao", "version")
+# Only these keys: a dependency or a tool version (kotlinVersion, "semver": "^7.5.0") is not the product's.
+# Quoted (JSON, TOML, Gradle), bare (YAML, properties) or an XML element; a +build after it is the store's number.
+VERSION_KEY = re.compile(r"""(?im)^[ \t]*[<"']?(?:version|versionName|__version__)[>"']?[ \t]*[:=]?[ \t]*["']?v?"""
+                         r"""(\d+\.\d+\.\d+)(-[\w.]+)?(?![\w.])""")
+VERSION_ONLY = re.compile(r"\s*v?(\d+\.\d+\.\d+)(-[\w.]+)?\s*")
+
+
+WARNINGS = []
+
+
+def warn(text):
+    """Print a warning and keep it for the quality report, where the next feedback-plugin can count it."""
+    print("warning: " + text, flush=True)
+    WARNINGS.append(text)
 
 
 def git(*args):
@@ -168,7 +192,7 @@ def time_limit():
         seconds = 0
     if 1 <= seconds <= DAY:
         return seconds
-    print(f"warning: invalid Tempo máximo '{value}' in CLAUDE.md (Comandos); using {MINUTES} minutes", flush=True)
+    warn(f"invalid Tempo máximo '{value}' in CLAUDE.md (Comandos); using {MINUTES} minutes")
     return MINUTES * 60
 
 
@@ -208,12 +232,7 @@ def secret_findings(base):
     spec = importlib.util.spec_from_file_location("secretscan", SCANNER)
     scanner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(scanner)
-    cwd = os.getcwd()
-    diff = scanner.git_checked(["log", "-p", "--diff-merges=separate", "--no-ext-diff", "--no-textconv", "--text",
-                                "--format=", f"{base}..HEAD", "--"] + scanner.EXCLUDES, cwd)
-    names = scanner.git_checked(["log", "--name-only", "-z", "--diff-merges=separate", "--diff-filter=d", "--format=",
-                                 f"{base}..HEAD"], cwd)
-    return scanner.scan(diff, scanner.names(names), scanner.load_allowlist(cwd, "HEAD"))
+    return scanner.range_findings(f"{base}..HEAD", os.getcwd())
 
 
 def glob_regex(pattern):
@@ -246,11 +265,13 @@ def glob_regex(pattern):
     return re.compile("".join(out) + r"\Z")
 
 
-def artifacts(plan):
+def artifacts(plan, slug=None):
     if not plan:
         return True, "no plan in the ledger (small work has none)"
     if not os.path.exists(plan):
         return False, f"plan not found: {plan}"
+    if slug and os.path.isfile("docs/README.md") and repo_path(plan) != f"docs/plans/{slug}.md":
+        return False, f"the plan is {repo_path(plan)}, not docs/plans/{slug}.md, where the delivery's slug puts it"
     named = sorted(set(WORKSPACE.findall(open(plan, encoding="utf-8").read())))
     if named:
         return False, (f"{plan} points inside .superpowers/, the agent workspace the kickoff ignores, so no clone has "
@@ -265,8 +286,18 @@ def docs():
     if not os.path.isfile("docs/README.md"):
         return True, "no docs/README.md: the kickoff prepares it"
     problems = []
-    modules = [path for path in git("ls-files", "-z", "docs")[1].split("\0") if MODULE_DOC.fullmatch(path)]
+    tracked = [path for path in git("-c", "core.quotePath=false", "ls-files", "-z", "docs")[1].split("\0") if path]
+    modules = [path for path in tracked if MODULE_DOC.fullmatch(path)]
     index = open("docs/README.md", encoding="utf-8").read()
+    for top in sorted({path.split("/")[1] for path in tracked if path.count("/") >= 1}):
+        if MODULE_NAME.fullmatch(top) or top not in DOCS_MAP and not re.search(
+                r"(?<![\w-])" + re.escape(top) + r"(?![\w-])", index):
+            where = "a module doc goes in docs/modulos/" if MODULE_NAME.fullmatch(top) else (
+                "move it to its place in the map, or name it in the index")
+            problems.append(f"docs/{top} is outside the map of docs/README.md: {where}")
+    problems += [f"docs/modulos/ holds only module docs (NN-*.md) and their folders: {path}" for path in tracked
+                 if path.startswith("docs/modulos/") and path.count("/") == 2 and not MODULE_DOC.fullmatch(path)
+                 and not path.endswith("/.gitkeep")]
     problems += [f"docs/README.md does not list {os.path.basename(path)}" for path in modules
                  if os.path.basename(path) not in index]
     if not os.path.isfile(PATTERNS):
@@ -281,6 +312,47 @@ def docs():
             if path and ":" not in path and not os.path.exists(os.path.join(os.path.dirname(page), path)):
                 problems.append(f"dead link: {page} -> {path}")
     return not problems, "\n".join(problems)
+
+
+def version_in(text):
+    """The x.y.z of the text, "pre-release" when a suffix such as -rc.1 follows it, or None."""
+    match = text is not None and (VERSION_ONLY.fullmatch(text) or VERSION_KEY.search(text))
+    return ("pre-release" if match.group(2) else match.group(1)) if match else None
+
+
+def semver(value):
+    return tuple(int(part) for part in value.split("."))
+
+
+def version(base):
+    """The files of the "Versão" line hold one version, above the one they held at the base; returns it too."""
+    files = next((value.split() for label, value in comandos() if label_key(label) in VERSION_LABELS), None)
+    if files is None:
+        if os.path.isfile("docs/README.md"):
+            return False, ('no "Versão" line in CLAUDE.md (Comandos): name the file or files that hold the product\'s '
+                           "version (the kickoff's template)"), None
+        return True, "no Versão line in CLAUDE.md (Comandos)", None
+    found = {path: version_in(open(path, encoding="utf-8", errors="replace").read() if os.path.isfile(path) else None)
+             for path in files}
+    early = [path for path, value in found.items() if value == "pre-release"]
+    if early:
+        return False, "a pre-release is no delivered version (x.y.z with no suffix): " + ", ".join(early), None
+    missing = [path for path, value in found.items() if not value]
+    if missing:
+        return False, ("no version (x.y.z after a version, versionName or __version__ key, or a file holding only "
+                       "it) in: " + ", ".join(missing)), None
+    if len(set(found.values())) > 1:
+        return False, "the version files disagree: " + ", ".join(f"{path} {value}" for path, value in found.items()), None
+    now = found[files[0]]
+    before = [version_in(out) for code, out in (git("show", f"{base}:{path}") for path in files) if code == 0]
+    old = max((value for value in before if value), key=semver, default=None)
+    if old and semver(now) <= semver(old):
+        changed = [name for name in git("diff", "--name-only", base, "HEAD")[1].split() if name]
+        if changed and all(name.startswith("docs/") or name.endswith(".md") for name in changed):
+            return True, f"only documentation changed since the base (version {now})", now
+        return False, (f"the version is {now}, not above the base's {old}: the manager raises it before the gate "
+                       "(manager step 6)"), now
+    return True, "", now
 
 
 def repo_path(path):
@@ -361,14 +433,14 @@ def traceability(plan, base="", task=None):
     ids = sorted(set(CRITERION.findall(text)))
     templates = sorted(set(CRITERION_ANY.findall(text)) - set(ids))
     if templates:
-        print(f"warning: {plan} writes {', '.join(templates)} with a placeholder right after it, so each is an id "
-              "template, not a criterion, and the gate traces no test for it", flush=True)
+        warn(f"{plan} writes {', '.join(templates)} with a placeholder right after it, so each is an id "
+              "template, not a criterion, and the gate traces no test for it")
     defined = sorted(set(DEFINED.findall(text)))
     if defined:
         cited = [item for item in ids if item not in defined]
         if cited:
-            print(f"warning: {plan}: cited, never defined: {', '.join(cited)} (a criterion is the id that opens a "
-                  "list item; the gate traces no test for these)", flush=True)
+            warn(f"{plan}: cited, never defined: {', '.join(cited)} (a criterion is the id that opens a "
+                  "list item; the gate traces no test for these)")
         ids = defined
     if task:
         ids = [item for item in ids if of_task(item, task)]
@@ -388,13 +460,12 @@ def traceability(plan, base="", task=None):
             try:
                 regex = glob_regex(pattern)
             except re.error:
-                print(f"warning: invalid test glob '{pattern}' (Arquivos de teste in CLAUDE.md)", flush=True)
+                warn(f"invalid test glob '{pattern}' (Arquivos de teste in CLAUDE.md)")
                 continue
             tests.append(regex)
             matched = [name for name in tracked if regex.match(name)]
             if not matched:
-                print(f"warning: test glob '{pattern}' matches no tracked file (Arquivos de teste in CLAUDE.md)",
-                      flush=True)
+                warn(f"test glob '{pattern}' matches no tracked file (Arquivos de teste in CLAUDE.md)")
             names += [name for name in matched if name not in names]
     else:
         names = [name for name in names if not name.lower().endswith(".md")]
@@ -406,10 +477,9 @@ def traceability(plan, base="", task=None):
     if tests and base:
         late = born_with_code(base, repo_path(plan), ids, patterns, tests, folders)
         if late:
-            print("warning: test and code in the same commit for "
+            warn("test and code in the same commit for "
                   + ", ".join(f"{item} ({sha})" for item, sha in late)
-                  + "; a test written first has a commit of its own, and no warning does not prove that order",
-                  flush=True)
+                  + "; a test written first has a commit of its own, and no warning does not prove that order")
     return not missing, ("criteria with no test: " + ", ".join(missing)) if missing else ""
 
 
@@ -479,6 +549,11 @@ def time_lines(metrics):
     unmeasured = time["unmeasured"]
     lines = ["## Time", "", "Agent time adds up every run; elapsed is wall-clock, so parallel runs count once. "
              f"{unmeasured} run{'' if unmeasured == 1 else 's'} unmeasured.", ""]
+    clock = time.get("delivery")
+    if clock:
+        share = f" ({round(clock['share'] * 100)}%)" if clock.get("share") is not None else ""
+        lines.append(f"- Delivery: {duration(clock['elapsed'])} elapsed, {duration(clock['paused'])} paused, "
+                     f"an agent running {duration(clock['agents'])}{share}")
     for cycle in metrics["cycles"]:
         agents = ", ".join(f"{agent} {duration(seconds)}" for agent, seconds in cycle["agents"].items())
         elapsed = f", {duration(cycle['elapsed'])} elapsed" if cycle.get("elapsed") is not None else ""
@@ -558,12 +633,13 @@ def report_path(slug):
     return f"{REPORTS}/{datetime.date.today().isoformat()}-{slug}.md"
 
 
-def write_report(slug, base, head, checks, ledger, changed, unrun):
+def write_report(slug, base, head, checks, ledger, changed, unrun, number=None):
     path = report_path(slug)
     os.makedirs(REPORTS, exist_ok=True)
     today = datetime.date.today().isoformat()
     code, log = git("log", "--format=- %h %s", f"{base}..HEAD")
-    lines = [f"# {slug}", "", f"{today} · {base[:7]}..{head[:7]}", "", "## Checks", ""]
+    lines = [f"# {slug}", "", f"{today} · {base[:7]}..{head[:7]}" + (f" · v{number}" if number else ""), "",
+             "## Checks", ""]
     lines += [f"- {name}: {verdict(ok, detail)}" for name, ok, detail in checks]
     lines += ["", "## Commits", "", log.strip() or "-", ""]
     if ledger:
@@ -579,6 +655,8 @@ def write_report(slug, base, head, checks, ledger, changed, unrun):
         lines += [""] + metrics_lines(ledger.get("metrics"))
     if unrun:
         lines += ["## Test lines not run", ""] + [f"- {label}" for label in unrun] + [""]
+    if WARNINGS:
+        lines += ["## Warnings", ""] + [f"- {text}" for text in dict.fromkeys(WARNINGS)] + [""]
     if changed:
         lines += ["## Comandos changed", "", "```diff"] + changed + ["```", ""]
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
@@ -634,16 +712,18 @@ def main():
     checks.append(("Ledger", not pending, pending))
 
     if args.report and git("diff", "--cached", "--name-only", "--", report_path(args.report))[1].strip():
-        print(f"warning: removing {report_path(args.report)}, a draft left by a gate run that did not finish", flush=True)
+        warn(f"removing {report_path(args.report)}, a draft left by a gate run that did not finish")
         drop_report(report_path(args.report), git("cat-file", "-e", f"HEAD:{report_path(args.report)}")[0] == 0)
     dirty = git("status", "--porcelain")[1].strip()
     checks.append(("Clean tree", not dirty, dirty))
     checks.append(("Docs", *docs()))
+    ok, detail, number = version(base)
+    checks.append(("Version", ok, detail))
 
     commands = project_commands(args.cmd)
     if ledger:
         checks.append(("Criteria", *traceability(ledger.get("plan"), base)))
-        checks.append(("Artifacts", *artifacts(ledger.get("plan"))))
+        checks.append(("Artifacts", *artifacts(ledger.get("plan"), ledger.get("slug"))))
         checks.append(("Reviewed", *reviewed(ledger)))
         checks.append(("Full suite", *full_suite(ledger, commands)))
 
@@ -660,7 +740,7 @@ def main():
     draft = report_path(args.report) if args.report and not dirty else None
     if draft:
         existed = git("cat-file", "-e", f"HEAD:{draft}")[0] == 0
-        write_report(args.report, base, head, checks, ledger, changed, unrun)
+        write_report(args.report, base, head, checks, ledger, changed, unrun, number)
         git("add", draft)
 
     ready = False
@@ -668,7 +748,7 @@ def main():
         before = tracked_changes()
         shell, seconds = bash(), time_limit()
         if not shell:
-            print("warning: no Git Bash found; the commands run in cmd.exe", flush=True)
+            warn("no Git Bash found; the commands run in cmd.exe")
         for name in ORDER + [name for name in commands if name not in ORDER]:
             if name not in commands:
                 checks.append((name, name != "Testes", "not configured in CLAUDE.md (Comandos)"))
@@ -684,14 +764,14 @@ def main():
 
         ready = all(ok for _, ok, _ in checks)
         width = max([12] + [len(name) + 2 for name, _, _ in checks])
-        print(f"\nGATE {base[:7]}..{head[:7]}")
+        print(f"\nGATE {base[:7]}..{head[:7]}" + (f" v{number}" if number else ""))
         for name, ok, detail in checks:
             print(f"{name + ':':{width}}{verdict(ok, detail)}"
                   + ("\n    " + detail.replace("\n", "\n    ") if detail else ""))
         print("Overall:    READY" if ready else "Overall:    NOT READY")
     finally:
         if draft and ready:
-            write_report(args.report, base, head, checks, ledger, changed, unrun)
+            write_report(args.report, base, head, checks, ledger, changed, unrun, number)
             git("add", draft)
             print(f"report staged: {draft}")
         elif draft:
