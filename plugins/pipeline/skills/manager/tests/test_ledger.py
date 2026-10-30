@@ -2044,7 +2044,7 @@ with open(os.path.join(repo, CLOCK), "w", encoding="utf-8", newline="\n") as han
         handle.write(json.dumps(entry) + "\n")
 delivery = status(CLOCK)["metrics"]["time"].get("delivery")
 check("metrics.time.delivery gives the elapsed time with the pauses out and the union of the agents' runs",
-      delivery == {"elapsed": 3600, "paused": 3600, "agents": 2100, "share": 0.58}, delivery)
+      delivery == {"elapsed": 3600, "paused": 3600, "queued": 0, "agents": 2100, "share": 0.58}, delivery)
 
 # The time the user is back (mode autonomous --until): what still fits before it, and when the night is over
 NIGHT = ".superpowers/night.jsonl"
@@ -2185,6 +2185,10 @@ git(proj, "worktree", "add", "-q", "--detach", held_tree)
 git(proj, "worktree", "add", "-q", "--detach", inner_tree)
 run("claim", "--task", "H1", "--worktree", held_tree, "--origin", "HEAD", cwd=proj)
 os.makedirs(os.path.join(copies, "half", "node_modules"))
+prep_tree = os.path.join(copies, "prep")
+git(proj, "worktree", "add", "-q", "-b", "feat/prep", prep_tree)
+with open(os.path.join(prep_tree, "plan.md"), "w", encoding="utf-8") as handle:
+    handle.write("plano da entrega seguinte, ainda sem commit\n")
 r = run("status", "--json", cwd=proj)
 left = json.loads(r.stdout).get("leftovers") if r.returncode == 0 else None
 norm = lambda path: os.path.normcase(os.path.realpath(path))
@@ -2196,6 +2200,10 @@ check("status lists an integrated worktree of the copies folder, one in .claude/
 check("a claimed worktree, a task not integrated, the delivery branch and a branch older than the base are no leftover",
       not any(item.get("branch") in ("task-open", "feat/x", "main", "old-merged") or
               norm(item.get("path") or "") in (norm(open_tree), norm(held_tree)) for item in left or []), left)
+check("a worktree with files not yet committed (the next delivery's spec and plan) and its branch are no leftover, "
+      "even with no commit past the head",
+      not any(item.get("branch") == "feat/prep" or norm(item.get("path") or "") == norm(prep_tree)
+              for item in left or []), left)
 state = json.loads(r.stdout) if r.returncode == 0 else {"pending": [], "steps": []}
 check("each leftover is pending, with the action, so the gate is not ready",
       any("leftover" in item and "done" in item and "remove" in item for item in state["pending"])
@@ -2258,6 +2266,71 @@ os.remove(os.path.join(disk_root, "CLAUDE.local.md"))
 state, _ = disk_at("30")
 check("with no disk peak nor floor declared, the reading is kept and nothing warns",
       disk_of(state).get("warning") is None and disk_of(state).get("high_gb") == 50, disk_of(state))
+
+QUEUE = ".superpowers/queue/ledger.jsonl"
+NEXT = ".superpowers/queue/next-seguinte.jsonl"
+run("start", "--slug", "atual", ledger=QUEUE)
+r = run("start", "--slug", "seguinte", "--next", ledger=QUEUE)
+check("start --next opens the next delivery in its own file beside the ledger, naming it for --ledger",
+      r.returncode == 0 and os.path.exists(os.path.join(repo, NEXT)) and "--ledger" in r.stdout
+      and status(QUEUE)["slug"] == "atual", (r.stdout, r.stderr))
+check("start --next twice for one slug is refused",
+      run("start", "--slug", "seguinte", "--next", ledger=QUEUE).returncode != 0)
+check("a delivery in preparation takes a plan review round", add("reviewer", "FAIL", "plan", 1, ledger=NEXT).returncode == 0)
+run("note", "--text", "PD-1 da seguinte", "--validar", "--recommend", "manter", ledger=NEXT)
+upcoming = (status(QUEUE).get("next") or [{}])[0]
+text = run("status", ledger=QUEUE).stdout
+check("the current delivery's status lists the open VALIDAR items of the delivery in preparation",
+      [(item["id"], item["text"], item["decision"]) for item in upcoming.get("validar", [])] == [("V1", "PD-1 da seguinte", None)]
+      and "VALIDAR V1" in text and NEXT.split("/")[-1] in text, (upcoming, text))
+run("validate", "--id", "V1", "--decision", "confirmed by the user", ledger=NEXT)
+check("a VALIDAR item validated in the preparation's ledger leaves the current delivery's list",
+      (status(QUEUE).get("next") or [{}])[0].get("validar") == [], status(QUEUE).get("next"))
+r = run("claim", "--task", "T1", ledger=NEXT)
+check("a delivery in preparation refuses a claim: code starts once it is promoted",
+      r.returncode != 0 and "start --slug seguinte --archive" in r.stderr, r.stderr)
+check("a delivery in preparation refuses a dev run and a cycle review",
+      add("dev", "DONE", "T1", ledger=NEXT).returncode != 0 and add("reviewer", "PASS", ledger=NEXT).returncode != 0)
+state = status(QUEUE)
+queued = state.get("next") or []
+check("the current delivery's status lists the next one and what its preparation still needs, as advice",
+      [item["slug"] for item in queued] == ["seguinte"] and any("plan review round 1 FAIL" in text
+                                                                 for text in queued[0]["pending"])
+      and not any("seguinte" in text for text in state["pending"]), state.get("next"))
+state = status(NEXT)
+check("the preparation's own status is never ready for the gate", not state["ready_for_gate"]
+      and any("start --slug seguinte --archive" in text for text in state["pending"]), state["pending"])
+QUEUE_TREE = os.path.join(repo, "..", "_temp", os.path.basename(repo) + "-worktrees", "queue-T9")
+subprocess.run(["git", "worktree", "add", "-q", "-b", "wt/queue-T9", QUEUE_TREE], cwd=repo, capture_output=True)
+state = status(NEXT)
+check("the preparation leaves the copies and the disk to the current delivery: none of its worktrees is a leftover there",
+      state["leftovers"] == [] and state["disk"] is None, (state["leftovers"], state["disk"]))
+subprocess.run(["git", "worktree", "remove", "--force", QUEUE_TREE],
+               cwd=repo, capture_output=True)
+subprocess.run(["git", "branch", "-D", "wt/queue-T9"], cwd=repo, capture_output=True)
+shutil.rmtree(os.path.join(repo, "..", "_temp", os.path.basename(repo) + "-worktrees"), ignore_errors=True)
+add("reviewer", "PASS", "plan", ledger=NEXT, seconds=60)
+run("defer", "--text", "item da preparação", "--recommend", "deixar", ledger=NEXT)
+r = run("start", "--slug", "seguinte", "--archive", ledger=QUEUE)
+state = status(QUEUE)
+check("start of the queued slug promotes its preparation with its review rounds and deferred items",
+      r.returncode == 0 and "promoted" in r.stdout and not os.path.exists(os.path.join(repo, NEXT))
+      and state["slug"] == "seguinte" and state["metrics"]["reviews"]["plan"]["rounds"] == 2
+      and [item["id"] for item in state["deferred"]] == ["D1"] and not state.get("next"), (r.stdout, r.stderr, state))
+check("the promoted delivery takes claims", run("claim", "--task", "T1", ledger=QUEUE).returncode == 0)
+QUEUED_CLOCK = os.path.join(repo, ".superpowers", "clock", "ledger.jsonl")
+os.makedirs(os.path.dirname(QUEUED_CLOCK), exist_ok=True)
+with open(QUEUED_CLOCK, "w", encoding="utf-8") as handle:
+    for entry in ({"type": "start", "slug": "c", "base": head(), "at": "2026-10-30T00:00:00+00:00",
+                   "promoted": "2026-10-30T01:00:00+00:00"},
+                  {"type": "run", "agent": "reviewer", "task": "plan", "verdict": "PASS", "seconds": 600,
+                   "at": "2026-10-30T00:10:00+00:00"},
+                  {"type": "run", "agent": "dev", "task": "T1", "verdict": "DONE", "seconds": 600,
+                   "at": "2026-10-30T01:10:00+00:00"}):
+        handle.write(json.dumps(entry) + "\n")
+clock = status(QUEUED_CLOCK)["metrics"]["time"]["delivery"]
+check("the wait in the queue, from the last preparation entry to the promotion, is left out of the delivery's clock",
+      clock["elapsed"] == 1200 and clock["queued"] == 3000 and clock["share"] == 1.0, clock)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)
