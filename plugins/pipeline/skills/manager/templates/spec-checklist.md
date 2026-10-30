@@ -59,7 +59,7 @@ Each rule has tests at both boundaries.
 A table: code | when it happens | status or return | user-facing message | logged? Codes must not act as oracles (section 7).
 
 ## 10. Test plan
-- Acceptance criteria as Given/When/Then, the negative ones included, each with an id (`AC-<task>-<n>` once the plan exists) that the test proving it carries in its name.
+- Acceptance criteria as Given/When/Then, the negative ones included, each with an id (`AC-<task>-<n>` once the plan exists) that the test proving it carries in its name; "the suites stay green" or "screen X does not change" is the task's verification, not a criterion, since no test carries it.
 - Permissions as a matrix (role × resource × action × relationship to the record), every cell tested, not a sample.
 - Per rule or policy: the test that proves it, including the negative case and the boundary (n-1, n, n+1; both edges of time windows; the limit of every derived value).
 - Null or empty for every argument.

@@ -88,8 +88,8 @@ up to three, then the delivery stops. extend, once status asks the user or stops
 on (a note, VALIDAR in autonomous mode): the current cycle gets one more fix round, and a reviewer or qa FAIL after
 it asks or stops again; it never carries to the next cycle. extend --task spec|plan is the same for that review loop,
 which runs one more round (also when status says waive: the user overrules it), and each extension is read only by the loop (or the cycle) it was given to. With scope recorded, a task of a later plan cycle may be
-claimed while the current cycle is open, but its add is refused until the cycle closes, so the next cycle's range
-starts at the head that closed this one. waive is refused when the dev ran after that FAIL (the fix needs its review); it
+claimed and added while the current cycle is open: its run is held ("after": the plan cycle), out of this cycle, and
+opens the next one once this closes, so the next cycle's range starts at the head that closed this one. waive is refused when the dev ran after that FAIL (the fix needs its review); it
 records the reason as a note and counts as that agent's PASS at the head it reviewed. Notes marked --validar (and
 waivers in autonomous mode) are listed apart, numbered V1, V2... in the order written, for the user to confirm on
 return; validate records the decision, and status lists the items still waiting apart from the decided ones. A
@@ -358,15 +358,30 @@ def first(groups):
 
 
 def cycles(entries):
-    groups, current, closed = [], [], False
+    """The cycles' runs; a run held for a later plan cycle opens the next cycle once the one open when it was added
+    closes, so that cycle's range starts where this one ends."""
+    groups, current, closed, waiting = [], [], False, []
     for entry in runs(entries):
+        if entry.get("after") and not closed:
+            waiting.append(entry)
+            continue
         if closed and entry["agent"] == "dev" and not is_task(entry, FOLLOW_UP):
             groups.append(current)
             current, closed = [], False
         current.append(entry)
         closed = cycle_state(current, interface=NEEDS_INTERFACE and not groups)[1] == []
+        if closed and waiting:
+            groups.append(current)
+            current, waiting = waiting, []
+            closed = cycle_state(current)[1] == []
     groups.append(current)
     return groups
+
+
+def held_runs(entries):
+    """Runs held for a later plan cycle that no cycle took yet: the one open when they were added is still open."""
+    placed = {id(entry) for group in cycles(entries) for entry in group}
+    return [entry for entry in runs(entries) if entry.get("after") and id(entry) not in placed]
 
 
 def extension(entries, group, task=None):
@@ -806,17 +821,17 @@ def add(args):
     blocking = args.critical + args.important
     if args.agent in ("reviewer", "qa") and (args.verdict == "FAIL") != (blocking > 0):
         sys.exit("FAIL needs open Critical/Important findings (--critical or --important > 0) and PASS none")
+    later = None
     if args.agent == "dev" and not FOLLOW_UP.fullmatch(args.task):
         groups = cycles(entries)
         cycle = groups[-1]
         later = later_cycle(entries, cycle, args.task) if cycle_state(cycle, interface=first(groups))[1] else None
-        if later:
-            sys.exit(f"{args.task} is a task of plan cycle {later}: integrate and add it once this cycle closes "
-                     "(status says what the cycle still needs), so the next cycle's range starts where this one ends")
     entry = {"type": "run", "agent": args.agent, "task": args.task, "verdict": args.verdict, "open": blocking,
              "critical": args.critical, "important": args.important, "minor": args.minor,
              "origin": tally("--origin", ORIGINS, args.origin, blocking + args.minor),
              "head": git_head(ledger=args.ledger) or ""}
+    if later:
+        entry["after"] = later
     if args.report:
         entry["report"] = args.report
     if args.report and args.agent == "qa":
@@ -846,6 +861,7 @@ def add(args):
     write(args.ledger, entry)
     label = f"{args.agent}{' ' + args.task if args.task else ''}: {args.verdict}"
     print(f"{label} (round {len(review_loop(read(args.ledger), args.task))})" if is_review(entry)
+          else f"{label} (held for plan cycle {later}: integrate it once this cycle closes)" if later
           else f"{label} (cycle {len(cycles(read(args.ledger)))})")
 
 
@@ -1279,7 +1295,9 @@ def progress(entries, closed, held, ledger):
     if not plan:
         return None
     done = {entry["task"] for entry in runs(entries) if entry["agent"] == "dev" and entry["verdict"] in DONE}
-    latest = [entry["task"] for entry in runs(entries) if entry["agent"] == "dev" and not is_task(entry, FOLLOW_UP)]
+    waiting = {id(entry) for entry in held_runs(entries)}
+    latest = [entry["task"] for entry in runs(entries) if entry["agent"] == "dev" and not is_task(entry, FOLLOW_UP)
+              and id(entry) not in waiting]
     names = list(plan)
     current = names[0]
     for task in latest + (list(held) if closed else []):
@@ -1576,10 +1594,13 @@ def status(args):
         if wait is not None and wait >= PARTIAL_REPORT_MINUTES:
             since += (f"; past {PARTIAL_REPORT_MINUTES} minutes: ask it for a partial report (SendMessage): causes "
                       "found, commits, open hypothesis, and decide with the user whether it goes on")
-        pending.append(f"dev {task} dispatched at {at}, for plan cycle {later}: integrate and add it "
-                       f"once this cycle closes, or release --task {task}{since}" if later else
+        pending.append(f"dev {task} dispatched at {at}, for plan cycle {later}: add it as soon as it reports (the "
+                       f"ledger holds it out of this cycle) and integrate it once this cycle closes, or release "
+                       f"--task {task}{since}" if later else
                        f"dev {task} dispatched at {at}, no report yet (add it as soon as it reports, or "
                        f"release --task {task}){since}")
+    pending += [f"dev {entry['task']} {entry['verdict']} held for plan cycle {entry['after']}: integrate it once this "
+                "cycle closes, and the next cycle starts from the head that closes it" for entry in held_runs(entries)]
     pending += [f"deferred {item['id']} has no decision: {item['text']}" + advice(item)
                 for item in items if not item["decision"]]
     steps += [step for _, step in kept] + [{"step": "decide", "id": item["id"], "text": item["text"],
