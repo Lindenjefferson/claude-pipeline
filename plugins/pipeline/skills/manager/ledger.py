@@ -33,8 +33,9 @@ flight and the gate waits for them, so a manager resuming after a compaction see
 claim refuses a task that is in flight or already DONE in the current cycle, so one task never runs twice by mistake.
 status lists each copy left over, pending (step leftover, with its action) until it is gone, so the gate waits: a
 worktree under ../_temp/<project>-worktrees/ (project being the main worktree's folder) or .claude/worktrees/ with no
-claim and its HEAD in the delivery head, a folder of ../_temp/<project>-worktrees/ with no .git, and a local branch
-integrated in this delivery (in the head, not in the base) that is neither the current one nor a claimed worktree's;
+claim, its HEAD in the delivery head and nothing uncommitted, a folder of ../_temp/<project>-worktrees/ with no .git, and
+a local branch integrated in this delivery (in the head, not in the base) that is neither the current one nor the branch
+of a claimed worktree or of one with uncommitted work (the next delivery's spec and plan before its start);
 status --json gives them as leftovers: {kind worktree|folder|branch, path, branch, action}.
 --worktree (an existing directory) and --origin (a commit, resolved to its hash there) are kept with the claim; status
 shows them and, when the delivery head is no longer the origin, names the head (a fact: it moves with every
@@ -76,7 +77,8 @@ the ledger, while the current one is still coding; every command run with --ledg
 preparation: it takes the spec and plan review rounds (add --task spec|plan, waive and extend of those loops), a
 discovery run, measure, note, defer, resolve, validate, plan and sensitive, and refuses the rest (claim, a dev run, a
 cycle's review), naming the promotion; its own status is never ready for the gate and leaves leftovers and disk to the current one. The current delivery's status lists
-each one as advice, never pending (next: {slug, ledger, pending}, the pending of its review loops). start of a slug
+each one as advice, never pending (next: {slug, ledger, pending, validar}: the pending of its review loops and its open
+VALIDAR items, validated with --ledger on its file). start of a slug
 waiting in next-<slug>.jsonl promotes it: after the archive, that file becomes the ledger with its rounds, notes and
 deferred items, its start gets the new --base (and --plan, when given) and the time it was promoted, and the file goes.
 metrics.time.delivery.queued is the wait in the queue, from the last entry before the promotion to the promotion,
@@ -937,11 +939,15 @@ def leftovers(entries, ledger, head):
             continue
         path = norm(fields["worktree"])
         trees.add(path)
+        branch = fields.get("branch", "")[11:]
         if path in held:
-            busy.add(fields.get("branch", "")[11:])
-        if path.startswith(homes) and path not in held and integrated(fields.get("HEAD", "")):
-            found.append({"kind": "worktree", "path": os.path.normpath(fields["worktree"]),
-                          "branch": fields.get("branch", "")[11:] or None, "action": "tear the copy down as Execução em paralelo says, then git worktree remove it"})
+            busy.add(branch)
+        elif path != norm(root) and integrated(fields.get("HEAD", "")):
+            if git_ok(fields["worktree"], "status", "--porcelain"):
+                busy.add(branch)  # work not committed yet, as the next delivery's spec and plan before its start
+            elif path.startswith(homes):
+                found.append({"kind": "worktree", "path": os.path.normpath(fields["worktree"]),
+                              "branch": branch or None, "action": "tear the copy down as Execução em paralelo says, then git worktree remove it"})
     for name in sorted(os.listdir(copies)) if os.path.isdir(copies) else []:
         path = os.path.join(copies, name)
         if os.path.isdir(path) and norm(path) not in trees and not os.path.exists(os.path.join(path, ".git")):
@@ -1592,7 +1598,8 @@ def status(args):
         pending.insert(0, f"{entries[0].get('slug')} is in preparation: its code starts once the current delivery "
                           f"reaches the gate, with start --slug {entries[0].get('slug')} --archive")
     upcoming = [] if preparing(entries) else [
-        {"slug": prepared[0].get("slug"), "ledger": path, "pending": review_state(prepared, auto)[0]}
+        {"slug": prepared[0].get("slug"), "ledger": path, "pending": review_state(prepared, auto)[0],
+         "validar": [item for item in validar(prepared) if item["decision"] is None]}
         for path, prepared in queued(args.ledger) if prepared]
     pause_state = paused(entries)
     if pause_state:
@@ -1673,6 +1680,9 @@ def status(args):
         for item in upcoming:
             print(f"next: {item['slug']} in {item['ledger']}: " + ("; ".join(item["pending"]) or "no review pending")
                   + f"; once this delivery reaches the gate, start --slug {item['slug']} --archive promotes it")
+            for decision in item["validar"]:
+                print(f"next VALIDAR {decision['id']} of {item['slug']} (--ledger {item['ledger']}): {decision['text']}"
+                      + advice(decision))
         for item in report["unmeasured"]:
             task = f" {item['task']}" if item["task"] else ""
             print(f"unmeasured: {item['agent']}{task} at {item['at']}: with its notification, measure --agent "
