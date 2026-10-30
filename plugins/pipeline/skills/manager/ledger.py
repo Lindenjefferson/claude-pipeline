@@ -860,7 +860,7 @@ def leftovers(entries, ledger, head):
     if not common or not head:
         return []
     root = os.path.dirname(common)
-    norm = lambda path: os.path.normcase(os.path.abspath(path))
+    norm = lambda path: os.path.normcase(os.path.realpath(path))
     copies = os.path.normpath(os.path.join(os.path.dirname(root), "_temp", os.path.basename(root) + "-worktrees"))
     homes = (norm(copies) + os.sep, norm(os.path.join(root, ".claude", "worktrees")) + os.sep)
     held = {norm(entry["worktree"]) for entry in claims(entries).values() if entry.get("worktree")}

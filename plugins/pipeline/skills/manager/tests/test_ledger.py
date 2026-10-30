@@ -2187,7 +2187,7 @@ run("claim", "--task", "H1", "--worktree", held_tree, "--origin", "HEAD", cwd=pr
 os.makedirs(os.path.join(copies, "half", "node_modules"))
 r = run("status", "--json", cwd=proj)
 left = json.loads(r.stdout).get("leftovers") if r.returncode == 0 else None
-norm = lambda path: os.path.normcase(os.path.abspath(path))
+norm = lambda path: os.path.normcase(os.path.realpath(path))
 found = {(item["kind"], norm(item["path"]) if item.get("path") else item.get("branch")) for item in left or []}
 check("status lists an integrated worktree of the copies folder, one in .claude/worktrees, a copy folder with no .git "
       "and the integrated branch, and nothing else",
