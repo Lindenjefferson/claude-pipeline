@@ -6,7 +6,7 @@ Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão 
 
 **A numeração voltou para 1.x** (decisão do usuário, com o plugin só em instalação local). A 2.12.0 passou a ser a **1.12.0**, e cada versão da linha 2.x segue a mesma conta (a 2.9.9 é a 1.9.9, e assim por diante). A linha 1.x original, de antes da 2.0.0, virou 0.x pela mesma conta (a 1.6.0 de então é a **0.6.0**), para nenhum número valer por duas versões. Nada muda no comportamento. Uma cópia 2.x se atualiza pelo caminho normal — `claude plugin marketplace update linden-plugins` e `claude plugin update pipeline@linden-plugins --scope <escopo>`, depois `/reload-plugins` — porque o instalador compara com o que o marketplace oferece, não a ordem dos números; a skill `atualizar` continua valendo. Conferido na prática, de 2.12.0 para 1.12.0.
 
-## 1.26.0 — a tarefa do ciclo seguinte registrada na hora
+## 1.26.0 — a tarefa do ciclo seguinte registrada na hora (PR #77)
 
 Da [noite do `homebudgy`](../../docs/analises/1.23-noite-do-homebudgy.md) (1.23.0), com o dono: as tarefas do ciclo seguinte já rodavam durante a verificação do atual, mas o ledger recusava o resultado delas até o ciclo fechar.
 
