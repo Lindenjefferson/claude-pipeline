@@ -2,6 +2,7 @@
 """Delivery ledger: one JSON line per agent run, grouped in cycles, so the manager sees what is pending.
 
   start   --slug <slug> [--base <rev>] [--plan <path>] [--archive]       once per delivery
+  start   --slug <slug> --next [--base <rev>]                 the next delivery's spec and plan, while this one codes
   add     --agent dev --task <id> --verdict <v> [--seconds <duration>] [--tokens N]
   add     --agent reviewer|qa --verdict PASS|FAIL [--critical N --important N --minor N --origin <origin>=N,...]
           [--report <path>] [--seconds <duration>] [--tokens N]
@@ -70,7 +71,16 @@ that fills it, so a notification that arrived after a compaction is never lost. 
 waiting_minutes, partial_report (true from 90 minutes on: its line asks for a partial report by SendMessage) and, for a
 claim with no worktree whose delivery head moved since, committed: the dev commits straight on the branch, so its work
 may be in and its report waiting to be added. A deferred item with no decision keeps the delivery from the gate. Everything that waits for the user carries --recommend, what the manager would decide and why, so every list of what waits (status, the pane, validar) recommends without being asked: defer requires it, note takes it with --validar and refuses it without. An entry of an earlier version, with no recommendation, reads as before. start --archive moves an existing delivery to
-ledger-<old-slug>.jsonl next to the ledger first. start also carries each item the latest quality report (the docs/quality-reports/*.md git added last at the ledger's project root, else the last by name) moved to a later delivery, a line of its Deferred section whose decision, after the first arrow, starts with "moved to" in any case, as a deferred item of the new delivery, recommending that decision, so it needs a decision before the gate and is never forgotten. An item whose decision names another delivery (a slug right after "moved to", then a colon) is passed on instead: deferred and resolved with that same decision, so the next report carries it on and only the delivery it names decides it. Its text keeps only the last "(moved here by ...)". --check exits 1 while anything is pending, so the gate can rely on
+ledger-<old-slug>.jsonl next to the ledger first. start --next opens the next delivery in next-<slug>.jsonl beside
+the ledger, while the current one is still coding; every command run with --ledger on that file reads it as in
+preparation: it takes the spec and plan review rounds (add --task spec|plan, waive and extend of those loops), a
+discovery run, measure, note, defer, resolve, validate, plan and sensitive, and refuses the rest (claim, a dev run, a
+cycle's review), naming the promotion; its own status is never ready for the gate and leaves leftovers and disk to the current one. The current delivery's status lists
+each one as advice, never pending (next: {slug, ledger, pending}, the pending of its review loops). start of a slug
+waiting in next-<slug>.jsonl promotes it: after the archive, that file becomes the ledger with its rounds, notes and
+deferred items, its start gets the new --base (and --plan, when given) and the time it was promoted, and the file goes.
+metrics.time.delivery.queued is the wait in the queue, from the last entry before the promotion to the promotion,
+left out of elapsed like a pause. start also carries each item the latest quality report (the docs/quality-reports/*.md git added last at the ledger's project root, else the last by name) moved to a later delivery, a line of its Deferred section whose decision, after the first arrow, starts with "moved to" in any case, as a deferred item of the new delivery (numbered after the ones a promoted preparation brought), recommending that decision, so it needs a decision before the gate and is never forgotten. An item whose decision names another delivery (a slug right after "moved to", then a colon) is passed on instead: deferred and resolved with that same decision, so the next report carries it on and only the delivery it names decides it. Its text keeps only the last "(moved here by ...)". --check exits 1 while anything is pending, so the gate can rely on
 it. A cycle whose reviewer or qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on
 up to three, then the delivery stops. extend, once status asks the user or stops, records the user's decision to go
 on (a note, VALIDAR in autonomous mode): the current cycle gets one more fix round, and a reviewer or qa FAIL after
@@ -490,23 +500,78 @@ def archive_path(ledger, slug):
     return path
 
 
+def next_path(ledger, slug):
+    return os.path.join(os.path.dirname(os.path.abspath(ledger)), "next-" + re.sub(r"[^\w.-]+", "-", slug) + ".jsonl")
+
+
+def queued(ledger):
+    """The deliveries in preparation beside this ledger: [(path, entries)], by file name."""
+    folder = os.path.dirname(os.path.abspath(ledger))
+    names = sorted(name for name in os.listdir(folder) if name.startswith("next-") and name.endswith(".jsonl")) \
+        if os.path.isdir(folder) else []
+    return [(path, read(path)) for path in (os.path.join(folder, name) for name in names)]
+
+
+def preparing(entries):
+    return bool(entries) and entries[0]["type"] == "start" and bool(entries[0].get("next"))
+
+
+def preparation_only(args):
+    """A delivery in preparation takes only its spec and plan rounds and what goes with them; no code yet."""
+    if args.command in ("start", "capacity"):
+        return
+    entries = read(args.ledger)
+    if not preparing(entries):
+        return
+    review = getattr(args, "task", "") in ("spec", "plan")
+    if args.command in ("measure", "note", "defer", "resolve", "validate", "plan", "sensitive", "status") or (
+            args.command in ("waive", "extend") and review) or (
+            args.command == "add" and (review and args.agent == "reviewer" or args.agent == "discovery")):
+        return
+    slug = entries[0].get("slug")
+    sys.exit(f"{slug} is in preparation: only its spec and plan rounds go in {args.ledger}; its code starts once the "
+             f"current delivery reaches the gate, with start --slug {slug} --archive")
+
+
 def start(args):
+    base = git_head(args.base, args.ledger)
+    if base is None:
+        sys.exit(f"not a commit: {args.base}")
+    if args.next:
+        target = next_path(args.ledger, args.slug)
+        if os.path.exists(target):
+            sys.exit(f"{args.slug} is already in preparation in {target}")
+        write(target, {"type": "start", "slug": args.slug, "base": base, "plan": args.plan, "next": True})
+        print(f"preparing {args.slug} in {target}: pass --ledger {target} to its spec and plan rounds (add, measure, "
+              f"note, defer); its code starts once this delivery reaches the gate, with start --slug {args.slug} "
+              "--archive")
+        return
     entries = read(args.ledger)
     if entries and not args.archive:
         sys.exit(f"{args.ledger} already has a delivery ({entries[0].get('slug')}); "
                  "run start --archive to move it to ledger-<slug>.jsonl and start fresh")
-    base = git_head(args.base, args.ledger)
-    if base is None:
-        sys.exit(f"not a commit: {args.base}")
     if entries:
         target = archive_path(args.ledger, entries[0].get("slug"))
         os.replace(args.ledger, target)
         print(f"archived {entries[0].get('slug')} to {target}")
-    write(args.ledger, {"type": "start", "slug": args.slug, "base": base, "plan": args.plan})
-    print(f"started {args.slug} at {base[:12]}")
+    prepared = next_path(args.ledger, args.slug)
+    if os.path.exists(prepared):
+        with open(prepared, encoding="utf-8") as handle:
+            lines = [line for line in handle.read().splitlines() if line.strip()]
+        opening = {key: value for key, value in json.loads(lines[0]).items() if key != "next"}
+        opening.update(base=base, plan=args.plan or opening.get("plan"),
+                       promoted=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"))
+        os.makedirs(os.path.dirname(os.path.abspath(args.ledger)), exist_ok=True)
+        with open(args.ledger, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write("\n".join([json.dumps(opening, ensure_ascii=False)] + lines[1:]) + "\n")
+        os.remove(prepared)
+        print(f"promoted {args.slug} from {prepared} at {base[:12]}, its preparation kept")
+    else:
+        write(args.ledger, {"type": "start", "slug": args.slug, "base": base, "plan": args.plan})
+        print(f"started {args.slug} at {base[:12]}")
     report, moved = carried(args.ledger)
-    passed = []
-    for number, (text, decision) in enumerate(moved, 1):
+    passed, offset = [], len(deferred(read(args.ledger)))
+    for number, (text, decision) in enumerate(moved, offset + 1):
         bare = MOVED_HERE.sub("", text)
         text = f"{bare} (moved here by {report})"
         target = MOVED_TO.match(decision)
@@ -1424,6 +1489,11 @@ def delivery_clock(entries, measured):
             paused += max((min(at(entry), end) - since).total_seconds(), 0)
             since = None
     paused += max((end - since).total_seconds(), 0) if since else 0
+    waited = 0
+    if entries[0].get("promoted"):
+        promoted = datetime.datetime.fromisoformat(entries[0]["promoted"])
+        last = max((at(entry) for entry in entries if entry.get("at") and at(entry) <= promoted), default=promoted)
+        waited = max((min(promoted, end) - last).total_seconds(), 0)
     agents, open_start, open_end = 0, None, None
     for start, stop in spans:
         if open_end is None or start > open_end:
@@ -1432,8 +1502,8 @@ def delivery_clock(entries, measured):
         else:
             open_end = max(open_end, stop)
     agents += (open_end - open_start).total_seconds()
-    clock = int((end - begin).total_seconds() - paused)
-    return {"elapsed": clock, "paused": int(paused), "agents": int(agents),
+    clock = int((end - begin).total_seconds() - paused - waited)
+    return {"elapsed": clock, "paused": int(paused), "queued": int(waited), "agents": int(agents),
             "share": round(agents / clock, 2) if clock > 0 else None}
 
 
@@ -1513,10 +1583,17 @@ def status(args):
         pending.append(f"security scan has not run, and the delivery touches a sensitive domain ({marks[-1]}): run "
                        "it once the last cycle closes (references/security.md)")
         steps.append({"step": "security", "reason": marks[-1]})
-    left = leftovers(entries, args.ledger, head)
+    # the copies and the disk are the current delivery's: a preparation sees none of its claims
+    left = [] if preparing(entries) else leftovers(entries, args.ledger, head)
     pending += [f"leftover {item['kind']} {item['path'] or item['branch']}, already integrated or abandoned: "
                 f"{item['action']}" for item in left]
     steps += [{"step": "leftover", **item} for item in left]
+    if preparing(entries):
+        pending.insert(0, f"{entries[0].get('slug')} is in preparation: its code starts once the current delivery "
+                          f"reaches the gate, with start --slug {entries[0].get('slug')} --archive")
+    upcoming = [] if preparing(entries) else [
+        {"slug": prepared[0].get("slug"), "ledger": path, "pending": review_state(prepared, auto)[0]}
+        for path, prepared in queued(args.ledger) if prepared]
     pause_state = paused(entries)
     if pause_state:
         pending.insert(0, f"delivery paused since {pause_state['at']}: {pause_state['text']} "
@@ -1546,7 +1623,7 @@ def status(args):
                         if entry["type"] == "pause" or (entry["type"] == "note" and not entry.get("validar"))],
               "validar": validar(entries),
               "metrics": metrics(entries), "usage": usage, "night": night(entries),
-              "disk": disk_watch(entries, args.ledger, held), "ready_for_gate": not pending}
+              "disk": None if preparing(entries) else disk_watch(entries, args.ledger, held), "next": upcoming, "ready_for_gate": not pending}
     report["settings"] = settings(args.ledger, report["scope"])
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
@@ -1593,6 +1670,9 @@ def status(args):
                   "CLAUDE.md is unfilled: they run one at a time")
         for item in pending:
             print(f"pending: {item}")
+        for item in upcoming:
+            print(f"next: {item['slug']} in {item['ledger']}: " + ("; ".join(item["pending"]) or "no review pending")
+                  + f"; once this delivery reaches the gate, start --slug {item['slug']} --archive promotes it")
         for item in report["unmeasured"]:
             task = f" {item['task']}" if item["task"] else ""
             print(f"unmeasured: {item['agent']}{task} at {item['at']}: with its notification, measure --agent "
@@ -1873,6 +1953,7 @@ def main():
     command.add_argument("--base", default="HEAD")
     command.add_argument("--plan", help="the approved plan, whose acceptance-criterion ids the gate traces to tests")
     command.add_argument("--archive", action="store_true", help="move an existing delivery aside first")
+    command.add_argument("--next", action="store_true", help="prepare the next delivery's spec and plan beside this one")
     command.set_defaults(run=start)
     command = commands.add_parser("add")
     command.add_argument("--agent", required=True, choices=sorted(VERDICTS))
@@ -1962,6 +2043,7 @@ def main():
     args.ledger = args.ledger or default_ledger(args.command)
     global NEEDS_INTERFACE
     NEEDS_INTERFACE = interface_line(args.ledger)
+    preparation_only(args)
     args.run(args)
 
 
