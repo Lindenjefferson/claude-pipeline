@@ -2185,6 +2185,10 @@ git(proj, "worktree", "add", "-q", "--detach", held_tree)
 git(proj, "worktree", "add", "-q", "--detach", inner_tree)
 run("claim", "--task", "H1", "--worktree", held_tree, "--origin", "HEAD", cwd=proj)
 os.makedirs(os.path.join(copies, "half", "node_modules"))
+prep_tree = os.path.join(copies, "prep")
+git(proj, "worktree", "add", "-q", "-b", "feat/prep", prep_tree)
+with open(os.path.join(prep_tree, "plan.md"), "w", encoding="utf-8") as handle:
+    handle.write("plano da entrega seguinte, ainda sem commit\n")
 r = run("status", "--json", cwd=proj)
 left = json.loads(r.stdout).get("leftovers") if r.returncode == 0 else None
 norm = lambda path: os.path.normcase(os.path.realpath(path))
@@ -2196,6 +2200,10 @@ check("status lists an integrated worktree of the copies folder, one in .claude/
 check("a claimed worktree, a task not integrated, the delivery branch and a branch older than the base are no leftover",
       not any(item.get("branch") in ("task-open", "feat/x", "main", "old-merged") or
               norm(item.get("path") or "") in (norm(open_tree), norm(held_tree)) for item in left or []), left)
+check("a worktree with files not yet committed (the next delivery's spec and plan) and its branch are no leftover, "
+      "even with no commit past the head",
+      not any(item.get("branch") == "feat/prep" or norm(item.get("path") or "") == norm(prep_tree)
+              for item in left or []), left)
 state = json.loads(r.stdout) if r.returncode == 0 else {"pending": [], "steps": []}
 check("each leftover is pending, with the action, so the gate is not ready",
       any("leftover" in item and "done" in item and "remove" in item for item in state["pending"])
@@ -2269,6 +2277,15 @@ check("start --next opens the next delivery in its own file beside the ledger, n
 check("start --next twice for one slug is refused",
       run("start", "--slug", "seguinte", "--next", ledger=QUEUE).returncode != 0)
 check("a delivery in preparation takes a plan review round", add("reviewer", "FAIL", "plan", 1, ledger=NEXT).returncode == 0)
+run("note", "--text", "PD-1 da seguinte", "--validar", "--recommend", "manter", ledger=NEXT)
+upcoming = (status(QUEUE).get("next") or [{}])[0]
+text = run("status", ledger=QUEUE).stdout
+check("the current delivery's status lists the open VALIDAR items of the delivery in preparation",
+      [(item["id"], item["text"], item["decision"]) for item in upcoming.get("validar", [])] == [("V1", "PD-1 da seguinte", None)]
+      and "VALIDAR V1" in text and NEXT.split("/")[-1] in text, (upcoming, text))
+run("validate", "--id", "V1", "--decision", "confirmed by the user", ledger=NEXT)
+check("a VALIDAR item validated in the preparation's ledger leaves the current delivery's list",
+      (status(QUEUE).get("next") or [{}])[0].get("validar") == [], status(QUEUE).get("next"))
 r = run("claim", "--task", "T1", ledger=NEXT)
 check("a delivery in preparation refuses a claim: code starts once it is promoted",
       r.returncode != 0 and "start --slug seguinte --archive" in r.stderr, r.stderr)
