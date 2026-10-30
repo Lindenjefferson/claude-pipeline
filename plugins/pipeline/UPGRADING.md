@@ -2,9 +2,20 @@
 
 O que cada versão entregou e o que muda para quem atualiza. O arquivo vai junto com cada versão instalada: a skill `atualizar` lê o **Ao atualizar** de cada versão pulada, da mais antiga para a mais nova. Termine a entrega em andamento, ou pause-a, antes de atualizar o plugin (a skill `atualizar` confere). As ideias que ainda não viraram versão estão no [roadmap](../../docs/roadmap.md).
 
-Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o número do PR. Só as versões que o `feedback-plugin` das próximas entregas ainda confere (hoje da 1.9.8 à 1.25.0) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta. O que é major, minor e patch está no [`CLAUDE.md`](../../CLAUDE.md).
+Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o número do PR. Só as versões que o `feedback-plugin` das próximas entregas ainda confere (hoje da 1.9.8 à 1.26.0) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta. O que é major, minor e patch está no [`CLAUDE.md`](../../CLAUDE.md).
 
 **A numeração voltou para 1.x** (decisão do usuário, com o plugin só em instalação local). A 2.12.0 passou a ser a **1.12.0**, e cada versão da linha 2.x segue a mesma conta (a 2.9.9 é a 1.9.9, e assim por diante). A linha 1.x original, de antes da 2.0.0, virou 0.x pela mesma conta (a 1.6.0 de então é a **0.6.0**), para nenhum número valer por duas versões. Nada muda no comportamento. Uma cópia 2.x se atualiza pelo caminho normal — `claude plugin marketplace update linden-plugins` e `claude plugin update pipeline@linden-plugins --scope <escopo>`, depois `/reload-plugins` — porque o instalador compara com o que o marketplace oferece, não a ordem dos números; a skill `atualizar` continua valendo. Conferido na prática, de 2.12.0 para 1.12.0.
+
+## 1.26.0 — a tarefa do ciclo seguinte registrada na hora
+
+Da [noite do `homebudgy`](../../docs/analises/1.23-noite-do-homebudgy.md) (1.23.0), com o dono: as tarefas do ciclo seguinte já rodavam durante a verificação do atual, mas o ledger recusava o resultado delas até o ciclo fechar.
+
+- **Execução de uma tarefa do ciclo seguinte registrada na hora** (melhoria): o `add` de uma tarefa de um ciclo posterior do plano, com o atual aberto, deixa de ser recusado. A execução entra segurada (`"after"`: o ciclo do plano), fora do ciclo atual, e abre o ciclo seguinte assim que o atual fecha; por isso o intervalo do ciclo seguinte continua começando na cabeça que fecha este, o motivo da recusa antiga. O `status` diz "held for plan cycle …: integrate it once this cycle closes", e o tempo dela conta no relógio desde quando rodou. Na `titular-do-cartao`, o manager guardou seis execuções (8151 s) num `medidas-pendentes.txt` por até 94 min, e o `status` dava "waiting 88m, no report" de tarefas prontas. Teste primeiro, trocando o que garantia a recusa. Número: arquivos de medida feitos à mão (era 1; deve ser 0).
+- **"A suíte segue verde" não é critério de aceite** (melhoria): o item de critérios do `spec-checklist.md` diz que "a suíte segue verde" e "a tela X não muda" são a verificação da tarefa, porque nenhum teste carrega esse id. Na `titular-do-cartao` e na `web-f1`, dez critérios assim viraram linha de Verificação por errata, cada vez com um VALIDAR. Número: critérios convertidos em Verificação depois do plano (eram 10; deve ser 0).
+
+O prompt cresceu uma oração no `spec-checklist.md`: um script não distingue um critério de uma verificação no texto do plano, e o gate só vê o id que falta depois. O `parallel.md` ficou do mesmo tamanho.
+
+**Ao atualizar:** nada muda; os ledgers antigos continuam legíveis (uma execução sem `"after"` segue como antes).
 
 ## 1.25.0 — a entrega seguinte preparada no ledger enquanto a atual codifica (PR #76)
 

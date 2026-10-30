@@ -10,8 +10,6 @@ Nenhuma no momento.
 
 ## Backlog
 
-- **Execução de uma tarefa do ciclo seguinte registrada na hora** (melhoria; [noite do `homebudgy`](analises/1.23-noite-do-homebudgy.md), 1.23.0): o `ledger.py:812` recusa o `add` dela até o ciclo atual fechar, e o manager guardou seis execuções (8151 s) num `medidas-pendentes.txt` por até 94 min, com o `status` dizendo "waiting 88m, no report" de tarefas prontas. Proposta: o `add` entra com a marca do ciclo do plano e fica fora do intervalo do ciclo atual; só a integração espera o fechamento. Teste primeiro, mudando o que hoje garante a recusa. Número: arquivos de medida à mão, de 1 para 0. Esforço: M.
-- **"A suíte segue verde" não é critério de aceite** (melhoria; [noite do `homebudgy`](analises/1.23-noite-do-homebudgy.md), 1.23.0): 3 critérios na `titular-do-cartao` e 7 na `web-f1` viraram "linha de Verificação" por errata, cada vez com um VALIDAR, porque o gate exige um teste com o id. Proposta: o item de critérios do `spec-checklist.md` diz que "a suíte segue verde" e "a tela X não muda" são a verificação da tarefa, juntando-se à linha "The verification it needs" para o texto não crescer. Número: critérios convertidos em Verificação depois do plano, de 10 para 0. Esforço: P.
 
 ## Em espera (voltam com um sinal)
 
