@@ -175,7 +175,8 @@ check("start --archive moves the old delivery next to the ledger and starts fres
 run("start", "--slug", "old/one", "--archive", ledger=ARCHIVE)
 run("start", "--slug", "third", "--archive", ledger=ARCHIVE)
 r = run("start", "--slug", "fourth", "--archive", ledger=ARCHIVE)
-folder = sorted(os.listdir(os.path.join(repo, ".superpowers", "archive")))
+folder = sorted(name for name in os.listdir(os.path.join(repo, ".superpowers", "archive"))
+                if name.endswith(".jsonl"))
 check("archiving never overwrites an earlier archive",
       r.returncode == 0 and folder == ["ledger-next.jsonl", "ledger-old-one-2.jsonl", "ledger-old-one.jsonl",
                                        "ledger-third.jsonl", "ledger.jsonl"], folder)
@@ -2160,6 +2161,103 @@ os.remove(os.path.join(cfg, "CLAUDE.local.md"))
 check("a missing CLAUDE.local.md is listed once, as missing",
       {"file": "CLAUDE.local.md", "section": None, "line": None} in status(CFG)["settings"]["unfilled"],
       status(CFG)["settings"])
+
+# Copies left after their task was integrated: worktrees, folders and branches status asks to tear down.
+left_root = tempfile.mkdtemp(prefix="ledger_left_")
+atexit.register(shutil.rmtree, left_root, True)
+proj = os.path.join(left_root, "proj")
+copies = os.path.join(left_root, "_temp", "proj-worktrees")
+os.makedirs(proj)
+os.makedirs(copies)
+for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t.com"), ("config", "user.name", "t"),
+             ("commit", "-q", "--allow-empty", "-m", "base"), ("switch", "-q", "-c", "feat/x")):
+    git(proj, *args)
+git(proj, "branch", "old-merged")
+run("start", "--slug", "left", cwd=proj)
+done_tree, open_tree, held_tree = (os.path.join(copies, name) for name in ("done", "open", "held"))
+inner_tree = os.path.join(proj, ".claude", "worktrees", "agent-1")
+git(proj, "worktree", "add", "-q", "-b", "task-done", done_tree)
+git(done_tree, "commit", "-q", "--allow-empty", "-m", "done task")
+git(proj, "merge", "-q", "--ff-only", "task-done")
+git(proj, "worktree", "add", "-q", "-b", "task-open", open_tree)
+git(open_tree, "commit", "-q", "--allow-empty", "-m", "open task")
+git(proj, "worktree", "add", "-q", "--detach", held_tree)
+git(proj, "worktree", "add", "-q", "--detach", inner_tree)
+run("claim", "--task", "H1", "--worktree", held_tree, "--origin", "HEAD", cwd=proj)
+os.makedirs(os.path.join(copies, "half", "node_modules"))
+r = run("status", "--json", cwd=proj)
+left = json.loads(r.stdout).get("leftovers") if r.returncode == 0 else None
+norm = lambda path: os.path.normcase(os.path.realpath(path))
+found = {(item["kind"], norm(item["path"]) if item.get("path") else item.get("branch")) for item in left or []}
+check("status lists an integrated worktree of the copies folder, one in .claude/worktrees, a copy folder with no .git "
+      "and the integrated branch, and nothing else",
+      found == {("worktree", norm(done_tree)), ("worktree", norm(inner_tree)), ("folder", norm(os.path.join(copies, "half"))),
+                ("branch", "task-done")}, left)
+check("a claimed worktree, a task not integrated, the delivery branch and a branch older than the base are no leftover",
+      not any(item.get("branch") in ("task-open", "feat/x", "main", "old-merged") or
+              norm(item.get("path") or "") in (norm(open_tree), norm(held_tree)) for item in left or []), left)
+state = json.loads(r.stdout) if r.returncode == 0 else {"pending": [], "steps": []}
+check("each leftover is pending, with the action, so the gate is not ready",
+      any("leftover" in item and "done" in item and "remove" in item for item in state["pending"])
+      and any(item["step"] == "leftover" for item in state["steps"]) and not state.get("ready_for_gate", True),
+      state["pending"])
+check("status --check exits 1 while a copy is left", run("status", "--check", cwd=proj).returncode == 1)
+git(proj, "worktree", "remove", "--force", done_tree)
+git(proj, "worktree", "remove", "--force", inner_tree)
+git(proj, "branch", "-D", "task-done")
+shutil.rmtree(os.path.join(copies, "half"))
+check("once the copies are torn down and the branch deleted, nothing is left over",
+      json.loads(run("status", "--json", cwd=proj).stdout).get("leftovers") == [])
+
+# The free disk against the delivery's highest reading and the declared floor: advice in status, never pending.
+disk_root = tempfile.mkdtemp(prefix="ledger_disk_")
+atexit.register(shutil.rmtree, disk_root, True)
+os.makedirs(os.path.join(disk_root, ".superpowers"))
+DISK = os.path.join(disk_root, ".superpowers", "ledger.jsonl")
+with open(DISK, "w", encoding="utf-8") as handle:
+    handle.write(json.dumps({"type": "start", "slug": "disk", "base": "abc"}) + "\n")
+with open(os.path.join(disk_root, "CLAUDE.local.md"), "w", encoding="utf-8") as handle:
+    handle.write("# p\n\n## Execução em paralelo\n\n- Quanto uma cópia ocupa no pico: memória `4` GB, disco `5` GB\n"
+                 "- Disco livre mínimo: `20`\n")
+
+
+def disk_at(free):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PIPELINE_CAPACITY")}
+    env["PIPELINE_CAPACITY_DISK_GB"] = free
+    result = subprocess.run([sys.executable, LEDGER, "--ledger", DISK, "status", "--json"], capture_output=True,
+                            text=True, encoding="utf-8", env=env, cwd=disk_root)
+    text = subprocess.run([sys.executable, LEDGER, "--ledger", DISK, "status"], capture_output=True, text=True,
+                          encoding="utf-8", env=env, cwd=disk_root).stdout
+    return (json.loads(result.stdout) if result.returncode == 0 else {}), text
+
+
+def disk_of(state):
+    return state.get("disk") or {}
+
+
+state, _ = disk_at("100")
+check("status gives the free disk and the delivery's highest reading, with no warning at the first one",
+      disk_of(state).get("free_gb") == 100 and disk_of(state).get("high_gb") == 100
+      and disk_of(state).get("warning") is None, state.get("disk"))
+state, text = disk_at("97")
+check("a drop within one copy's disk peak is no warning", disk_of(state).get("warning") is None, disk_of(state))
+state, text = disk_at("90")
+check("a drop since the highest reading larger than the copies in flight (at least one) times the disk peak warns, "
+      "pointing at what verification writes outside the worktree",
+      disk_of(state).get("dropped_gb") == 10 and "outside the worktree" in (disk_of(state).get("warning") or "")
+      and "disk:" in text, (disk_of(state), text))
+check("the disk warning is advice, never pending", not any("disk" in item for item in state.get("pending", [])), state.get("pending", []))
+state, _ = disk_at("15")
+check("below the declared disk floor, status warns naming it", "floor 20" in (disk_of(state).get("warning") or ""),
+      disk_of(state))
+with open(DISK, "w", encoding="utf-8") as handle:
+    handle.write(json.dumps({"type": "start", "slug": "next", "base": "abc"}) + "\n")
+state, _ = disk_at("50")
+check("a new delivery starts its own highest reading", disk_of(state).get("high_gb") == 50, disk_of(state))
+os.remove(os.path.join(disk_root, "CLAUDE.local.md"))
+state, _ = disk_at("30")
+check("with no disk peak nor floor declared, the reading is kept and nothing warns",
+      disk_of(state).get("warning") is None and disk_of(state).get("high_gb") == 50, disk_of(state))
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)
