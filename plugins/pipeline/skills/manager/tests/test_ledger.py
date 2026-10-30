@@ -451,17 +451,24 @@ check("while this cycle is open, the progress stays on its plan cycle",
       state["scope"]["current"] == "R" and state["scope"]["cycles_left"] == 2, state["scope"])
 check("status says the next cycle's task is added once this cycle closes",
       any("T3.2" in item and "once this cycle closes" in item for item in state["pending"]), state["pending"])
-r = add("dev", "DONE", "T3.2", ledger=NEXT)
-check("add of a task of a later plan cycle is refused while this cycle is open",
-      r.returncode != 0 and "once this cycle closes" in r.stderr, r.stdout + r.stderr)
+r = add("dev", "DONE", "T3.2", ledger=NEXT, seconds=300)
+state = status(NEXT)
+check("add of a task of a later plan cycle goes in at once while this cycle is open, held out of it",
+      r.returncode == 0 and "held" in r.stdout and state["cycle"] == 1 and "T3.2" not in state["tasks"]
+      and state["in_flight"] == [] and state["scope"]["current"] == "R", (r.stdout, r.stderr, state["tasks"]))
+check("status says the held run is integrated once this cycle closes",
+      any("T3.2" in item and "held" in item and "once this cycle closes" in item for item in state["pending"]),
+      state["pending"])
+check("the held run's time counts in the delivery's clock from when it ran",
+      state["metrics"]["time"]["agents"].get("dev", 0) >= 300, state["metrics"]["time"])
 add("reviewer", "PASS", ledger=NEXT)
 add("qa", "PASS", ledger=NEXT)
-closing = status(NEXT)["runs"][-1]["head"]
-r = add("dev", "DONE", "T3.2", ledger=NEXT)
+closing = head()
 state = status(NEXT)
-check("once the cycle closes, the next cycle's task opens the next cycle from the closing head",
-      r.returncode == 0 and state["cycle"] == 2 and state["from"] == closing and state["scope"]["current"] == "3",
-      (r.stderr, state["cycle"], state["scope"]))
+check("once the cycle closes, the held run opens the next cycle from the closing head",
+      state["cycle"] == 2 and state["from"] == closing and state["scope"]["current"] == "3"
+      and "T3.2" in state["tasks"] and not any("held" in item for item in state["pending"]),
+      (state["cycle"], state["scope"], state["tasks"], state["pending"]))
 check("a task of the same plan cycle is still added while its cycle is open",
       add("dev", "DONE", "T3.1", ledger=NEXT).returncode == 0)
 
