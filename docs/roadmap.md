@@ -16,6 +16,7 @@ Nenhum no momento.
 
 Cada item diz o sinal que o traz de volta; o detalhe da análise está no histórico do git deste arquivo.
 
+- **A cópia usa as versões das ferramentas da principal** (`homebudgy`, 1.23.0): uma cópia de tarefa puxou de novo a storage-api v1.77.0 e outro postgres, que a stack principal não usa, e a imagem apagada voltou. Volta se uma cópia com versão diferente custar uma rodada ou se repetir em outro projeto: a linha "Como preparar as dependências de uma cópia" do molde pede as mesmas versões da principal. Esforço: P.
 - **Dublê de dependência externa que aceita o que a real recusa** (`app-f0-api` do CF, 1.18.1): o mock aceitava texto onde o módulo real exige bytes, e a suíte ficou verde com o app quebrado. Candidato a princípio no `checklists/general.md`. Volta quando outro projeto tiver um defeito que o dublê escondeu. Esforço: P.
 - **Desmontagem de uma cópia com alcance de máquina** (`0.7.4` do `launcher-multimidia`, 1.17.1): o `gradle --stop` de uma cópia derrubou os daemons da outra. Volta na segunda vez: a linha "como derrubá-lo" do template pergunta se o comando alcança só a cópia, e o `parallel.md` só roda o de máquina sem nada em voo. Esforço: P.
 - **Leitores de um valor que muda de origem listados no plano** (`0.7.4`, 1.17.1): a revisão do plano pegou dois leitores esquecidos. Candidato a princípio. Volta se um leitor esquecido passar da revisão do plano, ou numa segunda entrega com o mesmo achado. Esforço: P.

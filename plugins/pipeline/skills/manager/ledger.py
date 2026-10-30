@@ -30,6 +30,11 @@
 A claim is written when the dev is dispatched and freed by the dev's add (or release); status lists the tasks in
 flight and the gate waits for them, so a manager resuming after a compaction sees which runs it still owes a report.
 claim refuses a task that is in flight or already DONE in the current cycle, so one task never runs twice by mistake.
+status lists each copy left over, pending (step leftover, with its action) until it is gone, so the gate waits: a
+worktree under ../_temp/<project>-worktrees/ (project being the main worktree's folder) or .claude/worktrees/ with no
+claim and its HEAD in the delivery head, a folder of ../_temp/<project>-worktrees/ with no .git, and a local branch
+integrated in this delivery (in the head, not in the base) that is neither the current one nor a claimed worktree's;
+status --json gives them as leftovers: {kind worktree|folder|branch, path, branch, action}.
 --worktree (an existing directory) and --origin (a commit, resolved to its hash there) are kept with the claim; status
 shows them and, when the delivery head is no longer the origin, names the head (a fact: it moves with every
 integration). A claim's tip is its worktree's current HEAD (null with no worktree or folder): resume prints
@@ -168,6 +173,11 @@ line to fill. The reason names an env override that replaced a measure. copies i
 floor), so one more copy and the floor stay free (null when the peak or the memory is unknown); dispatch is false below
 the floor. It needs no delivery, exits 1 when dispatch is false, and --json gives memory_free_gb, disk_free_gb, peak_gb,
 disk_peak_gb, floor_gb, heavy_limit, autonomous, dispatch, copies and reason.
+status --json gives disk: {free_gb, high_gb, dropped_gb, floor_gb, allowed_gb, warning}, or null when the free disk is
+unknown (PIPELINE_CAPACITY_DISK_GB overrides it, as in capacity). high_gb is the delivery's highest reading, kept in
+disk.json beside the ledger (a new slug starts over); warning names a free disk below the "Disco livre mínimo" line of
+CLAUDE.local.md, or a drop from high_gb larger than the claims in flight (at least one) times the disk peak, pointing
+at what verification writes outside the worktree and at leftover copies. It is advice, never pending, like usage.
 
 Without --ledger, the ledger is .superpowers/ledger.jsonl at the root of the current worktree, or of the main
 worktree when the current one has none (a task worktree), except for start, which always uses the current one. A
@@ -843,6 +853,45 @@ def committed(entry, head):
     return bool(not entry.get("worktree") and entry.get("head") and head and entry["head"] != head)
 
 
+def leftovers(entries, ledger, head):
+    """Copies left after their task was integrated: worktrees and folders of the copies, and their branches."""
+    where = os.path.dirname(os.path.abspath(ledger))
+    common = git_ok(where, "rev-parse", "--path-format=absolute", "--git-common-dir") if os.path.isdir(where) else None
+    if not common or not head:
+        return []
+    root = os.path.dirname(common)
+    norm = lambda path: os.path.normcase(os.path.realpath(path))
+    copies = os.path.normpath(os.path.join(os.path.dirname(root), "_temp", os.path.basename(root) + "-worktrees"))
+    homes = (norm(copies) + os.sep, norm(os.path.join(root, ".claude", "worktrees")) + os.sep)
+    held = {norm(entry["worktree"]) for entry in claims(entries).values() if entry.get("worktree")}
+    integrated = lambda rev: git_ok(root, "merge-base", "--is-ancestor", rev, head) is not None
+    found, trees, busy = [], set(), set()
+    for block in (git_ok(root, "worktree", "list", "--porcelain") or "").split("\n\n"):
+        fields = dict(line.partition(" ")[::2] for line in block.splitlines())
+        if "worktree" not in fields:
+            continue
+        path = norm(fields["worktree"])
+        trees.add(path)
+        if path in held:
+            busy.add(fields.get("branch", "")[11:])
+        if path.startswith(homes) and path not in held and integrated(fields.get("HEAD", "")):
+            found.append({"kind": "worktree", "path": os.path.normpath(fields["worktree"]),
+                          "branch": fields.get("branch", "")[11:] or None, "action": "tear the copy down as Execução em paralelo says, then git worktree remove it"})
+    for name in sorted(os.listdir(copies)) if os.path.isdir(copies) else []:
+        path = os.path.join(copies, name)
+        if os.path.isdir(path) and norm(path) not in trees and not os.path.exists(os.path.join(path, ".git")):
+            found.append({"kind": "folder", "path": path, "branch": None,
+                          "action": "stop what still runs from it (by the PID of its port), then delete the folder"})
+    base = entries[0].get("base")
+    current = git_ok(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    for line in (git_ok(root, "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads") or "").splitlines():
+        name, _, commit = line.partition(" ")
+        if name != current and name not in busy and integrated(commit) and not (
+                base and git_ok(root, "merge-base", "--is-ancestor", commit, base) is not None):
+            found.append({"kind": "branch", "path": None, "branch": name, "action": "git branch -d it"})
+    return found
+
+
 def claim(args):
     entries = read(args.ledger)
     if not entries:
@@ -1464,6 +1513,10 @@ def status(args):
         pending.append(f"security scan has not run, and the delivery touches a sensitive domain ({marks[-1]}): run "
                        "it once the last cycle closes (references/security.md)")
         steps.append({"step": "security", "reason": marks[-1]})
+    left = leftovers(entries, args.ledger, head)
+    pending += [f"leftover {item['kind']} {item['path'] or item['branch']}, already integrated or abandoned: "
+                f"{item['action']}" for item in left]
+    steps += [{"step": "leftover", **item} for item in left]
     pause_state = paused(entries)
     if pause_state:
         pending.insert(0, f"delivery paused since {pause_state['at']}: {pause_state['text']} "
@@ -1481,7 +1534,7 @@ def status(args):
                           "waiting_minutes": waiting(claim), "committed": committed(claim, head),
                           "partial_report": (waiting(claim) or 0) >= PARTIAL_REPORT_MINUTES}
                          for task, claim in claims(entries).items()],
-              "paused": pause_state, "full_qa": full[-1] if full else None,
+              "paused": pause_state, "full_qa": full[-1] if full else None, "leftovers": left,
               "tasks": {task: entry["verdict"] for task, entry in state["tasks"].items()},
               "reviewer": state["reviewer"], "qa": state["qa"], "runs": groups[-1], "pending": pending,
               "steps": steps, "scope": progress(entries, closed, held, args.ledger),
@@ -1492,7 +1545,8 @@ def status(args):
               "notes": [entry["text"] if entry["type"] == "note" else f"paused: {entry['text']}" for entry in entries
                         if entry["type"] == "pause" or (entry["type"] == "note" and not entry.get("validar"))],
               "validar": validar(entries),
-              "metrics": metrics(entries), "usage": usage, "night": night(entries), "ready_for_gate": not pending}
+              "metrics": metrics(entries), "usage": usage, "night": night(entries),
+              "disk": disk_watch(entries, args.ledger, held), "ready_for_gate": not pending}
     report["settings"] = settings(args.ledger, report["scope"])
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
@@ -1526,6 +1580,8 @@ def status(args):
                      else "the window resets"))
         if report["night"]:
             print(night_line(report["night"], pause_state))
+        if report["disk"] and report["disk"]["warning"]:
+            print(f"disk: {report['disk']['warning']}")
         unfilled = report["settings"]["unfilled"]
         if unfilled:
             print("settings: unfilled, " + "; ".join(
@@ -1609,12 +1665,13 @@ def first_number(text, unit=False):
 
 
 def capacity_settings(path):
-    """CLAUDE.local.md, Execução em paralelo: the memory and disk peak of a copy, the free-memory floor, the heavy limit."""
-    found = {"peak": None, "disk_peak": None, "floor": None, "heavy": None}
+    """CLAUDE.local.md, Execução em paralelo: the memory and disk peak of a copy, the free memory and disk floors, the heavy
+    limit."""
+    found = {"peak": None, "disk_peak": None, "floor": None, "disk_floor": None, "heavy": None}
     section = []
     inside = False
     labels = {"quanto uma copia ocupa no pico": "peak", "memoria livre minima para despachar": "floor",
-              "com o usuario usando a maquina": "heavy"}
+              "disco livre minimo": "disk_floor", "com o usuario usando a maquina": "heavy"}
     try:
         with open(path, encoding="utf-8") as handle:
             rows = handle.read().splitlines()
@@ -1638,8 +1695,8 @@ def capacity_settings(path):
                 found["peak"] = first_number(memory, unit=True)
                 found["disk_peak"] = (None if re.match(r"[\s:`-]*(?:a\s+)?medir", disk)
                                       else first_number(disk, unit=True)) if disk else None
-            elif key == "floor":
-                found["floor"] = first_number(rest)
+            elif key in ("floor", "disk_floor"):
+                found[key] = first_number(rest)
             else:
                 found["heavy"] = heavy_count(rest)
     text = " ".join(section)
@@ -1757,6 +1814,44 @@ def capacity(args):
         print(f"capacity: dispatch {label}, copies {'unknown' if copies is None else copies}; {reason}")
     if dispatch is False:
         sys.exit(1)
+
+
+def disk_watch(entries, ledger, held):
+    """The free disk of the ledger's root against the delivery's highest reading, kept in disk.json, and the floor."""
+    folder = os.path.dirname(os.path.abspath(ledger))
+    root = os.path.dirname(folder)
+    free = probed("PIPELINE_CAPACITY_DISK_GB", lambda: shutil.disk_usage(root).free / 1024 ** 3)
+    if free is None:
+        return None
+    setting = capacity_settings(os.path.join(root, "CLAUDE.local.md"))
+    path, slug = os.path.join(folder, "disk.json"), entries[0].get("slug")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            saved = json.load(handle)
+    except (OSError, ValueError):
+        saved = {}
+    high = saved.get("high_gb") if isinstance(saved, dict) and saved.get("slug") == slug else None
+    high = free if not isinstance(high, (int, float)) or free > high else high
+    if not isinstance(saved, dict) or high != saved.get("high_gb") or slug != saved.get("slug"):
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump({"slug": slug, "high_gb": round(high, 2),
+                           "at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}, handle)
+        except OSError:
+            pass
+    dropped, floor = round(high - free, 2), setting["disk_floor"]
+    allowed = max(len(held), 1) * setting["disk_peak"] if setting["disk_peak"] else None
+    warning = None
+    if floor and free < floor:
+        warning = f"{free:.1f} GB free, below the floor {floor:g}"
+    elif allowed and dropped > allowed:
+        warning = (f"{dropped:g} GB less than the delivery's highest ({high:g}), more than {allowed:g} for "
+                   f"{max(len(held), 1)} cop{'y' if max(len(held), 1) == 1 else 'ies'}")
+    if warning:
+        warning += (": look for what verification writes outside the worktree (a tool's temporary folder, test "
+                    "output) and for leftover copies")
+    return {"free_gb": round(free, 2), "high_gb": round(high, 2), "dropped_gb": dropped, "floor_gb": floor,
+            "allowed_gb": allowed, "warning": warning}
 
 
 def count(text):
