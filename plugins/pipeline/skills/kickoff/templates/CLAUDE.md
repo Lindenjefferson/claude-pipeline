@@ -23,6 +23,7 @@ Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o
 - Lint: _(comando)_
 - Testes: _(comando)_ (outra suíte que precisa passar antes do merge, como a de interface ou a do banco, vai numa linha "Testes (<nome>)", que o gate também roda; com a de interface fora delas, o `manager` roda um `qa` final com a suíte inteira)
 - Testes afetados (um arquivo ou filtro, para o `dev`): _(comando)_
+- Testes (verificação do projeto): _(comando dos testes que vigiam o projeto inteiro, como o que proíbe um padrão em qualquer arquivo; o `dev` o roda a cada tarefa e o `reviewer` confere o plano contra eles; opcional)_
 - Arquivos de teste (globs separados por espaço; o `gate.py` procura neles o id de cada critério de aceite): _(globs)_
 - Auditoria (vulnerabilidades das dependências; opcional): _(comando)_
 - Versão (os arquivos que guardam a versão do produto, separados por espaço; todos com o mesmo `x.y.z`, sem sufixo de pré-lançamento, que o `gate.py` exige acima do da branch principal): _(ex.: `package.json`)_

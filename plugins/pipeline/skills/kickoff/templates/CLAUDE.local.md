@@ -9,6 +9,10 @@ O Claude Code lê este arquivo junto com o `CLAUDE.md`, e ele fica fora do git: 
 - Disco livre mínimo: _(GB, entre crases; abaixo disso o `status` avisa)_
 - Com o usuário usando a máquina: _(quantas cópias pesadas ao mesmo tempo, entre crases, e a memória livre que já conta como falta)_
 
+## Ambiente
+
+- Ambiente dos comandos: _(o prefixo, entre crases, que todo comando do projeto precisa nesta máquina, como `export PATH="/c/ferramentas/node:$PATH"`; o `gate.py` e os agentes o rodam antes de cada comando; sem ele, nada)_
+
 ## Uso da conta
 
 O mod do plugin grava o uso da assinatura (janela de 5 horas e semana) ao lado do ledger, e o `manager` economiza ou pausa por ele. Sem estas linhas valem os números padrão.

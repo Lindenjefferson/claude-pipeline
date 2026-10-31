@@ -1,4 +1,4 @@
-import atexit, os, re, shutil, stat, subprocess, sys, tempfile, time
+import atexit, json, os, re, shutil, stat, subprocess, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GATE = os.path.join(HERE, "..", "gate.py")
@@ -890,6 +890,43 @@ check("the secret scan still runs when the commands are skipped", re.search(r"Se
 r = gate("--base", "main", "--report", "z")
 check("a skipped run leaves no quality report behind", r.returncode == 1
       and not os.path.isdir(os.path.join(repo, "docs", "quality-reports")), r.stdout)
+
+# A fix round's criteria are traced by --criteria fix-N; the machine's environment prefixes every command; the verdict
+# goes in the ledger
+repo = os.path.join(base_dir, "repo8")
+os.makedirs(repo)
+sh("git", "init", "-q", "-b", "main")
+sh("git", "config", "user.email", "t@t.com")
+sh("git", "config", "user.name", "t")
+write(".gitignore", ".superpowers/\nCLAUDE.local.md\n")
+sh("git", "add", ".gitignore")
+commit("CLAUDE.md", f"# p\n\n## Comandos\n\n- Testes: `{PY} -c \"import os, sys; sys.exit(os.environ.get('PIPE_ENV') != 'on')\"`\n",
+       "base")
+sh("git", "switch", "-q", "-c", "feat/f")
+commit("plan.md", "# plan\n- AC-T1-1 a\n## Errata\n- AC-DC-FIX2-1 the fix round's criterion\n", "docs: plan")
+ledger_cmd("start", "--slug", "f", "--base", "main", "--plan", "plan.md")
+r = gate("--criteria", "fix-2")
+check("--criteria fix-2 finds a criterion of the Errata written FIX2", r.returncode == 1 and "AC-DC-FIX2-1" in r.stdout,
+      r.stdout)
+commit("t.test.txt", "AC-T1-1 AC-DC-FIX2-1\n", "test: both")
+check("--criteria fix-2 passes once its test exists", gate("--criteria", "fix-2").returncode == 0)
+for agent in ("dev", "reviewer", "qa"):
+    ledger_cmd("add", "--agent", agent, "--verdict", "DONE" if agent == "dev" else "PASS", *(["--task", "T1"] if agent == "dev" else []))
+r = gate()
+check("without the environment line, the command misses the machine's setting and fails", re.search(r"Testes:\s+FAIL", r.stdout),
+      r.stdout)
+write("CLAUDE.local.md", "# local\n\n## Execução em paralelo\n\n- Ambiente dos comandos: `export PIPE_ENV=on`\n")
+r = gate()
+check("the Ambiente dos comandos line of CLAUDE.local.md runs before every command", r.returncode == 0
+      and re.search(r"Testes:\s+PASS", r.stdout), r.stdout)
+gates = json.loads(ledger_cmd("status", "--json").stdout)["gates"]
+check("each gate run is recorded in the ledger with its failed checks",
+      [(item["verdict"], item["failed"]) for item in gates] == [("NOT_READY", ["Testes"]), ("READY", [])], gates)
+r = gate("--report", "f")
+text = open(os.path.join(repo, "docs", "quality-reports", os.listdir(os.path.join(repo, "docs", "quality-reports"))[0]),
+            encoding="utf-8").read() if r.returncode == 0 else ""
+check("the quality report counts the gate runs before it and why each was NOT READY",
+      "- Gate runs: 3 (NOT READY 1: Testes)" in text, text)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)
