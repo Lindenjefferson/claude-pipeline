@@ -5,7 +5,7 @@
   start   --slug <slug> --next [--base <rev>]                 the next delivery's spec and plan, while this one codes
   add     --agent dev --task <id> --verdict <v> [--seconds <duration>] [--tokens N]
   add     --agent reviewer|qa --verdict PASS|FAIL [--critical N --important N --minor N --origin <origin>=N,...]
-          [--report <path> | --from-agent <agent id>] [--seconds <duration>] [--tokens N]
+          [--report <path> | --from-agent <agent id>] [--head <rev>] [--seconds <duration>] [--tokens N]
   add     --agent reviewer --task spec|plan|security --verdict PASS|FAIL ...
                                                               one round of the spec, plan or security review loop
   add     --agent qa ... --full | --interface                 the qa ran the full test command, or the interface
@@ -26,7 +26,8 @@
   sensitive --reason <text>                                   the delivery touches a sensitive domain (step 0)
   resolve --id <id> --decision <text>                         the final decision on a deferred item
   lesson  --text <rule> [--check <test or lint rule>]         a lesson, automated when --check names the check
-  status  [--json] [--check]                                  the current cycle, what it still needs, and metrics
+  status  [--json] [--check] [--tick]                         the current cycle, what it still needs, and metrics
+  gate    --verdict READY|NOT_READY [--failed <check,...>]    a gate run's verdict (gate.py records it)
   capacity [--json]                                           free memory and disk, and the parallel copies that fit
 
 A claim is written when the dev is dispatched and freed by the dev's add (or release); status lists the tasks in
@@ -99,6 +100,13 @@ records the reason as a note and counts as that agent's PASS at the head it revi
 waivers in autonomous mode) are listed apart, numbered V1, V2... in the order written, for the user to confirm on
 return; validate records the decision, and status lists the items still waiting apart from the decided ones. A
 ledger with no mode entry is supervised.
+
+A run's head is --head when given, else the end of the Range: line of its report (a reviewer's) or the Commit: its
+qa report tested, else the HEAD of the ledger's checkout, which may be another delivery's branch.
+status --tick, the heartbeat's call, also records a tick; in autonomous mode, status --json gives heartbeat: {minutes,
+since} once the latest tick (or the latest mode entry, before the first tick) is over 30 minutes old, else null, and
+the text says to check the heartbeat with CronList. It is advice, never pending. gate records a gate.py run (verdict,
+failed checks); status --json lists them as gates, for the quality report and the analysis of where the time went.
 
 approve records the user's standing approval of merge and push, across deliveries, in approval.json beside the
 ledger ({until, conditions, at}; --revoke removes it); status --json gives it as approval, or null. bash-guard.py reads
@@ -876,6 +884,9 @@ def add(args):
         sys.exit("--report names a file you saved, --from-agent saves it: give one")
     if args.from_agent:
         args.report = save_agent_report(args, entries)
+    named = git_head(args.head, args.ledger) if args.head else None
+    if args.head and not named:
+        sys.exit(f"--head {args.head} is no commit here")
     if args.report and not saved_report(args.report, args.ledger):
         sys.exit(f"--report {args.report} is no file: the agents have no Write, so save the report there yourself "
                  "and add the run naming the file you saved")
@@ -894,13 +905,16 @@ def add(args):
     entry = {"type": "run", "agent": args.agent, "task": args.task, "verdict": args.verdict, "open": blocking,
              "critical": args.critical, "important": args.important, "minor": args.minor,
              "origin": tally("--origin", ORIGINS, args.origin, blocking + args.minor),
-             "head": git_head(ledger=args.ledger) or ""}
+             "head": named or git_head(ledger=args.ledger) or ""}
     if later:
         entry["after"] = later
     if args.report:
         entry["report"] = args.report
     if args.report and args.agent == "qa":
         entry.update(qa_report(args, entries))
+        entry["head"] = named or entry["tested"]
+    elif args.report and not named:
+        entry["head"] = reviewed_head(args) or entry["head"]
     if args.full:
         entry["full"] = True
     if args.interface:
@@ -928,6 +942,42 @@ def add(args):
     print(f"{label} (round {len(review_loop(read(args.ledger), args.task))})" if is_review(entry)
           else f"{label} (held for plan cycle {later}: integrate it once this cycle closes)" if later
           else f"{label} (cycle {len(cycles(read(args.ledger)))})")
+
+
+def reviewed_head(args):
+    """The commit at the end of the Range: line of a saved reviewer report, or None."""
+    path = args.report if os.path.isfile(args.report) else os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(args.ledger))), args.report)
+    try:
+        text = open(path, encoding="utf-8", errors="replace").read()
+    except OSError:
+        return None
+    match = re.search(r"(?im)^[ \t>*_-]*Range[*_]*:[*_]*[ \t]*`?[^\s`]*?\.\.([0-9a-f]{4,40})\b", text)
+    return git_head(match.group(1), args.ledger) if match else None
+
+
+HEARTBEAT_MINUTES = 30
+
+
+def heartbeat(entries, auto):
+    """In autonomous mode, how long since the latest tick (or mode entry): {minutes, since} past 30, else None."""
+    marks = [entry["at"] for entry in entries if entry["type"] in ("tick", "mode") and entry.get("at")]
+    if not auto or not marks:
+        return None
+    try:
+        since = datetime.datetime.fromisoformat(marks[-1])
+    except ValueError:
+        return None
+    minutes = int((datetime.datetime.now(datetime.timezone.utc) - since).total_seconds() // 60)
+    return {"minutes": minutes, "since": marks[-1]} if minutes > HEARTBEAT_MINUTES else None
+
+
+def gate_run(args):
+    if not read(args.ledger):
+        sys.exit("no delivery started: run start first")
+    failed = [name.strip() for name in (args.failed or "").split(",") if name.strip()]
+    write(args.ledger, {"type": "gate", "verdict": args.verdict, "failed": failed})
+    print(f"gate {args.verdict}" + (f": {', '.join(failed)}" if failed else ""))
 
 
 def qa_report(args, entries):
@@ -1674,6 +1724,9 @@ def status(args):
     entries = read(args.ledger)
     if not entries:
         sys.exit("no delivery started")
+    if args.tick:
+        write(args.ledger, {"type": "tick"})
+        entries = read(args.ledger)
     groups = cycles(entries)
     auto = autonomous(entries)
     state, pending = cycle_state(groups[-1], auto, extension(entries, groups[-1]), first(groups))
@@ -1755,6 +1808,9 @@ def status(args):
               "disk": None if preparing(entries) else disk_watch(entries, args.ledger, held), "next": upcoming, "ready_for_gate": not pending}
     report["settings"] = settings(args.ledger, report["scope"])
     report["approval"] = standing(args.ledger)
+    report["heartbeat"] = heartbeat(entries, auto)
+    report["gates"] = [{"verdict": entry["verdict"], "failed": entry.get("failed", []), "at": entry.get("at")}
+                       for entry in entries if entry["type"] == "gate"]
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:
@@ -1789,6 +1845,9 @@ def status(args):
             print(night_line(report["night"], pause_state))
         if report["disk"] and report["disk"]["warning"]:
             print(f"disk: {report['disk']['warning']}")
+        if report["heartbeat"]:
+            print(f"heartbeat: no tick for {report['heartbeat']['minutes']} min in autonomous mode (since "
+                  f"{report['heartbeat']['since']}): check the heartbeat job with CronList and create it if it is gone")
         unfilled = report["settings"]["unfilled"]
         if unfilled:
             print("settings: unfilled, " + "; ".join(
@@ -2097,6 +2156,7 @@ def main():
     command.add_argument("--origin", default="", help="design=N,assumption=N,plan=N,execution=N,environment=N")
     command.add_argument("--report", help="the file the manager saved a reviewer or qa report in")
     command.add_argument("--from-agent", help="the reviewer or qa agent id: its report is saved from its transcript")
+    command.add_argument("--head", help="the commit the run reviewed or tested, when the checkout is elsewhere")
     command.add_argument("--seconds", help="how long the run took, from its completion notification: 90, 12m, 1h5m or 12m30s")
     command.add_argument("--tokens", type=count, help="the tokens the run used, from its completion notification")
     command.add_argument("--full", action="store_true", help="the qa ran the project's full test command")
@@ -2177,7 +2237,12 @@ def main():
     command = commands.add_parser("status")
     command.add_argument("--json", action="store_true")
     command.add_argument("--check", action="store_true")
+    command.add_argument("--tick", action="store_true", help="the heartbeat's call: also records a tick")
     command.set_defaults(run=status)
+    command = commands.add_parser("gate")
+    command.add_argument("--verdict", required=True, choices=("READY", "NOT_READY"))
+    command.add_argument("--failed", help="the checks that failed, comma-separated")
+    command.set_defaults(run=gate_run)
     args = parser.parse_args()
     args.ledger = args.ledger or default_ledger(args.command)
     global NEEDS_INTERFACE
