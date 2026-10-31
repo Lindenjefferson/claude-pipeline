@@ -226,6 +226,51 @@ for command in ("cmd /c git push origin main", "if ($?) {git push origin main}",
 check("PowerShell: the autonomous-mode guard reads it too",
       run(repo, "git switch main; git merge feat/x", tool="PowerShell")[1] is not None)
 
+# A standing approval lets the publish of a READY delivery through, and nothing else
+repo = tempfile.mkdtemp(prefix="guard_standing_")
+for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t.com"), ("config", "user.name", "t"),
+             ("commit", "-q", "--allow-empty", "-m", "base")):
+    sh("git", *args)
+sh(sys.executable, LEDGER_PY, "start", "--slug", "x")
+sh(sys.executable, LEDGER_PY, "mode", "autonomous")
+sh("git", "checkout", "-q", "-b", "feat/x")
+
+
+def commit_file(name, text):
+    os.makedirs(os.path.dirname(os.path.join(repo, name)) or repo, exist_ok=True)
+    with open(os.path.join(repo, name), "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+    sh("git", "add", name)
+    sh("git", "commit", "-q", "-m", name)
+
+
+def git_head():
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
+
+
+commit_file("a.txt", "a\n")
+gated = git_head()
+REPORT = "docs/quality-reports/2026-10-31-x.md"
+commit_file(REPORT, f"# x\n\n2026-10-31 · 0000000..{gated[:7]} · v1.2.0\n\n## Checks\n")
+PUBLISH = ("gh pr merge 3 --merge", "git checkout main && git merge --no-ff feat/x && git push origin main")
+for command in PUBLISH:
+    check(f"autonomous, READY report but no standing approval: denied {command!r}", reaches_main(command))
+r = subprocess.run([sys.executable, LEDGER_PY, "approve", "--until", "1.5.0", "--conditions", "gate READY"], cwd=repo,
+                   capture_output=True, text=True)
+check("approve records a standing approval", r.returncode == 0, r.stderr)
+for command in PUBLISH:
+    check(f"standing approval and a READY report at this tree: passes {command!r}",
+          run(repo, command)[1] is None, str(run(repo, command)))
+check("standing approval: a push of every branch is still denied", reaches_main("git push --all"))
+commit_file("b.txt", "after the gate\n")
+check("standing approval: a commit after the READY report is denied", reaches_main("gh pr merge 3 --merge"))
+sh("git", "reset", "-q", "--hard", "HEAD~1")
+commit_file(REPORT, f"# x\n\n2026-10-31 · 0000000..{gated[:7]} · v1.6.0\n\n## Checks\n")
+check("standing approval: a version past --until is denied", reaches_main("gh pr merge 3 --merge"))
+sh("git", "reset", "-q", "--hard", "HEAD~1")
+r = subprocess.run([sys.executable, LEDGER_PY, "approve", "--revoke"], cwd=repo, capture_output=True, text=True)
+check("approve --revoke ends it: denied again", r.returncode == 0 and reaches_main("gh pr merge 3 --merge"), r.stderr)
+
 config = json.load(open(os.path.join(HOOKS, "hooks.json"), encoding="utf-8"))
 pre = config["hooks"]["PreToolUse"]
 check("hooks.json registers bash-guard.py for Bash and PowerShell",
