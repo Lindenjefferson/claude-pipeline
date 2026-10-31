@@ -5,7 +5,7 @@
   start   --slug <slug> --next [--base <rev>]                 the next delivery's spec and plan, while this one codes
   add     --agent dev --task <id> --verdict <v> [--seconds <duration>] [--tokens N]
   add     --agent reviewer|qa --verdict PASS|FAIL [--critical N --important N --minor N --origin <origin>=N,...]
-          [--report <path>] [--seconds <duration>] [--tokens N]
+          [--report <path> | --from-agent <agent id>] [--seconds <duration>] [--tokens N]
   add     --agent reviewer --task spec|plan|security --verdict PASS|FAIL ...
                                                               one round of the spec, plan or security review loop
   add     --agent qa ... --full | --interface                 the qa ran the full test command, or the interface
@@ -21,6 +21,7 @@
   plan    --path <path>                                       the approved plan, when start ran before it existed
   scope   --cycle <name> --tasks <id,id,...>                  the tasks of one plan cycle, in plan order
   mode    autonomous [--until <HH:MM or ISO time>]|supervised  the user turned autonomous mode on, or is back
+  approve --until <x.y.z> --conditions <text> | --revoke     the user's standing approval to publish, up to that version
   defer   --text <text> --recommend <text>                    an item left for later; prints its id (D1, D2...)
   sensitive --reason <text>                                   the delivery touches a sensitive domain (step 0)
   resolve --id <id> --decision <text>                         the final decision on a deferred item
@@ -57,7 +58,11 @@ A fix round (task fix-N) and the cleanup task (task cleanup) stay in the current
 a reviewer pass, and qa again only when a FAIL came before them. Every finding carries its origin (design,
 assumption, plan, execution, environment); --report keeps the path of the file the manager saved the agent's report
 in, so a FAIL still open names it, and is refused when no file is there (the agents have no Write: the manager saves
-the report, then adds the run naming it), read from the current directory or from the ledger's project root; a qa --report must hold the Verdict:, Commit:,
+the report, then adds the run naming it), read from the current directory or from the ledger's project root.
+--from-agent <agent id> saves it instead: the agent's final report (its last SubagentHandback message, else its last
+text) is read from its transcript, <config>/projects/*/*/subagents/agent-<id>.jsonl under CLAUDE_CONFIG_DIR and
+~/.claude, written to reports/<slug>/<agent>-<id>.md beside the ledger and kept as the run's --report, so a report
+the manager's context lost in a compaction is still on disk; with no transcript it is refused, naming --report; a qa --report must hold the Verdict:, Commit:,
 Interface: and Processes: lines of qa.md's report (Verdict the one given, Commit a commit here), and the run
 stores that commit as tested, and stale when it is not the latest dev run's head or later: a qa dispatched before a
 fix counts only for what came before it, so its FAIL still asks for the fix and the re-run is still asked for; --seconds takes 90, 12m, 1h5m or 12m30s, and --seconds and --tokens are optional, from the
@@ -94,6 +99,13 @@ records the reason as a note and counts as that agent's PASS at the head it revi
 waivers in autonomous mode) are listed apart, numbered V1, V2... in the order written, for the user to confirm on
 return; validate records the decision, and status lists the items still waiting apart from the decided ones. A
 ledger with no mode entry is supervised.
+
+approve records the user's standing approval of merge and push, across deliveries, in approval.json beside the
+ledger ({until, conditions, at}; --revoke removes it); status --json gives it as approval, or null. bash-guard.py reads
+it in autonomous mode: a publish passes only when the commit it publishes has the tree of the commit that added the
+delivery's quality report, that report's head differs from it only in docs/quality-reports/, and its version is at
+most --until (the gate writes the report on READY only). The conditions are the user's text, which the manager
+checks before publishing and the status shows.
 
 A reviewer run with --task spec or plan is one round of that review loop, before the code: it is no part of any
 cycle, and its findings, time and tokens are counted apart in the metrics. --task security is the security scan of a
@@ -328,6 +340,55 @@ def where(entry):
 def saved_report(path, ledger):
     root = os.path.dirname(os.path.dirname(os.path.abspath(ledger)))
     return os.path.isfile(path) or os.path.isfile(os.path.join(root, path))
+
+
+def transcript_report(agent_id):
+    """The final report of a finished subagent, read from its transcript: its last SubagentHandback message, else
+    the text of its last message that has any; None when no transcript is found."""
+    agent_id = agent_id.removeprefix("agent-")
+    roots = dict.fromkeys(os.path.abspath(root) for root in (os.environ.get("CLAUDE_CONFIG_DIR"),
+                                                             os.path.join(os.path.expanduser("~"), ".claude")) if root)
+    for root in roots:
+        projects = os.path.join(root, "projects")
+        for project in sorted(os.listdir(projects)) if os.path.isdir(projects) else []:
+            sessions = os.path.join(projects, project)
+            for session in sorted(os.listdir(sessions)) if os.path.isdir(sessions) else []:
+                path = os.path.join(sessions, session, "subagents", f"agent-{agent_id}.jsonl")
+                if os.path.isfile(path):
+                    return last_report(path)
+    return None
+
+
+def last_report(path):
+    handback, text = None, None
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                content = (json.loads(line).get("message") or {}).get("content")
+            except (ValueError, AttributeError):
+                continue
+            for block in content if isinstance(content, list) else []:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use" and block.get("name") == "SubagentHandback":
+                    handback = (block.get("input") or {}).get("message") or handback
+                elif block.get("type") == "text" and block.get("text", "").strip():
+                    text = block["text"]
+    return handback or text
+
+
+def save_agent_report(args, entries):
+    report = transcript_report(args.from_agent)
+    if not report:
+        sys.exit(f"--from-agent {args.from_agent}: no transcript of that agent with a report was found; save the "
+                 "report yourself and add the run with --report")
+    folder = os.path.join(os.path.dirname(os.path.abspath(args.ledger)), "reports", entries[0].get("slug") or "delivery")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, f"{args.agent}-{args.from_agent.removeprefix('agent-')}.md")
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(report.rstrip("\n") + "\n")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(args.ledger)))
+    return os.path.relpath(path, root).replace("\\", "/")
 
 
 def advice_of(entry):
@@ -809,8 +870,12 @@ def add(args):
     if args.agent != "dev" and args.task and not (args.agent == "reviewer" and args.task in REVIEWS):
         sys.exit("--task on a reviewer run is spec, plan or security (one round of that review loop); qa runs take "
                  "none")
-    if args.agent == "dev" and args.report:
+    if args.agent == "dev" and (args.report or args.from_agent):
         sys.exit("--report keeps the file of a reviewer or qa report; the dev's report is checked before integrating")
+    if args.report and args.from_agent:
+        sys.exit("--report names a file you saved, --from-agent saves it: give one")
+    if args.from_agent:
+        args.report = save_agent_report(args, entries)
     if args.report and not saved_report(args.report, args.ledger):
         sys.exit(f"--report {args.report} is no file: the agents have no Write, so save the report there yourself "
                  "and add the run naming the file you saved")
@@ -1344,6 +1409,42 @@ def mode(args):
     print(f"mode {args.mode}" + (f" until {until}" if until else ""))
 
 
+def approval_path(ledger):
+    return os.path.join(os.path.dirname(os.path.abspath(ledger)), "approval.json")
+
+
+def standing(ledger):
+    """The user's standing approval to publish, {until, conditions, at}, or None."""
+    try:
+        with open(approval_path(ledger), encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) and version_key(data.get("until")) else None
+
+
+def version_key(text):
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", str(text or "").strip())
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def approve(args):
+    path = approval_path(args.ledger)
+    if args.revoke:
+        if os.path.exists(path):
+            os.remove(path)
+        print("standing approval revoked")
+        return
+    if not version_key(args.until) or not args.conditions:
+        sys.exit("approve needs --until <x.y.z>, the last version it covers, and --conditions, the user's text")
+    data = {"until": args.until.lstrip("v"), "conditions": args.conditions,
+            "at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        json.dump(data, handle, ensure_ascii=False)
+    print(f"standing approval up to v{data['until']}: {data['conditions']}")
+
+
 NIGHT_RUNS = {"dev": "dev", "reviewer": "reviewer", "qa": "qa", "qa_full": "qa --full"}
 
 
@@ -1653,6 +1754,7 @@ def status(args):
               "metrics": metrics(entries), "usage": usage, "night": night(entries),
               "disk": None if preparing(entries) else disk_watch(entries, args.ledger, held), "next": upcoming, "ready_for_gate": not pending}
     report["settings"] = settings(args.ledger, report["scope"])
+    report["approval"] = standing(args.ledger)
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:
@@ -1994,6 +2096,7 @@ def main():
         command.add_argument(f"--{severity}", type=count, default=0)
     command.add_argument("--origin", default="", help="design=N,assumption=N,plan=N,execution=N,environment=N")
     command.add_argument("--report", help="the file the manager saved a reviewer or qa report in")
+    command.add_argument("--from-agent", help="the reviewer or qa agent id: its report is saved from its transcript")
     command.add_argument("--seconds", help="how long the run took, from its completion notification: 90, 12m, 1h5m or 12m30s")
     command.add_argument("--tokens", type=count, help="the tokens the run used, from its completion notification")
     command.add_argument("--full", action="store_true", help="the qa ran the project's full test command")
@@ -2048,6 +2151,11 @@ def main():
     command.add_argument("mode", choices=("autonomous", "supervised"))
     command.add_argument("--until", help="the time the user is back: HH:MM or an ISO time with its offset")
     command.set_defaults(run=mode)
+    command = commands.add_parser("approve")
+    command.add_argument("--until", help="the last version the approval covers, x.y.z")
+    command.add_argument("--conditions", help="the user's conditions, as said")
+    command.add_argument("--revoke", action="store_true", help="ends the standing approval")
+    command.set_defaults(run=approve)
     command = commands.add_parser("defer")
     command.add_argument("--text", required=True)
     command.add_argument("--recommend", required=True, help="what you would decide and why, read with the item")

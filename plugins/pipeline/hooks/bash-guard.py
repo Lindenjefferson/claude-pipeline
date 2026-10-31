@@ -10,7 +10,13 @@ passes), a git merge while it is checked out (--abort and --quit pass), and a pu
 glab mr merge or accept, also behind the tool's own options, and its api on pulls/<n>/merge or
 merge_requests/<n>/merge). A git checkout or switch earlier in the same command counts as what is checked out for
 the rest of it; a cd does not, so the check reads the session's directory. Pushing and merging the work branch pass;
-in supervised mode, or with no ledger, nothing here is denied and the ask rule on git push applies.
+in supervised mode, or with no ledger, nothing here is denied and the ask rule on git push applies. With the user's
+standing approval (ledger.py approve, read from approval.json beside the ledger), a publish passes when what it
+publishes is a gated delivery: the commit (the ref a git merge names, HEAD for a pull request merge, the source of a
+push, or the default branch a merge earlier in the same command already approved) has the tree of the commit that
+last added the delivery's quality report (docs/quality-reports/*-<slug>.md, which the gate writes on READY only), the
+report's head differs from that commit only in docs/quality-reports/, and the report's version is at most the
+approval's --until. A push with --all, --mirror or --delete is still denied.
 
 Skipping the hook is denied in any project, in the foreground or background: a git commit with --no-verify (or an
 unambiguous prefix such as --no-veri) or -n (also inside a cluster such as -nm or -an), a git -c or --config-env
@@ -383,15 +389,39 @@ def git_out(cwd, *args):
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-def autonomous(cwd):
+def ledger_state(cwd):
+    """(ledger module, ledger path, entries) for the session's directory, or None with no ledger."""
     spec = importlib.util.spec_from_file_location("pipeline_ledger", LEDGER)
     ledger = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(ledger)
     os.chdir(cwd)
     try:
-        return ledger.autonomous(ledger.read(ledger.default_ledger("status")))
+        path = ledger.default_ledger("status")
+        return ledger, path, ledger.read(path)
     except SystemExit:
+        return None
+
+
+def gated(cwd, ref, state):
+    """True when the standing approval covers publishing ref: see the docstring."""
+    ledger, path, entries = state
+    approval, slug = ledger.standing(path), entries and entries[0].get("slug")
+    commit = ref and git_out(cwd, "rev-parse", "--verify", "--quiet", ref + "^{commit}")
+    if not approval or not slug or not commit:
         return False
+    reports = sorted(name for name in git_out(cwd, "ls-tree", "--name-only", commit, "docs/quality-reports/").splitlines()
+                     if name.endswith(f"-{slug}.md"))
+    added = reports and git_out(cwd, "log", "-1", "--format=%H", commit, "--", reports[-1])
+    match = added and re.search(r"\b[0-9a-f]{7,40}\.\.([0-9a-f]{7,40})\b.*?\bv(\d+\.\d+\.\d+)\b",
+                                git_out(cwd, "show", f"{added}:{reports[-1]}"))
+    if not match or (ledger.version_key(match.group(2)) or ()) > ledger.version_key(approval["until"]):
+        return False
+    head = git_out(cwd, "rev-parse", "--verify", "--quiet", match.group(1) + "^{commit}")
+    if not head or subprocess.run(["git", "diff", "--quiet", added, commit], cwd=cwd, capture_output=True).returncode:
+        return False
+    changed = subprocess.run(["git", "diff", "--name-only", head, added], cwd=cwd, capture_output=True, text=True)
+    return changed.returncode == 0 and all(line.startswith("docs/quality-reports/")
+                                           for line in changed.stdout.splitlines())
 
 
 def main_branch(cwd):
@@ -401,6 +431,35 @@ def main_branch(cwd):
     names = [git_out(cwd, "config", "--get", "init.defaultBranch"), "main", "master"]
     return next((name for name in names
                  if name and git_out(cwd, "rev-parse", "--verify", "--quiet", "refs/heads/" + name)), None)
+
+
+def push_sources(arguments, main, current):
+    """What a push that reaches the default branch publishes there: the source of each refspec whose target it is
+    (the branch checked out with no refspec), or None when it is no single commit (--all, --mirror, --delete)."""
+    if {"--all", "--mirror", "--delete", "-d"} & set(arguments):
+        return None
+    positional = [word for position, word in enumerate(arguments) if not word.startswith("-")
+                  and not (position and arguments[position - 1] in PUSH_VALUE)]
+    if len(positional) < 2:
+        return [current]
+    sources = []
+    for spec in positional[1:]:
+        source, _, target = spec.lstrip("+").rpartition(":") if ":" in spec else ("", "", spec.lstrip("+"))
+        if target.removeprefix("refs/heads/") == main or (target in ("HEAD", "@") and current == main):
+            sources.append(source if ":" in spec else target)
+    return sources if all(sources) else None
+
+
+def merged_ref(arguments):
+    value_next = False
+    for word in arguments:
+        if value_next:
+            value_next = False
+        elif word in ("-m", "-s", "-X", "-F", "--strategy", "--strategy-option", "--file"):
+            value_next = True
+        elif not word.startswith("-"):
+            return word
+    return None
 
 
 def push_reaches(arguments, main, current):
@@ -454,19 +513,27 @@ def reaches_main(command, cwd, powershell=False):
         elif program in ("gh", "glab"):
             calls.append((program, "", arguments))
     if not any(name in ("push", "merge") or (program != "git" and merges_pull_request(rest))
-               for program, name, rest in calls) or not autonomous(cwd):
+               for program, name, rest in calls):
+        return False
+    state = ledger_state(cwd)
+    if not state or not state[0].autonomous(state[2]):
         return False
     main, current = main_branch(cwd), git_out(cwd, "branch", "--show-current")
+    published = set()
     for program, name, rest in calls:
         if program != "git":
-            if merges_pull_request(rest):
+            if merges_pull_request(rest) and not gated(cwd, "HEAD", state):
                 return True
         elif name in ("checkout", "switch"):
             current = switched_to(rest) or current
         elif main and name == "push" and push_reaches(rest, main, current):
-            return True
+            sources = push_sources(rest, main, current)
+            if sources is None or not all(source in published or gated(cwd, source, state) for source in sources):
+                return True
         elif main and name == "merge" and current == main and not {"--abort", "--quit"} & set(rest):
-            return True
+            if not gated(cwd, merged_ref(rest), state):
+                return True
+            published.add(main)
     return False
 
 

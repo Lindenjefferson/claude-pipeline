@@ -684,6 +684,36 @@ check("add --report keeps the report path with the run and in its fix step",
 text = run("status", ledger=REPORTS).stdout
 check("the pending text names the report of each open FAIL",
       f"reviewer FAIL (2 open, report {REVIEW_REPORT})" in text and "1-qa.md" in text, text)
+config = os.path.join(repo, "config")
+transcripts = os.path.join(config, "projects", "proj", "session", "subagents")
+os.makedirs(transcripts)
+with open(os.path.join(transcripts, "agent-a1b2c3.jsonl"), "w", encoding="utf-8") as handle:
+    for line in ({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "draft"}]}},
+                 {"type": "assistant", "message": {"role": "assistant", "content": [
+                     {"type": "tool_use", "name": "SubagentHandback",
+                      "input": {"message": "Verdict: FAIL\nRange: a..b\nCounts: 0 Critical, 1 Important"}}]}}):
+        handle.write(json.dumps(line) + "\n")
+with open(os.path.join(transcripts, "agent-d4e5f6.jsonl"), "w", encoding="utf-8") as handle:
+    handle.write(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "thinking", "thinking": ""}, {"type": "text", "text": "Verdict: PASS\nlast text"}]}}) + "\n")
+os.environ["CLAUDE_CONFIG_DIR"] = config
+r = run("add", "--agent", "reviewer", "--verdict", "FAIL", "--important", "1", "--origin", "execution=1",
+        "--from-agent", "a1b2c3", ledger=REPORTS)
+saved = ".superpowers/reports/reports/reviewer-a1b2c3.md"
+check("add --from-agent saves the agent's handback from its transcript and keeps that file as the report",
+      r.returncode == 0 and status(REPORTS)["reviewer"][0].get("report") == saved
+      and open(os.path.join(repo, saved), encoding="utf-8").read().startswith("Verdict: FAIL\nRange: a..b"),
+      (r.stderr, status(REPORTS)["reviewer"][0]))
+r = run("add", "--agent", "reviewer", "--verdict", "PASS", "--from-agent", "agent-d4e5f6", ledger=REPORTS)
+check("with no handback, --from-agent takes the agent's last text (the agent- prefix is optional)",
+      r.returncode == 0 and "last text" in open(os.path.join(repo, ".superpowers/reports/reports/reviewer-d4e5f6.md"),
+                                                encoding="utf-8").read(), r.stderr)
+r = run("add", "--agent", "reviewer", "--verdict", "PASS", "--from-agent", "zzz999", ledger=REPORTS)
+check("--from-agent with no transcript is refused, naming the fallback", r.returncode != 0
+      and "--report" in r.stderr, r.stderr)
+r = run("add", "--agent", "dev", "--task", "T9", "--verdict", "DONE", "--from-agent", "a1b2c3", ledger=REPORTS)
+check("a dev run takes no --from-agent", r.returncode != 0, r.stderr)
+del os.environ["CLAUDE_CONFIG_DIR"]
 add("dev", "DONE", "fix-1", ledger=REPORTS)
 check("a run without --report has no report key", "report" not in status(REPORTS)["runs"][0]
       and not any("report" in step for step in status(REPORTS)["steps"]), status(REPORTS)["steps"])
