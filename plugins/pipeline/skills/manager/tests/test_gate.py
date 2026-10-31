@@ -415,6 +415,7 @@ commit("tests/ids.test.txt", "fn ac_t3_1_given_f() {}\ndef test_AC_T3_2_given_g(
        "#[test] fn ac_t3_4() {}\nfn ac_t3_5_given_j() {}\n", "test: the last ids")
 r = gate("--base", "main")
 check("every id found in identifier-named tests: traceability passes", "Criteria:   PASS" in r.stdout, r.stdout)
+ledger("--agent", "reviewer", "--verdict", "PASS")  # the commands run only when every check before them passes
 
 r = gate("--base", "main", "--cmd", f"Lint=CI=1 {PY} -c \"import os, sys; sys.exit(os.environ.get('CI') != '1')\"")
 check("the commands run in the shell of the Bash tool: a variable before the command is set",
@@ -422,6 +423,7 @@ check("the commands run in the shell of the Bash tool: a variable before the com
 commit("CLAUDE.md", claude_md(test_files="tests/* e2e/**/*.spec.txt", audit=True).replace(
        "\n\n## Outra seção", "\n- Tempo máximo de cada comando do gate, em minutos (padrão 15): `0.05`\n\n## Outra seção"),
        "docs: gate timeout")
+ledger("--agent", "reviewer", "--verdict", "PASS")
 marker = os.path.join(base_dir, "late.txt").replace("\\", "/")
 started = time.monotonic()
 r = gate("--base", "main", "--cmd", f"Lint=sleep 30; echo late > '{marker}'")
@@ -437,6 +439,7 @@ for value in ("`inf`", "30", "`1e9`"):
     commit("CLAUDE.md", claude_md(test_files="tests/* e2e/**/*.spec.txt", audit=True).replace(
            "\n\n## Outra seção", f"\n- Tempo máximo de cada comando do gate, em minutos (padrão 15): {value}\n\n"
            "## Outra seção"), f"docs: gate time limit {value}")
+    ledger("--agent", "reviewer", "--verdict", "PASS")
     r = gate("--base", "main")
     check(f"a time limit that is no number of minutes up to a day is a warning and the default: {value}",
           "warning: invalid Tempo máximo" in r.stdout and re.search(r"Lint:\s+PASS", r.stdout),
@@ -868,6 +871,25 @@ check("the quality report lists the gate's warnings", "## Warnings" in text and 
       (r.stdout, text))
 check("the quality report gives the delivery's clock: elapsed, pauses out, and the share with an agent running",
       re.search(r"- Delivery: \S+ elapsed, \S+ paused, an agent running \S+ \(\d+%\)", text), text)
+
+# A cheap check that fails stops the gate before the commands: the suite would run only to end NOT READY
+repo = os.path.join(base_dir, "repo7")
+os.makedirs(repo)
+sh("git", "init", "-q", "-b", "main")
+sh("git", "config", "user.email", "t@t.com")
+sh("git", "config", "user.name", "t")
+marker = os.path.join(base_dir, "suite-ran").replace("\\", "/")
+commit("CLAUDE.md", f"# p\n\n## Comandos\n\n- Testes: `{PY} -c \"open('{marker}', 'w').close()\"`\n", "base")
+sh("git", "switch", "-q", "-c", "feat/z")
+commit("a.txt", "a\n", "feat: a")
+r = gate("--base", "main")
+check("a failing cheap check (no ledger) skips the commands, says why and is NOT READY",
+      r.returncode == 1 and not os.path.exists(marker) and re.search(r"Testes:\s+FAIL", r.stdout)
+      and "not run: Ledger failed" in r.stdout, r.stdout)
+check("the secret scan still runs when the commands are skipped", re.search(r"Secrets:\s+PASS", r.stdout), r.stdout)
+r = gate("--base", "main", "--report", "z")
+check("a skipped run leaves no quality report behind", r.returncode == 1
+      and not os.path.isdir(os.path.join(repo, "docs", "quality-reports")), r.stdout)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)

@@ -34,7 +34,9 @@ Windows, and cmd.exe with a warning only when there is none; bash, else sh, else
 "Tempo máximo" line of that section (15 by default; a value that is no number of minutes up to a day is a warning;
 past the limit the command and, outside Windows, the processes it started are stopped); the commands changed no
 tracked file; and no secret or .env file is added anywhere in <base>..HEAD, the whole history that a push would send.
-A check that does not apply is SKIP with the reason; only Testes is required. With the test files declared, the gate
+A check that does not apply is SKIP with the reason; only Testes is required. When a check before the commands
+fails (Ledger through Full suite), the commands are not run and each fails as "not run", since the run would end NOT
+READY anyway; the secret scan still runs. With the test files declared, the gate
 also warns when a criterion's test arrived in the same commit as code, naming the criterion and that commit: a test
 written first has a commit of its own. Test material is not code arriving (the declared test files and anything
 under a folder they name, the plan, the lessons, the allowlist, the quality reports, and a rename with no content).
@@ -742,12 +744,16 @@ def main():
         git("add", draft)
 
     ready = False
+    failed = [name for name, ok, _ in checks if not ok]
     try:
         before = tracked_changes()
         shell, seconds = bash(), time_limit()
-        if not shell:
+        if not shell and not failed:
             warn("no Git Bash found; the commands run in cmd.exe")
         for name in ORDER + [name for name in commands if name not in ORDER]:
+            if failed and name in commands:
+                checks.append((name, False, f"not run: {', '.join(failed)} failed, and the run would end NOT READY"))
+                continue
             if name not in commands:
                 checks.append((name, name != "Testes", "not configured in CLAUDE.md (Comandos)"))
                 continue
