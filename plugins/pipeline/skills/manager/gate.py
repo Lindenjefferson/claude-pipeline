@@ -6,7 +6,8 @@
 
 A criterion is an id that opens a list item of the plan (- AC-T3-2, * **AC-T3-2**, 1. `AC-T3-2`); an id written
 anywhere else is cited, a warning ("cited, never defined") and never traced, and a plan where no id opens a list
-item is read as before, every id a criterion. A task's criteria, for --criteria, are those with a segment that is the
+item is read as before, every id a criterion (one opening an item of the plan's ## Errata too, as a fix round's
+criteria). A task's criteria, for --criteria, are those with a segment that is the
 task id or ends with it right after a digit (AC-T3-2, AC-PL-T3-2 and AC-074T3-2 are T3's; AC-T31-2 is not).
 
 Checks, in order: nothing is pending in the ledger (the current cycle is closed, every deferred item has a final
@@ -34,6 +35,9 @@ Windows, and cmd.exe with a warning only when there is none; bash, else sh, else
 "Tempo máximo" line of that section (15 by default; a value that is no number of minutes up to a day is a warning;
 past the limit the command and, outside Windows, the processes it started are stopped); the commands changed no
 tracked file; and no secret or .env file is added anywhere in <base>..HEAD, the whole history that a push would send.
+The "Ambiente dos comandos" line of CLAUDE.local.md (the machine's own file; a _(...)_ placeholder is none) runs
+before every command, joined with &&, as a PATH to a tool this machine needs. Each run is recorded in the ledger
+(ledger.py gate, with the checks that failed), and the quality report counts the runs and why each was NOT READY.
 A check that does not apply is SKIP with the reason; only Testes is required. When a check before the commands
 fails (Ledger through Full suite), the commands are not run and each fails as "not run", since the run would end NOT
 READY anyway; the secret scan still runs. With the test files declared, the gate
@@ -421,9 +425,21 @@ def born_with_code(base, plan, ids, patterns, tests, folders):
 
 
 def of_task(item, task):
-    """A segment of the id is the task id, or ends with it right after a digit (AC-T3-2, AC-PL-T3-2, AC-074T3-2)."""
+    """A segment of the id is the task id, or ends with it right after a digit (AC-T3-2, AC-PL-T3-2, AC-074T3-2), in
+    any case and with the task's hyphens left out (fix-2 is FIX2 in AC-DC-FIX2-1)."""
+    task = task.replace("-", "").lower()
     return any(part == task or (part.endswith(task) and part[:-len(task)][-1:].isdigit())
-               for part in re.split(r"[.-]", item)[1:])
+               for part in (part.lower() for part in re.split(r"[.-]", item)[1:]))
+
+
+def environment():
+    """The prefix of the "Ambiente dos comandos" line of CLAUDE.local.md, or None."""
+    try:
+        text = open("CLAUDE.local.md", encoding="utf-8").read()
+    except OSError:
+        return None
+    found = re.search(r"(?mi)^\s*[-*]\s*Ambiente dos comandos[^:\n]*:\s*`([^`]+)`", text)
+    return found.group(1).strip() if found and found.group(1).strip() else None
 
 
 def traceability(plan, base="", task=None):
@@ -646,6 +662,12 @@ def write_report(slug, base, head, checks, ledger, changed, unrun, number=None):
         lines += ["## Ledger", "", f"Cycles: {ledger['cycle']}"]
         lines += ["Mode: autonomous"] if ledger.get("autonomous") else []
         lines += [f"- note: {text}" for text in ledger["notes"]]
+        gates = ledger.get("gates") or []
+        if gates:
+            refused = [item for item in gates if item["verdict"] != "READY"]
+            reasons = list(dict.fromkeys(name for item in refused for name in item["failed"]))
+            lines += [f"- Gate runs: {len(gates)}" + (f" (NOT READY {len(refused)}: {', '.join(reasons)})" if refused
+                                                       else "")]
         if ledger.get("validar"):
             lines += ["", "## VALIDAR", ""] + [f"- {item['id']} {item['text']} -> {item['decision'] or 'pending'}"
                                                for item in ledger["validar"]]
@@ -747,7 +769,7 @@ def main():
     failed = [name for name, ok, _ in checks if not ok]
     try:
         before = tracked_changes()
-        shell, seconds = bash(), time_limit()
+        shell, seconds, prefix = bash(), time_limit(), environment()
         if not shell and not failed:
             warn("no Git Bash found; the commands run in cmd.exe")
         for name in ORDER + [name for name in commands if name not in ORDER]:
@@ -758,7 +780,7 @@ def main():
                 checks.append((name, name != "Testes", "not configured in CLAUDE.md (Comandos)"))
                 continue
             print(f"running {name}: {commands[name]}", flush=True)
-            ok, tail = run_command(commands[name], shell, seconds)
+            ok, tail = run_command(f"{prefix} && {commands[name]}" if prefix else commands[name], shell, seconds)
             checks.append((name, ok, "" if ok else tail))
         moved = sorted(line for line in tracked_changes() ^ before if not line.endswith(draft or "\0"))
         checks.append(("Unchanged", not moved, "\n".join(moved)))
@@ -767,6 +789,12 @@ def main():
         checks.append(("Secrets", not findings, "\n".join(findings)))
 
         ready = all(ok for _, ok, _ in checks)
+        if ledger:
+            failed = [name for name, ok, _ in checks if not ok]
+            subprocess.run([sys.executable, os.path.join(HERE, "ledger.py"), *(["--ledger", args.ledger] if args.ledger
+                            else []), "gate", "--verdict", "READY" if ready else "NOT_READY", "--failed", ",".join(failed)],
+                           capture_output=True)
+            ledger.setdefault("gates", []).append({"verdict": "READY" if ready else "NOT_READY", "failed": failed})
         width = max([12] + [len(name) + 2 for name, _, _ in checks])
         print(f"\nGATE {base[:7]}..{head[:7]}" + (f" v{number}" if number else ""))
         for name, ok, detail in checks:

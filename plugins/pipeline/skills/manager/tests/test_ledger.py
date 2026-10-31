@@ -2369,5 +2369,51 @@ clock = status(QUEUED_CLOCK)["metrics"]["time"]["delivery"]
 check("the wait in the queue, from the last preparation entry to the promotion, is left out of the delivery's clock",
       clock["elapsed"] == 1200 and clock["queued"] == 3000 and clock["share"] == 1.0, clock)
 
+# The head of a run is the one its report reviewed or tested, not whatever the ledger's checkout holds
+TRACE = ".superpowers/trace.jsonl"
+run("start", "--slug", "trace", ledger=TRACE)
+reviewed = head()
+subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "another delivery's commit"], cwd=repo, check=True)
+add("dev", "DONE", "T1", ledger=TRACE)
+REVIEWED = report_file("trace-reviewer.md", lines=["Verdict: PASS", f"Range: {reviewed[:7]}..{reviewed[:7]}", "Counts: 0"])
+r = run("add", "--agent", "reviewer", "--verdict", "PASS", "--report", REVIEWED, ledger=TRACE)
+check("a reviewer run takes its head from the Range: of its report", r.returncode == 0
+      and status(TRACE)["reviewer"][0]["head"] == reviewed, (r.stderr, status(TRACE)["reviewer"]))
+r = run("add", "--agent", "qa", "--verdict", "PASS", "--report", report_file("trace-qa.md", commit=reviewed),
+        ledger=TRACE)
+check("a qa run takes its head from the Commit: of its report", r.returncode == 0
+      and status(TRACE)["qa"][0]["head"] == reviewed, (r.stderr, status(TRACE)["qa"]))
+r = run("add", "--agent", "reviewer", "--verdict", "PASS", "--head", reviewed[:7], ledger=TRACE)
+check("add --head names the run's head", r.returncode == 0 and status(TRACE)["reviewer"][0]["head"] == reviewed,
+      r.stderr)
+check("add --head that is no commit is refused",
+      run("add", "--agent", "reviewer", "--verdict", "PASS", "--head", "nope", ledger=TRACE).returncode != 0)
+
+# The heartbeat leaves a tick, and a silent one is named in autonomous mode
+r = run("status", "--tick", ledger=TRACE)
+ticks = [json.loads(line) for line in open(os.path.join(repo, TRACE), encoding="utf-8") if '"tick"' in line]
+check("status --tick records a tick and prints the status", r.returncode == 0 and len(ticks) == 1
+      and "delivery trace" in r.stdout, r.stdout + r.stderr)
+check("a tick is no run and no pending item", not any(entry["type"] == "tick" for entry in status(TRACE)["runs"])
+      and not any("tick" in item for item in status(TRACE)["pending"]), status(TRACE)["pending"])
+run("mode", "autonomous", ledger=TRACE)
+check("autonomous with a recent tick or mode entry: no heartbeat warning",
+      status(TRACE)["heartbeat"] is None, status(TRACE)["heartbeat"])
+old = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=95)).isoformat(timespec="seconds")
+lines = open(os.path.join(repo, TRACE), encoding="utf-8").read().splitlines()
+aged = [json.dumps({**json.loads(line), "at": old}) if json.loads(line)["type"] in ("tick", "mode") else line
+        for line in lines]
+open(os.path.join(repo, TRACE), "w", encoding="utf-8", newline="\n").write("\n".join(aged) + "\n")
+beat = status(TRACE)["heartbeat"]
+check("autonomous, no tick for over 30 minutes: status names the silence and the CronList check",
+      beat and beat["minutes"] >= 90 and "CronList" in run("status", ledger=TRACE).stdout, beat)
+
+# The gate's verdict goes in the ledger
+r = run("gate", "--verdict", "NOT_READY", "--failed", "Ledger,Docs", ledger=TRACE)
+run("gate", "--verdict", "READY", ledger=TRACE)
+check("gate records each verdict with its failed checks; status --json gives them",
+      r.returncode == 0 and [(g["verdict"], g["failed"]) for g in status(TRACE)["gates"]]
+      == [("NOT_READY", ["Ledger", "Docs"]), ("READY", [])], status(TRACE).get("gates"))
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)
