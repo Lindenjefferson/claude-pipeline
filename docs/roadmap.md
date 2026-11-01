@@ -10,7 +10,7 @@ Nenhuma no momento.
 
 ## Backlog
 
-- **Defeito: servidor de uma cópia que sobrevive ao "parado por PID"** (um projeto do autor, 1.23.0 e 1.26.0): o `agents-shared.md` e o `qa.md` mandam parar o que a cópia iniciou pelo PID da porta, e o ledger só exige a linha `Processes:` no relatório (1.21.0). A regra foi ignorada quatro vezes numa noite e derrubou rodadas (157 falhas falsas, `EADDRINUSE`): regra de prompt ignorada duas vezes vira checagem. Proposta: o `add` do `dev` e do `qa` de uma cópia confere que a porta dela, da linha "Execução em paralelo", não aceita conexão, e junta o item "o `status` não diz qual processo segura uma pasta", que é o mesmo processo. Número: rodadas derrubadas por porta ocupada (eram 5; deve ser 0). Esforço: M.
+Nenhum no momento.
 
 ## Em espera (voltam com um sinal)
 
@@ -60,7 +60,7 @@ Cada item diz o sinal que o traz de volta; o detalhe da análise está no histó
 
 ## Recusado
 
-- **Pasta sem `.git` nas cópias como aviso, não bloqueio** (um projeto do autor, 1.23.0): uma pasta sem `.git` ali é sobra por definição, e o gate a barra de propósito (1.24.0); o custo real era o processo que a segura, que está no Backlog. A pasta de saída de uma cópia ainda presente deixou de ser sobra na 1.31.1.
+- **Pasta sem `.git` nas cópias como aviso, não bloqueio** (um projeto do autor, 1.23.0): uma pasta sem `.git` ali é sobra por definição, e o gate a barra de propósito (1.24.0); o custo real era o processo que a segura, que o `add` do `qa` passou a barrar na 1.33.0. A pasta de saída de uma cópia ainda presente deixou de ser sobra na 1.31.1.
 - **Tarefa do ciclo seguinte despachada durante a verificação da correção** (um projeto do autor, 1.23.0): já é a regra "Fix round and next cycle" do `references/parallel.md`, e o ledger recusa integrar antes de o ciclo fechar; a própria entrega a usou, com o `claim` da T3 às 02:36 e o da T5 às 02:40, antes de o ciclo 1 fechar às 02:51.
 - **Saída do gate com acento num console cp1252** (achada no primeiro run do CI; revista na 1.19.0): a premissa estava errada. O `gate.py` já força UTF-8 na saída desde antes do CI (`main`, a reconfiguração do `sys.stdout`); o texto truncado veio de quem capturou a saída, não do gate.
 - **Exceção de auditoria lida pelo gate** (um projeto do autor): o gate só roda o comando "Auditoria" e lê o código de saída; ler pacote e faixa pediria entender a saída de cada gerenciador, o que é de stack, e uma exceção da linha inteira esconderia a vulnerabilidade nova que chegar depois. A exceção versionada com data de revisão mora no comando de Auditoria do projeto (uma ferramenta de auditoria com allowlist que expira), e o relatório de qualidade já mostra a linha e o comando.
