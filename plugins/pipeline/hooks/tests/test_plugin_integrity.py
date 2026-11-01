@@ -80,7 +80,8 @@ settings = json.load(open(os.path.join(ROOT, "skills", "kickoff", "templates", "
                           encoding="utf-8"))
 for entry in ("Bash(sudo:*)", "Bash(git push --force:*)", "Bash(git push -f:*)", "Bash(chmod 777:*)"):
     check(f"the kickoff template denies {entry}", entry in settings["deny"], settings["deny"])
-check("the kickoff template asks before every git push", "Bash(git push:*)" in settings.get("ask", []), settings)
+check("the kickoff template has no ask on every git push (bash-guard.py asks only for the main branch)",
+      not any("git push" in rule for rule in settings.get("ask", [])), settings)
 check("the kickoff template guards the scan allowlist with an Edit rule and has no Write rule (never consulted)",
       "Edit(.pipeline-secrets-allow)" in settings["deny"] and not any(rule.startswith("Write(") for rule in settings["deny"]),
       settings["deny"])
