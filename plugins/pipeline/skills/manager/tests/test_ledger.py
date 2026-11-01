@@ -2051,6 +2051,30 @@ run("add", "--agent", "qa", "--verdict", "PASS", "--report", report_file("early-
 check("a qa that tested the fix's commit counts as its re-run",
       "qa has not re-run the scenarios the fix touched" not in status(EARLY)["pending"], status(EARLY)["pending"])
 
+# A dev run held for the next plan cycle is out of this cycle: a qa of this cycle's fix is not stale because of it
+HELDQA = ".superpowers/held-qa.jsonl"
+run("start", "--slug", "held-qa", ledger=HELDQA)
+run("scope", "--cycle", "1", "--tasks", "H1", ledger=HELDQA)
+run("scope", "--cycle", "2", "--tasks", "H5", ledger=HELDQA)
+add("dev", "DONE", "H1", ledger=HELDQA)
+run("add", "--agent", "reviewer", "--verdict", "FAIL", "--important", "1", "--origin", "execution=1", ledger=HELDQA)
+subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "held-qa fix-1"], cwd=repo, check=True,
+               capture_output=True)
+add("dev", "DONE", "fix-1", ledger=HELDQA)
+fixed = head()
+add("reviewer", "PASS", ledger=HELDQA)
+subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "H5 of the next cycle"], cwd=repo, check=True,
+               capture_output=True)
+add("dev", "DONE", "H5", ledger=HELDQA)
+r = run("add", "--agent", "qa", "--verdict", "PASS", "--report", report_file("held-qa.md", commit=fixed),
+        ledger=HELDQA)
+state = status(HELDQA)
+with open(os.path.join(repo, HELDQA), encoding="utf-8") as handle:
+    qa_runs = [entry for entry in map(json.loads, handle) if entry.get("agent") == "qa"]
+check("a qa of the fix added after a held dev run of the next cycle is not stale: it closes the cycle, and the held "
+      "run opens the next", r.returncode == 0 and not qa_runs[-1].get("stale") and state["cycle"] == 2
+      and "H5" in state["tasks"], (r.stderr, qa_runs, state["cycle"], state["pending"]))
+
 LATE = ".superpowers/late-qa.jsonl"
 run("start", "--slug", "late-qa", ledger=LATE)
 add("dev", "DONE", "L1", ledger=LATE)
@@ -2368,6 +2392,54 @@ with open(QUEUED_CLOCK, "w", encoding="utf-8") as handle:
 clock = status(QUEUED_CLOCK)["metrics"]["time"]["delivery"]
 check("the wait in the queue, from the last preparation entry to the promotion, is left out of the delivery's clock",
       clock["elapsed"] == 1200 and clock["queued"] == 3000 and clock["share"] == 1.0, clock)
+
+# A task of the next delivery's approved plan that collides with nothing of the current one starts before the promotion
+EARLY = ".superpowers/early/ledger.jsonl"
+EARLY_NEXT = ".superpowers/early/next-b.jsonl"
+for name, text in (("plan-a.md", "# a\n### T1\n- Touches: `src/a.txt`\n### T2\n- Touches: `src/shared.txt`, schema\n"),
+                   ("plan-b.md", "# b\n### B1\n- Touches: `src/b.txt`\n### B2\n- Touches: `src/a.txt`\n"
+                                 "### B3\n- Touches: `src/shared.txt`\n### B4\n- Goal: no touches line\n"
+                                 "### B5\n- Touches: `src/`\n")):
+    with open(os.path.join(repo, name), "w", encoding="utf-8") as handle:
+        handle.write(text)
+run("start", "--slug", "a", "--plan", "plan-a.md", ledger=EARLY)
+run("scope", "--cycle", "1", "--tasks", "T1,T2", ledger=EARLY)
+os.makedirs(os.path.join(repo, "src"), exist_ok=True)
+with open(os.path.join(repo, "src", "a.txt"), "w", encoding="utf-8") as handle:
+    handle.write("a\n")
+subprocess.run(["git", "add", "src/a.txt"], cwd=repo, check=True)
+subprocess.run(["git", "commit", "-q", "-m", "T1"], cwd=repo, check=True)
+add("dev", "DONE", "T1", ledger=EARLY)
+run("start", "--slug", "b", "--next", ledger=EARLY)
+r = run("claim", "--task", "B1", ledger=EARLY_NEXT)
+check("before its plan is approved (plan --path), a preparation still refuses a claim",
+      r.returncode != 0 and "plan --path" in r.stderr, r.stderr)
+run("plan", "--path", "plan-b.md", ledger=EARLY_NEXT)
+r = run("claim", "--task", "B1", ledger=EARLY_NEXT)
+check("a task of the approved next plan whose Touches: cross nothing of the current delivery is claimed",
+      r.returncode == 0, r.stderr)
+r = run("claim", "--task", "B2", ledger=EARLY_NEXT)
+check("a task touching a file the current delivery changed is refused, naming it",
+      r.returncode != 0 and "src/a.txt" in r.stderr, r.stderr)
+r = run("claim", "--task", "B3", ledger=EARLY_NEXT)
+check("a task touching what a task of the current delivery still to do touches is refused, naming both",
+      r.returncode != 0 and "src/shared.txt" in r.stderr and "T2" in r.stderr, r.stderr)
+r = run("claim", "--task", "B5", ledger=EARLY_NEXT)
+check("a folder in Touches: collides with a file inside it", r.returncode != 0 and "src/" in r.stderr, r.stderr)
+r = run("claim", "--task", "B4", ledger=EARLY_NEXT)
+check("a task with no Touches: line is refused: nothing says it does not collide",
+      r.returncode != 0 and "Touches:" in r.stderr, r.stderr)
+upcoming = (status(EARLY).get("next") or [{}])[0]
+check("the current delivery's status lists the claims of the next one", upcoming.get("claims") == ["B1"], upcoming)
+check("a dev run of the preparation needs its claim",
+      add("dev", "DONE", "B9", ledger=EARLY_NEXT).returncode != 0)
+r = add("dev", "DONE", "B1", ledger=EARLY_NEXT)
+check("the claimed task's dev run goes in the preparation", r.returncode == 0, r.stderr)
+check("a cycle review still waits for the promotion", add("reviewer", "PASS", ledger=EARLY_NEXT).returncode != 0)
+r = run("start", "--slug", "b", "--archive", ledger=EARLY)
+state = status(EARLY)
+check("the promotion keeps the task done before it", r.returncode == 0 and state["slug"] == "b"
+      and state["tasks"].get("B1") == "DONE", (r.stderr, state["tasks"]))
 
 # The head of a run is the one its report reviewed or tested, not whatever the ledger's checkout holds
 TRACE = ".superpowers/trace.jsonl"
