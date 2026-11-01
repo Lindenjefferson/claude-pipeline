@@ -48,7 +48,7 @@ No [modo autônomo](../plugins/pipeline/skills/manager/references/autonomous.md)
 
 ## Quanto custa
 
-Uma entrega real de um app web pequeno (Next.js e Postgres), com 9 tarefas em 2 ciclos, uma migration e telas:
+Uma entrega real de um app web pequeno (o plugin não depende da stack; esta era Next.js e Postgres), com 9 tarefas em 2 ciclos, uma migration e telas:
 
 | | |
 |---|---|

@@ -58,7 +58,7 @@ task, and qa ran again after every fix of a blocking (FAIL) finding. The next re
 A fix round (task fix-N) and the cleanup task (task cleanup) stay in the current cycle, even a closed one: they need
 a reviewer pass, and qa again only when a FAIL came before them. Every finding carries its origin (design,
 assumption, plan, execution, environment); --report keeps the path of the file the manager saved the agent's report
-in, so a FAIL still open names it, and is refused when no file is there (the agents have no Write: the manager saves
+in, so a FAIL still open names it, and is refused when no file is there (an agent never saves its own report: the manager saves
 the report, then adds the run naming it), read from the current directory or from the ledger's project root.
 --from-agent <agent id> saves it instead: the agent's final report (its last SubagentHandback message, else its last
 text) is read from its transcript, <config>/projects/*/*/subagents/agent-<id>.jsonl under CLAUDE_CONFIG_DIR and
@@ -903,7 +903,7 @@ def add(args):
     if args.head and not named:
         sys.exit(f"--head {args.head} is no commit here")
     if args.report and not saved_report(args.report, args.ledger):
-        sys.exit(f"--report {args.report} is no file: the agents have no Write, so save the report there yourself "
+        sys.exit(f"--report {args.report} is no file: an agent never saves its own report, so save it there yourself "
                  "and add the run naming the file you saved")
     if args.full and args.agent != "qa":
         sys.exit("--full marks a qa run of the project's full test command")
