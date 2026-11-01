@@ -42,7 +42,7 @@ def report_file(name, verdict="PASS", commit=None, lines=None):
     path = f".superpowers/reports/{name}"
     os.makedirs(os.path.join(repo, ".superpowers", "reports"), exist_ok=True)
     body = lines if lines is not None else [f"Verdict: {verdict}", f"Commit: {(commit or head())[:7]}",
-                                            "Interface: n/a", "Processes: none left running"]
+                                            "Interface: n/a", "Processes: none left running; ports: none"]
     with open(os.path.join(repo, path), "w", encoding="utf-8") as handle:
         handle.write("\n".join(body) + "\n")
     return path
@@ -2045,12 +2045,29 @@ add("dev", "DONE", "E1", ledger=EARLY)
 for name, lines, words in (
         ("no-interface.md", ["Verdict: PASS", f"Commit: {head()[:7]}", "Processes: none left running"], "Interface:"),
         ("no-lines.md", ["all good, 12 passed"], "Verdict:"),
-        ("other-verdict.md", ["Verdict: FAIL", f"Commit: {head()[:7]}", "Interface: n/a", "Processes: none"],
+        ("other-verdict.md", ["Verdict: FAIL", f"Commit: {head()[:7]}", "Interface: n/a", "Processes: ports: none"],
          "FAIL"),
-        ("no-commit.md", ["Verdict: PASS", "Commit: zzzzzzz", "Interface: n/a", "Processes: none"], "zzzzzzz")):
+        ("no-commit.md", ["Verdict: PASS", "Commit: zzzzzzz", "Interface: n/a", "Processes: ports: none"], "zzzzzzz"),
+        ("no-ports.md", ["Verdict: PASS", f"Commit: {head()[:7]}", "Interface: n/a", "Processes: none left running"],
+         "ports:")):
     r = run("add", "--agent", "qa", "--verdict", "PASS", "--report", report_file(name, lines=lines), ledger=EARLY)
     check(f"add --agent qa --report refuses a report that lacks what qa.md asks ({name})",
           r.returncode != 0 and words in r.stderr and not status(EARLY)["qa"], r.stderr)
+# a server the qa started and left up: the port it names still takes connections, so its report is refused
+import socket
+server = socket.socket()
+server.bind(("127.0.0.1", 0))
+server.listen()
+port = server.getsockname()[1]
+up = report_file("port-up.md", lines=["Verdict: PASS", f"Commit: {head()[:7]}", "Interface: n/a",
+                                      f"Processes: none left running; ports: {port}"])
+r = run("add", "--agent", "qa", "--verdict", "PASS", "--report", up, ledger=EARLY)
+check("add --agent qa refuses a report whose ports: line names a port that still accepts connections",
+      r.returncode != 0 and str(port) in r.stderr and "PID" in r.stderr and not status(EARLY)["qa"], r.stderr)
+server.close()
+r = run("add", "--agent", "qa", "--verdict", "PASS", "--report", up, ledger=EARLY)
+check("once that server is stopped, the same report is added", r.returncode == 0 and len(status(EARLY)["qa"]) == 1,
+      r.stderr)
 run("add", "--agent", "reviewer", "--verdict", "FAIL", "--important", "1", "--origin", "execution=1", ledger=EARLY)
 before = head()
 subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "fix-1"], cwd=repo, check=True, capture_output=True)
