@@ -65,7 +65,7 @@ text) is read from its transcript, <config>/projects/*/*/subagents/agent-<id>.js
 ~/.claude, written to reports/<slug>/<agent>-<id>.md beside the ledger and kept as the run's --report, so a report
 the manager's context lost in a compaction is still on disk; with no transcript it is refused, naming --report; a qa --report must hold the Verdict:, Commit:,
 Interface: and Processes: lines of qa.md's report (Verdict the one given, Commit a commit here), and the run
-stores that commit as tested, and stale when it is not the latest dev run's head or later: a qa dispatched before a
+stores that commit as tested, and stale when it is not the latest dev run's head or later (a run held for a later plan cycle left out): a qa dispatched before a
 fix counts only for what came before it, so its FAIL still asks for the fix and the re-run is still asked for; --seconds takes 90, 12m, 1h5m or 12m30s, and --seconds and --tokens are optional, from the
 agent's completion notification when it already arrived, never an estimate (a run without them goes unmeasured, its
 span counting from its timestamp in the cycle's elapsed, which is null when that span comes to zero, and 0 is refused). measure fills the numbers
@@ -81,8 +81,13 @@ may be in and its report waiting to be added. A deferred item with no decision k
 ledger-<old-slug>.jsonl next to the ledger first. start --next opens the next delivery in next-<slug>.jsonl beside
 the ledger, while the current one is still coding; every command run with --ledger on that file reads it as in
 preparation: it takes the spec and plan review rounds (add --task spec|plan, waive and extend of those loops), a
-discovery run, measure, note, defer, resolve, validate, plan and sensitive, and refuses the rest (claim, a dev run, a
-cycle's review), naming the promotion; its own status is never ready for the gate and leaves leftovers and disk to the current one. The current delivery's status lists
+discovery run, measure, note, defer, resolve, validate, plan and sensitive, and refuses the rest (a cycle's review),
+naming the promotion. Once its plan is approved (plan --path), it also takes the claim of a task that collides with
+nothing of the current delivery (the ledger.jsonl beside it), and that task's dev run and release: every item of the
+task's Touches: line (each `quoted` path, and each other comma-separated item) must differ from every file the current
+delivery changed (<its base>..HEAD) and from every Touches: item of its tasks not done (its scope, and its claims in
+flight), a folder ending in / colliding with what is inside it; a task with no Touches: line is refused, and so is
+each collision, naming it. The run stays in the preparation and goes with it into the promotion; its own status is never ready for the gate and leaves leftovers and disk to the current one. The current delivery's status lists
 each one as advice, never pending (next: {slug, ledger, pending, validar}: the pending of its review loops and its open
 VALIDAR items, validated with --ledger on its file). start of a slug
 waiting in next-<slug>.jsonl promotes it: after the archive, that file becomes the ledger with its rounds, notes and
@@ -615,6 +620,14 @@ def preparation_only(args):
             args.command == "add" and (review and args.agent == "reviewer" or args.agent == "discovery")):
         return
     slug = entries[0].get("slug")
+    approved = any(entry["type"] == "plan" for entry in entries)
+    if approved and (args.command == "claim" or args.command == "release" or (
+            args.command == "add" and args.agent == "dev" and args.task in in_flight(entries))):
+        return
+    if args.command == "claim" and not approved:
+        sys.exit(f"{slug} is in preparation and its plan is not approved yet: record it with plan --path <plan>, then a "
+                 f"task that collides with nothing of the current delivery may start; the rest waits for start --slug "
+                 f"{slug} --archive")
     sys.exit(f"{slug} is in preparation: only its spec and plan rounds go in {args.ledger}; its code starts once the "
              f"current delivery reaches the gate, with start --slug {slug} --archive")
 
@@ -982,7 +995,8 @@ def gate_run(args):
 
 def qa_report(args, entries):
     """The tested commit of a saved qa report, refused when a line of qa.md's report is missing or disagrees; stale
-    when it is not the latest dev run's head or later (qa was dispatched before that run, as before a fix)."""
+    when it is not the latest dev run's head or later (qa was dispatched before that run, as before a fix), a run held
+    for a later plan cycle left out."""
     path = args.report if os.path.isfile(args.report) else os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(args.ledger))), args.report)
     text = open(path, encoding="utf-8", errors="replace").read()
@@ -1000,7 +1014,8 @@ def qa_report(args, entries):
     tested = git_head(commit, args.ledger) if commit else None
     if not tested:
         sys.exit(f"{args.report} gives Commit: {commit or '(nothing)'}, which is no commit here")
-    devs = [entry for entry in runs(entries) if entry["agent"] == "dev" and entry.get("head")]
+    held = {id(entry) for entry in held_runs(entries)}
+    devs = [entry for entry in runs(entries) if entry["agent"] == "dev" and entry.get("head") and id(entry) not in held]
     where = os.path.dirname(os.path.dirname(os.path.abspath(args.ledger)))
     stale = bool(devs) and subprocess.run(["git", "merge-base", "--is-ancestor", devs[-1]["head"], tested],
                                           capture_output=True, cwd=where).returncode == 1
@@ -1094,10 +1109,51 @@ def leftovers(entries, ledger, head):
     return found
 
 
+def touch_items(line):
+    """The items of a Touches: line: each `quoted` path, then each other comma- or semicolon-separated item."""
+    quoted = re.findall(r"`([^`]+)`", line or "")
+    rest = re.sub(r"`[^`]+`", "", line or "")
+    items = quoted + [part.strip(" .") for part in re.split(r"[,;]", rest)]
+    return [item.strip().removeprefix("./") for item in items if item.strip(" .")]
+
+
+def overlaps(one, other):
+    return one == other or any(a.endswith("/") and b.startswith(a) for a, b in ((one, other), (other, one)))
+
+
+def collisions(args, entries):
+    """Why a task of a delivery in preparation collides with the current delivery beside it: [text], empty when not."""
+    touches = touch_items(plan_field(plan_text(entries, args.ledger), args.task, "Touches"))
+    if not touches:
+        sys.exit(f"{args.task} has no Touches: line in the plan, so nothing says it does not collide with the current "
+                 "delivery: it waits for the promotion")
+    current = os.path.join(os.path.dirname(os.path.abspath(args.ledger)), os.path.basename(LEDGER))
+    present = read(current) if os.path.exists(current) else []
+    if not present:
+        return []
+    slug, root = present[0].get("slug"), os.path.dirname(os.path.dirname(current))
+    changed = subprocess.run(["git", "diff", "--name-only", present[0].get("base") or "HEAD", "HEAD"], cwd=root,
+                             capture_output=True, text=True)
+    found = [f"{item} (changed by {slug}: {name})" for name in changed.stdout.splitlines() if changed.returncode == 0
+             for item in touches if overlaps(item, name)]
+    done = {entry["task"] for entry in runs(present) if entry["agent"] == "dev" and entry["verdict"] in DONE}
+    todo = [task for tasks in plan_cycles(present).values() for task in tasks if task not in done]
+    todo += [task for task in in_flight(present) if task not in todo]
+    text = plan_text(present, current)
+    for task in todo:
+        for other in touch_items(plan_field(text, task, "Touches")):
+            found += [f"{item} ({task} of {slug} touches {other})" for item in touches if overlaps(item, other)]
+    return found
+
+
 def claim(args):
     entries = read(args.ledger)
     if not entries:
         sys.exit("no delivery started: run start first")
+    if preparing(entries):
+        found = collisions(args, entries)
+        if found:
+            sys.exit(f"{args.task} collides with the current delivery: {'; '.join(found)}; it waits for the promotion")
     held = in_flight(entries)
     if args.task in held:
         sys.exit(f"{args.task} is already claimed ({held[args.task]}): its dev run is in flight; "
@@ -1774,7 +1830,8 @@ def status(args):
                           f"reaches the gate, with start --slug {entries[0].get('slug')} --archive")
     upcoming = [] if preparing(entries) else [
         {"slug": prepared[0].get("slug"), "ledger": path, "pending": review_state(prepared, auto)[0],
-         "validar": [item for item in validar(prepared) if item["decision"] is None]}
+         "validar": [item for item in validar(prepared) if item["decision"] is None],
+         "claims": list(in_flight(prepared))}
         for path, prepared in queued(args.ledger) if prepared]
     pause_state = paused(entries)
     if pause_state:
