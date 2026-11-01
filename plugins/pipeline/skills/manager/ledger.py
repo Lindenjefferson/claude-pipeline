@@ -87,7 +87,9 @@ last SubagentHandback message, else its last text) is read from its transcript,
 <config>/projects/*/*/subagents/agent-<id>.jsonl under CLAUDE_CONFIG_DIR and ~/.claude, written to
 reports/<slug>/<agent>-<id>.md beside the ledger and kept as the run's --report, so a report the manager's context
 lost in a compaction is still on disk; with no transcript it is refused, naming --report; a qa --report must hold the
-Verdict:, Commit:, Interface: and Processes: lines of qa.md's report (Verdict the one given, Commit a commit here),
+Verdict:, Commit:, Interface: and Processes: lines of qa.md's report (Verdict the one given, Commit a commit here,
+Processes naming the ports qa started a server on, ports: none when none, and none of them still accepting
+connections, on 127.0.0.1 or ::1),
 and the run stores that commit as tested, and stale when it is not the latest dev run's head or later (a run held for
 a later plan cycle left out): a qa dispatched before a fix counts only for what came before it, so its FAIL still asks
 for the fix and the re-run is still asked for; --seconds takes 90, 12m, 1h5m or 12m30s, and --seconds and --tokens are
@@ -358,6 +360,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import statistics
 import subprocess
 import sys
@@ -1126,6 +1129,17 @@ def gate_run(args):
     print(f"gate {args.verdict}" + (f": {', '.join(failed)}" if failed else ""))
 
 
+def accepts(port):
+    """Whether something on this machine still takes connections on the port, over IPv4 or IPv6."""
+    for host in ("127.0.0.1", "::1"):
+        try:
+            socket.create_connection((host, port), timeout=0.5).close()
+            return True
+        except (OSError, ValueError, OverflowError):
+            continue
+    return False
+
+
 def qa_report(args, entries):
     """The tested commit of a saved qa report, refused when a line of qa.md's report is missing or disagrees; stale
     when it is not the latest dev run's head or later (qa was dispatched before that run, as before a fix), a run held
@@ -1143,6 +1157,14 @@ def qa_report(args, entries):
     said = found["Verdict"].split()[0].strip("*_`") if found["Verdict"] else ""
     if said.upper() != args.verdict:
         sys.exit(f"{args.report} says Verdict: {said or '(nothing)'}, not {args.verdict}")
+    ports = re.search(r"(?i)\bports:\s*(none\b|\d[\d,\s]*)", found["Processes"])
+    if not ports:
+        sys.exit(f"{args.report} gives no ports: in its Processes: line: qa names each port it started a server on, "
+                 "or ports: none")
+    listening = [port for port in re.findall(r"\d+", ports.group(1)) if accepts(int(port))]
+    if listening:
+        sys.exit(f"port {', '.join(listening)} named in {args.report} still accepts connections: stop the server qa "
+                 "started there by the PID that listens on it (with its children), then add the run again")
     commit = found["Commit"].split()[0].strip("`") if found["Commit"] else ""
     tested = git_head(commit, args.ledger) if commit else None
     if not tested:
