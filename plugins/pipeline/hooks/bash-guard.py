@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """PreToolUse hook (matcher Bash|PowerShell, see hooks.json): denies skipping the secret-scan pre-commit hook,
 anything that reaches the default branch while the delivery is in autonomous mode, and the project's dev server
-outside background mode.
+outside background mode; asks the user before a delivery starts outside auto mode.
+
+A ledger.py start (also start --next), run in a session whose permission_mode is neither auto nor
+bypassPermissions, asks the user first, naming the mode: the delivery would stop at each permission prompt while the
+user is away. A payload with no permission_mode passes.
 
 In autonomous mode (the latest mode entry of the ledger ledger.py finds from the session's directory), denied in the
 foreground or background: a git push of the default branch (named by origin/HEAD, else init.defaultBranch, main or
@@ -24,7 +28,7 @@ that sets core.hooksPath, a GIT_CONFIG_* assignment naming it (also through env 
 writes or unsets it. The command is read word by word as the shell splits it, after the heredoc bodies the shell
 only passes along are removed, so a flag quoted inside a commit message is a message, not a flag. Wrappers such as
 env, command, time, nohup, xargs, `!`, `{` and if/then are looked through; a command given to a shell's -c (also
--lc) or to eval is read the same way, and so is a command substitution outside quotes; one inside double quotes is
+-lc) or to eval is read the same way (a script the shell runs is a command of its own), and so is a command substitution outside quotes; one inside double quotes is
 not read. Permission rules match the command as plain text and cannot tell a flag from a message, which is why this
 check lives here. A command that does not parse (an unbalanced quote) passes, since the shell refuses it too.
 
@@ -340,6 +344,7 @@ def simple_commands(command, powershell=False):
         elif not powershell and program in SHELLS:
             for position, word in enumerate(words[1:-1], 1):
                 if not word.startswith("-"):
+                    yield program, words[1:], segment  # a script the shell runs
                     break
                 if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", word):
                     yield from simple_commands(words[position + 1], powershell)
@@ -561,6 +566,24 @@ def commit_skips(arguments):
     return False
 
 
+UNATTENDED = {"auto", "bypassPermissions"}
+
+
+def starts_delivery(command, powershell=False):
+    """True when the command runs ledger.py start (also start --next): the delivery begins there."""
+    for _, arguments, segment in simple_commands(command, powershell):
+        words = [word for word in segment if word]
+        found = [i for i, word in enumerate(words) if os.path.basename(word.replace("\\", "/")) == "ledger.py"]
+        if not found:
+            continue
+        rest = words[found[0] + 1:]
+        while rest and rest[0].startswith("--ledger"):
+            rest = rest[1:] if "=" in rest[0] else rest[2:]
+        if rest[:1] == ["start"]:
+            return True
+    return False
+
+
 def main():
     payload = json.load(sys.stdin)
     if payload.get("tool_name") not in ("Bash", "PowerShell"):
@@ -569,6 +592,14 @@ def main():
     tool_input = payload.get("tool_input") or {}
     command = tool_input.get("command") or ""
     cwd = payload.get("cwd") or os.getcwd()
+    mode = payload.get("permission_mode")
+    if mode and mode not in UNATTENDED and starts_delivery(command, powershell):
+        json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                          "permissionDecisionReason": (
+                                              f"This session is in {mode} mode, not auto: the delivery would stop at "
+                                              "each permission prompt while the user is away. Start it anyway, or "
+                                              "restart the session in auto mode first?")}}, sys.stdout)
+        return
     if skips_hook(command, powershell):
         reason = ("This skips the secret-scan pre-commit hook (--no-verify, -n or a core.hooksPath override), and a "
                   "secret committed stays in the history. Commit without it; if the hook blocks, fix what it reports "
