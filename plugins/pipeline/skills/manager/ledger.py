@@ -84,11 +84,13 @@ preparation: it takes the spec and plan review rounds (add --task spec|plan, wai
 discovery run, measure, note, defer, resolve, validate, plan and sensitive, and refuses the rest (a cycle's review),
 naming the promotion. Once its plan is approved (plan --path), it also takes the claim of a task that collides with
 nothing of the current delivery (the ledger.jsonl beside it), and that task's dev run and release: every item of the
-task's Touches: line (each `quoted` path, and each other comma-separated item) must differ from every file the current
+task's Touches: line (each `quoted` path, and each other comma- or semicolon-separated item)
+must differ from every file the current
 delivery changed (<its base>..HEAD) and from every Touches: item of its tasks not done (its scope, and its claims in
 flight), a folder ending in / colliding with what is inside it; a task with no Touches: line is refused, and so is
 each collision, naming it. The run stays in the preparation and goes with it into the promotion; its own status is never ready for the gate and leaves leftovers and disk to the current one. The current delivery's status lists
-each one as advice, never pending (next: {slug, ledger, pending, validar}: the pending of its review loops and its open
+each one as advice, never pending (next: {slug, ledger, pending, validar, claims}: the pending of its review loops, its claims in
+flight and its open
 VALIDAR items, validated with --ledger on its file). start of a slug
 waiting in next-<slug>.jsonl promotes it: after the archive, that file becomes the ledger with its rounds, notes and
 deferred items, its start gets the new --base (and --plan, when given) and the time it was promoted, and the file goes.
