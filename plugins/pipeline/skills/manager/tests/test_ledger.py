@@ -2051,6 +2051,30 @@ run("add", "--agent", "qa", "--verdict", "PASS", "--report", report_file("early-
 check("a qa that tested the fix's commit counts as its re-run",
       "qa has not re-run the scenarios the fix touched" not in status(EARLY)["pending"], status(EARLY)["pending"])
 
+# A dev run held for the next plan cycle is out of this cycle: a qa of this cycle's fix is not stale because of it
+HELDQA = ".superpowers/held-qa.jsonl"
+run("start", "--slug", "held-qa", ledger=HELDQA)
+run("scope", "--cycle", "1", "--tasks", "H1", ledger=HELDQA)
+run("scope", "--cycle", "2", "--tasks", "H5", ledger=HELDQA)
+add("dev", "DONE", "H1", ledger=HELDQA)
+run("add", "--agent", "reviewer", "--verdict", "FAIL", "--important", "1", "--origin", "execution=1", ledger=HELDQA)
+subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "held-qa fix-1"], cwd=repo, check=True,
+               capture_output=True)
+add("dev", "DONE", "fix-1", ledger=HELDQA)
+fixed = head()
+add("reviewer", "PASS", ledger=HELDQA)
+subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "H5 of the next cycle"], cwd=repo, check=True,
+               capture_output=True)
+add("dev", "DONE", "H5", ledger=HELDQA)
+r = run("add", "--agent", "qa", "--verdict", "PASS", "--report", report_file("held-qa.md", commit=fixed),
+        ledger=HELDQA)
+state = status(HELDQA)
+with open(os.path.join(repo, HELDQA), encoding="utf-8") as handle:
+    qa_runs = [entry for entry in map(json.loads, handle) if entry.get("agent") == "qa"]
+check("a qa of the fix added after a held dev run of the next cycle is not stale: it closes the cycle, and the held "
+      "run opens the next", r.returncode == 0 and not qa_runs[-1].get("stale") and state["cycle"] == 2
+      and "H5" in state["tasks"], (r.stderr, qa_runs, state["cycle"], state["pending"]))
+
 LATE = ".superpowers/late-qa.jsonl"
 run("start", "--slug", "late-qa", ledger=LATE)
 add("dev", "DONE", "L1", ledger=LATE)
