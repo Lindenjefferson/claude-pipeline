@@ -10,8 +10,6 @@ Nenhuma no momento.
 
 ## Backlog
 
-- **Tarefa da entrega seguinte que não colide começa antes da promoção** (melhoria, `resultado-em-barra` do `homebudgy`, 1.26.0; muda o fluxo, aprovado pelo dono como o próximo): plano PASS às 18:43 e primeiro `claim` às 19:51, 68 min à espera da entrega anterior, com a T1 e a T2 sem tocar nada dela. Proposta: o `--next` aceita `claim` de uma tarefa cujo `Touches:` não cruza o diff da entrega atual nem uma claim em voo, e o `add` dela fica segurado (`"after"`, como na 1.26.0) até a promoção. Número: minutos entre o PASS do plano da seguinte e o primeiro `claim` dela (eram 68; deve ser 0 com uma tarefa sem colisão). Esforço: M.
-
 ## Em espera (voltam com um sinal)
 
 Cada item diz o sinal que o traz de volta; o detalhe da análise está no histórico do git deste arquivo.
