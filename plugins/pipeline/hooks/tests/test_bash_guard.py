@@ -135,7 +135,25 @@ main_pushes = ("git push origin main", "git push origin HEAD:main", "git push or
                "git push -u origin +main", "git push --all", "git push --mirror origin",
                "git push origin refs/heads/main", "gh pr merge 20 --merge", "cd . && git push origin main",
                "git push origin --delete main", "git -C . push origin main")
-check("supervised: a push to the main branch is left to the ask rule", not reaches_main("git push origin main"))
+
+
+def asks(command, cwd=None):
+    reason = run(cwd or repo, command)[1]
+    return reason is not None and reason[0] == "ask" and "main" in reason[1]
+
+
+for command in ("git push origin main", "git push", "git push origin HEAD:main", "git push --all",
+                "git switch -q main && git push"):
+    check(f"supervised: a push to the main branch asks the user {command!r}", asks(command), str(run(repo, command)))
+for command in ("git push origin feat/x", "git push -u origin feat/x:feat/x", "git push --tags", "gh pr merge 20",
+                "git merge feat/x"):
+    check(f"supervised: passes {command!r}", run(repo, command)[1] is None, str(run(repo, command)))
+loose = tempfile.mkdtemp(prefix="noledger_")
+for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t.com"), ("config", "user.name", "t"),
+             ("commit", "-q", "--allow-empty", "-m", "base")):
+    subprocess.run(["git", *args], cwd=loose, check=True, capture_output=True)
+check("with no ledger, a push to the main branch asks too", asks("git push origin main", loose))
+check("with no ledger, a push of a work branch passes", run(loose, "git push origin feat/y")[1] is None)
 sh(sys.executable, LEDGER_PY, "mode", "autonomous")
 for command in main_pushes + ("git push", "git merge feat/x", "git merge --no-ff feat/x"):
     check(f"autonomous, on the main branch: denied {command!r}", reaches_main(command))
@@ -158,7 +176,8 @@ for command in ("git push", "git push -u origin feat/x", "git push origin HEAD",
 sub = os.path.join(repo, "src")
 os.makedirs(sub)
 check("autonomous: the ledger is found from a subfolder", run(repo, "git push origin main", cwd=sub)[1] is not None)
-check("no ledger: a push to the main branch is left to the ask rule", run(bare, "git push origin main")[1] is None)
+check("outside a git repository, a push asks nothing (no main branch to read)",
+      run(bare, "git push origin main")[1] is None)
 
 def ps(folder, command, background=False):
     return run(folder, command, background=background, tool="PowerShell")[1]
