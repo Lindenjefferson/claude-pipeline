@@ -45,7 +45,8 @@ flight and the gate waits for them, so a manager resuming after a compaction see
 claim refuses a task that is in flight or already DONE in the current cycle, so one task never runs twice by mistake.
 status lists each copy left over, pending (step leftover, with its action) until it is gone, so the gate waits: a
 worktree under ../_temp/<project>-worktrees/ (project being the main worktree's folder) or .claude/worktrees/ with no
-claim, its HEAD in the delivery head and nothing uncommitted, a folder of ../_temp/<project>-worktrees/ with no .git,
+claim, its HEAD in the delivery head and nothing uncommitted, a folder of ../_temp/<project>-worktrees/ with no .git
+(not <copy>-saida..., the output of a copy still there, which goes with it),
 and a local branch integrated in this delivery (in the head, not in the base) that is neither the current one nor the
 branch of a claimed worktree or of one with uncommitted work (the next delivery's spec and plan before its start);
 status --json gives them as leftovers: {kind worktree|folder|branch, path, branch, action}. --worktree (an existing
@@ -1226,6 +1227,9 @@ def leftovers(entries, ledger, head):
                               "branch": branch or None, "action": "tear the copy down as Execução em paralelo says, then git worktree remove it"})
     for name in sorted(os.listdir(copies)) if os.path.isdir(copies) else []:
         path = os.path.join(copies, name)
+        owner = os.path.join(copies, name.partition("-saida")[0]) if "-saida" in name else None
+        if owner and norm(owner) in trees:
+            continue  # the output folder of a copy still there goes with it
         if os.path.isdir(path) and norm(path) not in trees and not os.path.exists(os.path.join(path, ".git")):
             found.append({"kind": "folder", "path": path, "branch": None,
                           "action": "stop what still runs from it (by the PID of its port), then delete the folder"})
