@@ -2,7 +2,7 @@
 
 As ideias para o plugin, de onde quer que venham (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto). O que cada versão entregou está no [histórico](../plugins/pipeline/UPGRADING.md): ao entregar um item, ele sai daqui e vai para a seção da versão, com o PR.
 
-Toda ideia passa pelo filtro do [`CLAUDE.md`](../CLAUDE.md) e termina numa destas seções: **Não triadas** até passar por ele; **Backlog** quando entra, dizendo antes de tudo se é **defeito** (o plugin não faz o que o arquivo dele diz) ou **melhoria**, porque defeito conferido não espera na fila; **Em espera** com o sinal que a traz de volta, sem tipo, porque nada ali foi conferido ainda; ou **Recusado**, com o motivo em uma linha. Um item em espera cujo sinal ficou remoto, pelo que as entregas mostram, sai do arquivo sem ir para Recusado (decisão do dono): o git guarda o texto. Cada item diz de onde veio e o esforço estimado (P, M, G).
+Toda ideia passa pelo filtro do [`CLAUDE.md`](../CLAUDE.md) e termina numa destas seções: **Não triadas** até passar por ele; **Backlog** quando entra, dizendo antes de tudo se é **defeito** (o plugin não faz o que o arquivo dele diz) ou **melhoria**, porque defeito conferido não espera na fila; **Em espera** com o sinal que a traz de volta, sem tipo, porque nada ali foi conferido ainda; ou **Recusado**, com o motivo em uma linha. Um item em espera cujo sinal ficou remoto, pelo que as entregas mostram, sai do arquivo sem ir para Recusado (decisão do dono): o git guarda o texto. Cada item diz de onde veio ("um projeto do autor", nunca o nome dele) e o esforço estimado (P, M, G).
 
 ## Não triadas
 
