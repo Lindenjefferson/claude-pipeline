@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """PreToolUse hook (matcher Bash|PowerShell, see hooks.json): denies skipping the secret-scan pre-commit hook,
 anything that reaches the default branch while the delivery is in autonomous mode, and the project's dev server
-outside background mode; asks the user before a delivery starts outside auto mode.
+outside background mode; asks the user before a delivery starts
+outside Claude Code's auto permission mode (not the delivery's autonomous mode).
 
 A ledger.py start (also start --next), run in a session whose permission_mode is neither auto nor
 bypassPermissions, asks the user first, naming the mode: the delivery would stop at each permission prompt while the

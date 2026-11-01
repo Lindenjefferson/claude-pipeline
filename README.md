@@ -16,6 +16,8 @@ O que rege o plugin — as premissas que valem tanto para mudá-lo como para o q
 
 ## Como funciona
 
+Cada entrega tem um *slug*, o nome curto que vai na branch e nos arquivos dela em `docs/`. O registro do que cada agente fez (o *ledger*) e os relatórios ficam em `.superpowers/`, fora do git. As decisões que o manager tomou por você, quando não pôde perguntar, ficam na lista *VALIDAR*, que você confere depois.
+
 ```
 tamanho → (spec) → plano ✋ → ciclos: dev por tarefa (as independentes em paralelo)
         → reviewer ‖ qa → correção 1× ↺ → limpeza → gate.py → merge/push ✋
@@ -60,11 +62,11 @@ claude plugin install pipeline@linden-plugins --scope local
 
 Para tirar de um projeto: `claude plugin uninstall pipeline@linden-plugins --scope local`.
 
-Noutro computador, num projeto que já usa o plugin: clone o repositório, instale o plugin nele e peça o kickoff. Ele percebe que é uma máquina nova e segue a seção "Preparar uma máquina" do `CLAUDE.md` do projeto: instala os pré-requisitos e as dependências, cria os arquivos de ambiente, sobe os serviços e roda a prova de que está pronto, com uma confirmação sua.
+Os scripts leem algumas seções do `CLAUDE.md` do projeto pelo título, em português ("Comandos", "Testes", "Versão" e as outras que o kickoff escreve): mantenha esses títulos como estão. O resto do arquivo, e a conversa com o Claude, podem ser em qualquer língua.
 
-O marketplace `linden-plugins` também lista o plugin `gerenciador-contas`, que mora no repositório [`gerenciador-contas`](https://github.com/Lindenjefferson/gerenciador-contas).
+Noutro computador, num projeto que já usa o plugin: clone, instale o plugin e peça o kickoff, que prepara a máquina pelo `CLAUDE.md` do projeto.
 
-Para atualizar, veja "Atualização" abaixo. Para desenvolver o plugin, use um clone local (`claude plugin marketplace add ./claude-pipeline`), que é carregado do disco: as edições valem na próxima sessão.
+Para desenvolver o plugin, use um clone local (`claude plugin marketplace add ./claude-pipeline`), carregado do disco: as edições valem na próxima sessão.
 
 ## Componentes
 
@@ -81,21 +83,17 @@ Para atualizar, veja "Atualização" abaixo. Para desenvolver o plugin, use um c
 | [`qa`](plugins/pipeline/agents/qa.md) | Roda a suíte e confere os critérios de aceite do ciclo, com a verificação de interface do projeto quando há tela. |
 | [`ledger.py`](plugins/pipeline/skills/manager/ledger.py) | Registro da entrega: o que cada agente concluiu, o que falta, itens adiados e métricas. |
 | [`gate.py`](plugins/pipeline/skills/manager/gate.py) | Checagem final local, sem agente: READY ou NOT READY e o relatório de qualidade. |
-| [`general.md`](plugins/pipeline/checklists/general.md) | Princípios gerais de qualidade que o `dev` e o `reviewer` aplicam: o índice e três fatias (dados e entradas do servidor; contas; servidor, navegador, telas, tokens e builds), cada uma lida quando o produto tem o que os itens dela tratam. |
+| [`general.md`](plugins/pipeline/checklists/general.md) | Princípios gerais de qualidade que o `dev` e o `reviewer` aplicam, divididos em fatias lidas conforme o produto. |
 | [`agents-shared.md`](plugins/pipeline/checklists/agents-shared.md) | O que `dev` e `qa` têm em comum (servidor de dev, processos que iniciam). |
 | [`spec-checklist.md`](plugins/pipeline/skills/manager/templates/spec-checklist.md) | O que toda spec e todo plano respondem, com o pré-mortem de cada escrita. |
-| [Hook de segredos e UTF-8](plugins/pipeline/hooks/pre-commit-secret-scan.py) | `pre-commit` do git que bloqueia `.env`, linhas com cara de segredo e linhas adicionadas que não são UTF-8 ou têm caracteres invisíveis; o docstring explica falso positivo e a correção. |
-| [Hook de retomada](plugins/pipeline/hooks/session-start.py) | `SessionStart` (toda sessão): depois de compactação ou retomada, devolve ao manager o `status` do ledger; em toda sessão, mantém o `pipeline.home` do repositório na versão do plugin em uso. Registrado em [`hooks.json`](plugins/pipeline/hooks/hooks.json). |
-| [Guarda dos comandos](plugins/pipeline/hooks/bash-guard.py) | `PreToolUse` em `Bash` e `PowerShell`: nega pular o `pre-commit` (`--no-verify`, `-n`, `core.hooksPath`), o que chega na branch principal no modo autônomo (fora dele, pergunta antes do push dela) e o comando da linha "Rodar em desenvolvimento" do `CLAUDE.md` do projeto fora do modo background; pergunta ao usuário antes de iniciar uma entrega (`ledger.py start`) numa sessão fora do modo auto. |
-| [Andamento](plugins/pipeline/hooks/andamento.js) | Mod do Claude Code: com entrega aberta, até três linhas em português abaixo do prompt, sob a linha do modo: o ciclo do plano e quantas tarefas e ciclos faltam; as tarefas em andamento, os vereditos e o que vem depois; e, em destaque, as decisões que esperam você; notifica o sistema quando a entrega passa a precisar de você; `/andamento` abre o painel com a tabela do ciclo, as outras frentes, os arquivos da entrega e um botão por agente em andamento, que abre a conversa dele; grava o uso da conta ao lado do ledger, para o manager economizar ou pausar. |
+| [Hook de segredos e UTF-8](plugins/pipeline/hooks/pre-commit-secret-scan.py) | `pre-commit` que bloqueia `.env`, linhas com cara de segredo e texto que não é UTF-8 ou tem caracteres invisíveis. |
+| [Hook de retomada](plugins/pipeline/hooks/session-start.py) | Ao abrir ou retomar uma sessão, devolve ao manager o estado da entrega. |
+| [Guarda dos comandos](plugins/pipeline/hooks/bash-guard.py) | Antes de cada comando: nega pular o `pre-commit`, publicar na branch principal no modo autônomo e o servidor de dev fora do background; pergunta antes do push da principal e antes de iniciar uma entrega fora do modo de permissão `auto` do Claude Code. |
+| [Andamento](plugins/pipeline/hooks/andamento.js) | Mod do Claude Code (uma extensão da interface): até três linhas sob o prompt com o andamento da entrega e o que espera você, e o painel `/andamento`. |
 
 ## O que fica no seu projeto
 
 Vai para o git, no mesmo slug da entrega: a spec (`docs/specs/<slug>.md`, nas entregas grandes), o plano (`docs/plans/<slug>.md`), o mockup das telas (`docs/mockups/<slug>.html`) e o relatório de qualidade do gate (`docs/quality-reports/`). Ficam também a doc de cada módulo em `docs/modulos/`, com o índice em `docs/README.md`, os padrões que todo código segue e o mapa dos módulos em `docs/arquitetura.md`, o roteiro de publicar, guardar e reverter em `docs/operacao.md`, as lições em `docs/lessons.md`, os achados do `discovery` em `docs/discovery/` e as convenções do projeto no `CLAUDE.md`. Ficam fora do git: `.superpowers/`, com o ledger e os relatórios de cada agente, e o `CLAUDE.local.md`, com o que vale só para este computador.
-
-## O que esperar de uma entrega
-
-Numa entrega real, a [`0.5-launcher-civic`](docs/analises/0.5-launcher-civic.md), foram 11,8 h de relógio, das quais só 3,4 h com algum agente rodando, e 3,73M tokens; 4,4 h foram uma pausa pedida pelo dono. Das seis esperas por você (~1,5 h ao todo), cinco foram para autorizar mais uma rodada de revisão de spec ou plano (~64 min), o que a 1.16.0 deixou de perguntar. A fase de código não teve nenhum achado Important.
 
 ## Quando não usar
 
@@ -106,9 +104,7 @@ Numa entrega real, a [`0.5-launcher-civic`](docs/analises/0.5-launcher-civic.md)
 
 ## Atualização
 
-- Instalações a partir do GitHub ficam fixas na `version` do `plugin.json`.
-- Para atualizar, peça "atualizar o plugin" na sessão do projeto: a skill [`atualizar`](plugins/pipeline/skills/atualizar/SKILL.md) espera um ponto de parada da entrega, atualiza, abre a sessão nova e aplica o "Ao atualizar" de cada versão pulada, no [histórico](plugins/pipeline/UPGRADING.md). À mão: `claude plugin marketplace update linden-plugins` e `claude plugin update pipeline@linden-plugins --scope local`; uma sessão aberta segue na versão que carregou até o `/reload-plugins` ou reiniciar.
-- Ative também a proteção de push contra segredos do seu provedor (no GitHub, secret scanning push protection): o hook local é contra acidentes, não contra quem o pula.
+Peça "atualizar o plugin" na sessão do projeto: a skill [`atualizar`](plugins/pipeline/skills/atualizar/SKILL.md) espera um ponto de parada da entrega e aplica as notas de cada versão do [histórico](plugins/pipeline/UPGRADING.md). Ative também a proteção de push contra segredos do seu provedor (no GitHub, *secret scanning push protection*): o hook local evita acidentes, não quem o pula.
 
 ## Para onde vai
 
