@@ -1,5 +1,7 @@
 # claude-pipeline
 
+> *In English:* a Claude Code plugin that runs a small multi-agent dev team (manager, dev, reviewer, qa) in short, test-first cycles, with a delivery ledger and a local gate, so you only decide product questions and approve the plan and the merge. The docs are in Portuguese; the agent prompts are in English.
+
 Um time de desenvolvimento multiagente e independente para o [Claude Code](https://code.claude.com), que constrói produtos pequenos de forma autônoma e leva cada um pelo ciclo inteiro (descoberta, triagem, desenvolvimento, testes, documentação, auditoria, segurança e operação), com a qualidade de um produto grande. O `manager` orquestra e gere a entrega; agentes especializados implementam, revisam e validam; você só decide as questões de produto e aprova o plano e o merge.
 
 O objetivo é que nada errado saia da máquina sem que você precise acompanhar cada passo: o trabalho anda em ciclos curtos, com testes primeiro, revisão e validação em todo ciclo e um gate local antes do merge.
@@ -25,25 +27,40 @@ tamanho → (spec) → plano ✋ → ciclos: dev por tarefa (as independentes em
 4. O `gate.py` confere localmente o ledger, os critérios de aceite com teste (e avisa quando o teste veio no mesmo commit do código), build, tipos, lint, testes (a suíte inteira no head final, rodada por ele ou por um `qa`), auditoria de dependências e segredos, e grava um relatório de qualidade com as métricas da entrega.
 5. Você decide o merge e o push (✋ 2). Nada sai da máquina sem esse pedido.
 
+O passo a passo, com o que você digita e o que vê em cada etapa, está em [Como é uma entrega](docs/como-e-uma-entrega.md).
+
 Com você ausente, o [modo autônomo](plugins/pipeline/skills/manager/references/autonomous.md) do manager troca as aprovações por uma lista VALIDAR e não faz merge nem push.
 
 ## Começo rápido
 
-Requisitos: Claude Code com plugins (a linha de andamento e o `/andamento` pedem a v2.1.287 ou mais nova, testados na v2.1.302), Python 3 e git no `PATH` (o Python com o nome `python` ou `python3`; testado no Windows e no Linux, ainda não no macOS), no Windows o Git Bash, onde rodam os hooks do plugin e o `gate.py` roda os comandos do projeto, e os plugins [`superpowers`](https://github.com/obra/superpowers) (`superpowers@claude-plugins-official`), `frontend-design@claude-plugins-official` (toda mudança de tela, com a rodada e a revisão de design do manager; só em produtos com tela) e `claude-code-setup@claude-plugins-official` (recomenda as automações do Claude Code de um projeto novo, depois de montada a stack) e `claude-security@claude-plugins-official` (a varredura de segurança de uma entrega de domínio sensível; pede um `python3` de verdade no `PATH` e a ferramenta Workflow ligada), declarados como dependência; o `kickoff` avisa quando falta um e diz como instalar.
+**Você precisa de:**
+
+- [Claude Code](https://code.claude.com) v2.1.287 ou mais nova (testado na v2.1.302);
+- Python 3 e git no `PATH` (o Python como `python` ou `python3`);
+- no Windows, o Git Bash, onde rodam os hooks e os comandos do gate;
+- Windows ou Linux (o macOS ainda não foi testado).
+
+Os quatro plugins de que ele depende (`superpowers`, `frontend-design`, `claude-code-setup` e `claude-security`, do marketplace oficial) vêm declarados como dependência, e o kickoff avisa quando falta um e diz como instalar.
+
+**Instalar:**
 
 ```bash
-# uma vez por máquina (repositório privado: o git da máquina precisa estar autenticado no GitHub)
+# uma vez por máquina
 claude plugin marketplace add Lindenjefferson/claude-pipeline
 
-# em cada projeto: habilitado só nele, nunca globalmente (o escopo local não vai para o git)
-# num projeto novo, basta a pasta vazia (mkdir meu-projeto): o kickoff faz o git init e prepara o resto
+# em cada projeto, só nele (o escopo local não vai para o git); num projeto novo basta a pasta vazia
 cd meu-projeto
 claude plugin install pipeline@linden-plugins --scope local
 ```
 
-Numa sessão na pasta do projeto, peça o **kickoff** para preparar a estrutura e depois uma entrega ("implementar o módulo de relatórios", "corrigir o bug do login"): o **manager** conduz do tamanho ao gate. Para desabilitar: `claude plugin uninstall pipeline@linden-plugins --scope local`.
+**Usar:** abra o Claude Code na pasta do projeto e digite:
 
-Noutro computador, num projeto que já usa o plugin (no GitHub ou em produção): clone o repositório, instale o plugin nele e peça o **kickoff**. Ele percebe que é uma máquina nova e segue a seção "Preparar uma máquina" do `CLAUDE.md` do projeto: confere e instala os pré-requisitos que o projeto declara, instala as dependências, cria os arquivos de ambiente (baixando os valores quando o projeto diz de onde), sobe os serviços e roda a prova de que está pronto, com uma confirmação sua e dizendo o que ficou com você.
+1. `prepara este projeto com o kickoff` (ou `/pipeline:kickoff`): uma vez, cria a estrutura;
+2. o que você quer entregar, como `implementar a exportação do extrato em CSV` ou `corrigir o bug do login`: o **manager** conduz do plano ao gate.
+
+Para tirar de um projeto: `claude plugin uninstall pipeline@linden-plugins --scope local`.
+
+Noutro computador, num projeto que já usa o plugin: clone o repositório, instale o plugin nele e peça o kickoff. Ele percebe que é uma máquina nova e segue a seção "Preparar uma máquina" do `CLAUDE.md` do projeto: instala os pré-requisitos e as dependências, cria os arquivos de ambiente, sobe os serviços e roda a prova de que está pronto, com uma confirmação sua.
 
 O marketplace `linden-plugins` também lista o plugin `gerenciador-contas`, que mora no repositório [`gerenciador-contas`](https://github.com/Lindenjefferson/gerenciador-contas).
 
@@ -99,4 +116,4 @@ As ideias em avaliação e as recusadas estão no [roadmap](docs/roadmap.md); o 
 
 ## Licença
 
-Projeto pessoal e privado. Todos os direitos reservados.
+[MIT](LICENSE). Feito e usado no dia a dia pelo autor nos próprios projetos; issues e sugestões são bem-vindas, sem garantia de suporte.
