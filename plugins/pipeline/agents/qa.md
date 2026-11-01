@@ -34,5 +34,5 @@ Acceptance criteria: <id: met / not met, the test that proves it, how you checke
 Captures: <paths, or n/a — no screens>
 Counts: <n> Critical, <n> Important, <n> Minor; origins: <origin>=<n>, ...
 Findings: <steps to reproduce, expected vs actual, severity, origin>
-Processes: none left running (each one you started, stopped by PID)
+Processes: none left running (each one you started, stopped by PID); ports: <each port you started a server on, or none>
 ```
