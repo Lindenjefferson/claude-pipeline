@@ -2,9 +2,20 @@
 
 O que cada versão entregou e o que muda para quem atualiza. O arquivo vai junto com cada versão instalada: a skill `atualizar` lê o **Ao atualizar** de cada versão pulada, da mais antiga para a mais nova. Termine a entrega em andamento, ou pause-a, antes de atualizar o plugin (a skill `atualizar` confere). As ideias que ainda não viraram versão estão no [roadmap](../../docs/roadmap.md).
 
-Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o número do PR. Só as versões que o `feedback-plugin` das próximas entregas ainda confere (hoje da 1.9.8 à 1.30.0) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta. O que é major, minor e patch está no [`CLAUDE.md`](../../CLAUDE.md).
+Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o número do PR. Só as versões que o `feedback-plugin` das próximas entregas ainda confere (hoje da 1.9.8 à 1.30.1) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta. O que é major, minor e patch está no [`CLAUDE.md`](../../CLAUDE.md).
 
 **A numeração voltou para 1.x** (decisão do usuário, com o plugin só em instalação local). A 2.12.0 passou a ser a **1.12.0**, e cada versão da linha 2.x segue a mesma conta (a 2.9.9 é a 1.9.9, e assim por diante). A linha 1.x original, de antes da 2.0.0, virou 0.x pela mesma conta (a 1.6.0 de então é a **0.6.0**), para nenhum número valer por duas versões. Nada muda no comportamento. Uma cópia 2.x se atualiza pelo caminho normal — `claude plugin marketplace update linden-plugins` e `claude plugin update pipeline@linden-plugins --scope <escopo>`, depois `/reload-plugins` — porque o instalador compara com o que o marketplace oferece, não a ordem dos números; a skill `atualizar` continua valendo. Conferido na prática, de 2.12.0 para 1.12.0.
+
+## 1.30.1 — guarda dos comandos lê `bash -o pipefail -c` e `git checkout <arquivo>` (PR #84)
+
+Das issues #80 e #81, abertas por quem roda uma guarda parecida; conferidas reproduzindo cada caso contra o hook da 1.30.0.
+
+- **`bash -o pipefail -c '...'` não escapa mais da guarda** (defeito, issue #80): o `bash-guard.py` parava de procurar o `-c` na primeira palavra sem `-`, que era o valor do `-o`, e não lia o comando de dentro: um `--no-verify`, um push da principal no modo autônomo ou o servidor de dev em primeiro plano passavam. Agora pula o valor de `-o`, `-O`, `+o`, `+O` (também no fim de um grupo, como `-euo pipefail`), `--rcfile` e `--init-file`. Teste primeiro.
+- **`git checkout <arquivo>` não troca mais a branch que a guarda considera** (defeito, issue #81): o hook tomava a primeira palavra solta de um `git checkout` como a branch nova, então `git checkout . && git push origin` na principal, no modo autônomo, passava, e `git checkout main -- arquivo` numa branch de trabalho era negado à toa. Agora um `checkout` com `--`, ou de uma palavra que não é branch local nem remota aqui (um caminho, `.`, `HEAD`), não muda a branch. Teste primeiro.
+
+Número das duas: comandos que a guarda deixa passar com o mesmo efeito de um que ela nega (eram estes; devem ser 0).
+
+**Ao atualizar:** nada muda.
 
 ## 1.30.0 — só o push da branch principal pergunta (PR #83)
 

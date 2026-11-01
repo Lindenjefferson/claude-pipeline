@@ -13,7 +13,7 @@ master: as a refspec's target, with --all or --mirror, or with no refspec while 
 passes), a git merge while it is checked out (--abort and --quit pass), and a pull request merge (gh pr merge or
 glab mr merge or accept, also behind the tool's own options, and its api on pulls/<n>/merge or
 merge_requests/<n>/merge). A git checkout or switch earlier in the same command counts as what is checked out for
-the rest of it; a cd does not, so the check reads the session's directory. Pushing and merging the work branch pass;
+the rest of it (a checkout with -- or of a word that is no branch here restores files and changes nothing); a cd does not, so the check reads the session's directory. Pushing and merging the work branch pass;
 in supervised mode, or with no ledger, nothing here is denied, and a push of the default branch (the same reading)
 asks the user: approval 2 is theirs, and a push of a work branch passes, since a permission rule cannot tell them
 apart inside a compound command. With the user's
@@ -30,7 +30,7 @@ that sets core.hooksPath, a GIT_CONFIG_* assignment naming it (also through env 
 writes or unsets it. The command is read word by word as the shell splits it, after the heredoc bodies the shell
 only passes along are removed, so a flag quoted inside a commit message is a message, not a flag. Wrappers such as
 env, command, time, nohup, xargs, `!`, `{` and if/then are looked through; a command given to a shell's -c (also
--lc) or to eval is read the same way (a script the shell runs is a command of its own), and so is a command substitution outside quotes; one inside double quotes is
+-lc, and after options that take a value, such as -o pipefail) or to eval is read the same way (a script the shell runs is a command of its own), and so is a command substitution outside quotes; one inside double quotes is
 not read. Permission rules match the command as plain text and cannot tell a flag from a message, which is why this
 check lives here. A command that does not parse (an unbalanced quote) passes, since the shell refuses it too.
 
@@ -122,6 +122,7 @@ def runs_it(command, dev, powershell=False):
 
 
 SHELLS = {"sh", "bash", "zsh", "dash"}
+SHELL_VALUE = {"--rcfile", "--init-file"}  # with -o, -O, +o, +O (also ending a cluster): an option and its value
 PS_SHELLS = {"powershell", "pwsh", "cmd"}
 PS_LAUNCHERS = {"start-process", "saps", "start"}
 PS_SET_ENV = {"set-item", "si", "new-item", "ni", "set-variable", "sv"}
@@ -344,13 +345,16 @@ def simple_commands(command, powershell=False):
             if parts:
                 yield program_name(parts[0]), parts[1:], parts
         elif not powershell and program in SHELLS:
-            for position, word in enumerate(words[1:-1], 1):
-                if not word.startswith("-"):
-                    yield program, words[1:], segment  # a script the shell runs
-                    break
+            position = 1
+            while position < len(words) - 1:
+                word = words[position]
                 if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", word):
                     yield from simple_commands(words[position + 1], powershell)
                     break
+                if not word.startswith(("-", "+")):
+                    yield program, words[1:], segment  # a script the shell runs
+                    break
+                position += 2 if word in SHELL_VALUE or re.fullmatch(r"[-+][A-Za-z]*[oO]", word) else 1
         elif program in (PS_EVALS if powershell else EVALS):
             yield from simple_commands(" ".join(words[1:]), powershell)
         else:
@@ -489,15 +493,19 @@ def push_reaches(arguments, main, current):
     return False
 
 
-def switched_to(arguments):
-    """The branch a git checkout or git switch leaves checked out, or None when it is not a branch change."""
+def switched_to(name, arguments, cwd):
+    """The branch a git checkout or git switch leaves checked out, or None when it is not a branch change: a git
+    checkout with -- or of a word that is no local or remote branch here (a path, ., HEAD) restores files."""
+    if name == "checkout" and "--" in arguments:
+        return None
     for position, word in enumerate(arguments):
-        if word == "--":
-            return None
         if word in ("-b", "-B", "-c", "-C", "--orphan"):
             return arguments[position + 1] if position + 1 < len(arguments) else None
         if not word.startswith("-"):
-            return word
+            if name == "switch" or git_out(cwd, "rev-parse", "--verify", "--quiet", f"refs/heads/{word}") \
+                    or git_out(cwd, "for-each-ref", "--count=1", f"refs/remotes/*/{word}"):
+                return word
+            return None
     return None
 
 
@@ -532,7 +540,7 @@ def reaches_main(command, cwd, powershell=False):
             if autonomous and merges_pull_request(rest) and not gated(cwd, "HEAD", state):
                 return "deny"
         elif name in ("checkout", "switch"):
-            current = switched_to(rest) or current
+            current = switched_to(name, rest, cwd) or current
         elif main and name == "push" and push_reaches(rest, main, current):
             if not autonomous:
                 return "ask"
