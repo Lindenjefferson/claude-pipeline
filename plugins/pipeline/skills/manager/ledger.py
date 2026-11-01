@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Delivery ledger: one JSON line per agent run, grouped in cycles, so the manager sees what is pending.
 
+Commands
+--------
+
   start   --slug <slug> [--base <rev>] [--plan <path>] [--archive]       once per delivery
   start   --slug <slug> --next [--base <rev>]                 the next delivery's spec and plan, while this one codes
   add     --agent dev --task <id> --verdict <v> [--seconds <duration>] [--tokens N]
@@ -9,19 +12,23 @@
   add     --agent reviewer --task spec|plan|security --verdict PASS|FAIL ...
                                                               one round of the spec, plan or security review loop
   add     --agent qa ... --full | --interface                 the qa ran the full test command, or the interface
-  claim   --task <id> [--worktree <path>] [--origin <rev>]    a dev run dispatched; refused if the task is in flight or done
+  claim   --task <id> [--worktree <path>] [--origin <rev>]
+                                                        a dev run dispatched; refused if the task is in flight or done
   release --task <id>                                         frees a claim whose run was lost
   pause   --text <text>                                       the delivery stops; the text says what comes on return
   resume                                                      the work restarts; lists the claims still in flight
-  measure --agent dev|reviewer|qa [--task <id>] [--at <at>] [--seconds <duration>] [--tokens N]  numbers of a run added
+  measure --agent dev|reviewer|qa [--task <id>] [--at <at>] [--seconds <duration>] [--tokens N]
+                                                              numbers of a run added
   note    --text <text> [--validar --recommend <text>]        a decision taken on the user's behalf
   validate --id <id> --decision <text>                        the user's decision on a VALIDAR item (V1, V2...)
-  waive   --agent reviewer|qa [--task spec|plan] --reason <text>   accepts the open findings of that agent's latest FAIL
+  waive   --agent reviewer|qa [--task spec|plan] --reason <text>
+                                                              accepts the open findings of that agent's latest FAIL
   extend  --reason <text> [--task spec|plan]                  the user lets the fixes, or that review loop, go on
   plan    --path <path>                                       the approved plan, when start ran before it existed
   scope   --cycle <name> --tasks <id,id,...>                  the tasks of one plan cycle, in plan order
   mode    autonomous [--until <HH:MM or ISO time>]|supervised  the user turned autonomous mode on, or is back
-  approve --until <x.y.z> --conditions <text> | --revoke     the user's standing approval to publish, up to that version
+  approve --until <x.y.z> --conditions <text> | --revoke
+                                                           the user's standing approval to publish, up to that version
   defer   --text <text> --recommend <text>                    an item left for later; prints its id (D1, D2...)
   sensitive --reason <text>                                   the delivery touches a sensitive domain (step 0)
   resolve --id <id> --decision <text>                         the final decision on a deferred item
@@ -30,110 +37,194 @@
   gate    --verdict READY|NOT_READY [--failed <check,...>]    a gate run's verdict (gate.py records it)
   capacity [--json]                                           free memory and disk, and the parallel copies that fit
 
+Claims, leftover copies and pauses
+----------------------------------
+
 A claim is written when the dev is dispatched and freed by the dev's add (or release); status lists the tasks in
 flight and the gate waits for them, so a manager resuming after a compaction sees which runs it still owes a report.
 claim refuses a task that is in flight or already DONE in the current cycle, so one task never runs twice by mistake.
 status lists each copy left over, pending (step leftover, with its action) until it is gone, so the gate waits: a
 worktree under ../_temp/<project>-worktrees/ (project being the main worktree's folder) or .claude/worktrees/ with no
-claim, its HEAD in the delivery head and nothing uncommitted, a folder of ../_temp/<project>-worktrees/ with no .git, and
-a local branch integrated in this delivery (in the head, not in the base) that is neither the current one nor the branch
-of a claimed worktree or of one with uncommitted work (the next delivery's spec and plan before its start);
-status --json gives them as leftovers: {kind worktree|folder|branch, path, branch, action}.
---worktree (an existing directory) and --origin (a commit, resolved to its hash there) are kept with the claim; status
-shows them and, when the delivery head is no longer the origin, names the head (a fact: it moves with every
-integration). A claim's tip is its worktree's current HEAD (null with no worktree or folder): resume prints
-"- <task> in <worktree> at <tip>", the commit the dev's brief names, since a wip commit moves the work past the origin.
-pause is refused when it is already paused or a claimed worktree has uncommitted work (commit it there as
-"wip: <task> ..."), and until resume status asks for it, so the gate waits; the claims stay held, as each task
-continues from its wip commit. Every pause also shows in notes as "paused: <text>", in ledger order, after resume too.
+claim, its HEAD in the delivery head and nothing uncommitted, a folder of ../_temp/<project>-worktrees/ with no .git,
+and a local branch integrated in this delivery (in the head, not in the base) that is neither the current one nor the
+branch of a claimed worktree or of one with uncommitted work (the next delivery's spec and plan before its start);
+status --json gives them as leftovers: {kind worktree|folder|branch, path, branch, action}. --worktree (an existing
+directory) and --origin (a commit, resolved to its hash there) are kept with the claim; status shows them and, when
+the delivery head is no longer the origin, names the head (a fact: it moves with every integration). A claim's tip is
+its worktree's current HEAD (null with no worktree or folder): resume prints "- <task> in <worktree> at <tip>", the
+commit the dev's brief names, since a wip commit moves the work past the origin. pause is refused when it is already
+paused or a claimed worktree has uncommitted work (commit it there as "wip: <task> ..."), and until resume status asks
+for it, so the gate waits; the claims stay held, as each task continues from its wip commit. Every pause also shows in
+notes as "paused: <text>", in ledger order, after resume too.
+
+Full and interface qa runs
+--------------------------
+
 add --full on a qa run marks a run of the full suite (every test line of Comandos and the entire interface suite);
-status --json gives the latest as full_qa. add --interface on a qa run marks one that ran the "Verificação de interface"
-command on at least one path. When the CLAUDE.md at the ledger's root gives that line a command (not a _(...)_
-placeholder), the first cycle closes only once one of its qa runs has --interface or --full: a machine that cannot run
-it is a block to make ready, not a VALIDAR. Later cycles do not need it.
+status --json gives the latest as full_qa. add --interface on a qa run marks one that ran the "Verificação de
+interface" command on at least one path. When the CLAUDE.md at the ledger's root gives that line a command (not a
+_(...)_ placeholder), the first cycle closes only once one of its qa runs has --interface or --full: a machine that
+cannot run it is a block to make ready, not a VALIDAR. Later cycles do not need it.
 
-A cycle is a few dev tasks followed by one reviewer pass over their diff and one qa pass; the two run in parallel.
-It closes when the latest reviewer PASS came after the latest dev run, qa PASSed after the cycle's latest regular
-task, and qa ran again after every fix of a blocking (FAIL) finding. The next regular dev run opens the next cycle.
-A fix round (task fix-N) and the cleanup task (task cleanup) stay in the current cycle, even a closed one: they need
-a reviewer pass, and qa again only when a FAIL came before them. Every finding carries its origin (design,
-assumption, plan, execution, environment); --report keeps the path of the file the manager saved the agent's report
-in, so a FAIL still open names it, and is refused when no file is there (an agent never saves its own report: the manager saves
-the report, then adds the run naming it), read from the current directory or from the ledger's project root.
---from-agent <agent id> saves it instead: the agent's final report (its last SubagentHandback message, else its last
-text) is read from its transcript, <config>/projects/*/*/subagents/agent-<id>.jsonl under CLAUDE_CONFIG_DIR and
-~/.claude, written to reports/<slug>/<agent>-<id>.md beside the ledger and kept as the run's --report, so a report
-the manager's context lost in a compaction is still on disk; with no transcript it is refused, naming --report; a qa --report must hold the Verdict:, Commit:,
-Interface: and Processes: lines of qa.md's report (Verdict the one given, Commit a commit here), and the run
-stores that commit as tested, and stale when it is not the latest dev run's head or later (a run held for a later plan cycle left out): a qa dispatched before a
-fix counts only for what came before it, so its FAIL still asks for the fix and the re-run is still asked for; --seconds takes 90, 12m, 1h5m or 12m30s, and --seconds and --tokens are optional, from the
-agent's completion notification when it already arrived, never an estimate (a run without them goes unmeasured, its
-span counting from its timestamp in the cycle's elapsed, which is null when that span comes to zero, and 0 is refused). measure fills the numbers
-of a run whose completion notification arrived after its add, as its own line naming that run: with one run of that
-agent and task still unmeasured it takes them by itself, and with more than one it refuses and lists their at, which
---at then names (a waived run takes none, and a run already measured is refused) - guessing would move the numbers of
-every later notification by one run, for the whole delivery. No dispatch ever waits for a notification. status lists
-each run still with no seconds (unmeasured: agent, task, at, oldest first, a waived run left out) with the measure --at
-that fills it, so a notification that arrived after a compaction is never lost. status gives each claim in flight its
-waiting_minutes, partial_report (true from 90 minutes on: its line asks for a partial report by SendMessage) and, for a
-claim with no worktree whose delivery head moved since, committed: the dev commits straight on the branch, so its work
-may be in and its report waiting to be added. A deferred item with no decision keeps the delivery from the gate. Everything that waits for the user carries --recommend, what the manager would decide and why, so every list of what waits (status, the pane, validar) recommends without being asked: defer requires it, note takes it with --validar and refuses it without. An entry of an earlier version, with no recommendation, reads as before. start --archive moves an existing delivery to
-ledger-<old-slug>.jsonl next to the ledger first. start --next opens the next delivery in next-<slug>.jsonl beside
-the ledger, while the current one is still coding; every command run with --ledger on that file reads it as in
-preparation: it takes the spec and plan review rounds (add --task spec|plan, waive and extend of those loops), a
-discovery run, measure, note, defer, resolve, validate, plan and sensitive, and refuses the rest (a cycle's review),
-naming the promotion. Once its plan is approved (plan --path), it also takes the claim of a task that collides with
-nothing of the current delivery (the ledger.jsonl beside it), and that task's dev run and release: every item of the
-task's Touches: line (each `quoted` path, and each other comma- or semicolon-separated item)
-must differ from every file the current
-delivery changed (<its base>..HEAD) and from every Touches: item of its tasks not done (its scope, and its claims in
-flight), a folder ending in / colliding with what is inside it; a task with no Touches: line is refused, and so is
-each collision, naming it. The run stays in the preparation and goes with it into the promotion; its own status is never ready for the gate and leaves leftovers and disk to the current one. The current delivery's status lists
-each one as advice, never pending (next: {slug, ledger, pending, validar, claims}: the pending of its review loops, its claims in
-flight and its open
-VALIDAR items, validated with --ledger on its file). start of a slug
-waiting in next-<slug>.jsonl promotes it: after the archive, that file becomes the ledger with its rounds, notes and
-deferred items, its start gets the new --base (and --plan, when given) and the time it was promoted, and the file goes.
-metrics.time.delivery.queued is the wait in the queue, from the last entry before the promotion to the promotion,
-left out of elapsed like a pause. start also carries each item the latest quality report (the docs/quality-reports/*.md git added last at the ledger's project root, else the last by name) moved to a later delivery, a line of its Deferred section whose decision, after the first arrow, starts with "moved to" in any case, as a deferred item of the new delivery (numbered after the ones a promoted preparation brought), recommending that decision, so it needs a decision before the gate and is never forgotten. An item whose decision names another delivery (a slug right after "moved to", then a colon) is passed on instead: deferred and resolved with that same decision, so the next report carries it on and only the delivery it names decides it. Its text keeps only the last "(moved here by ...)". --check exits 1 while anything is pending, so the gate can rely on
-it. A cycle whose reviewer or qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on
-up to three, then the delivery stops. extend, once status asks the user or stops, records the user's decision to go
-on (a note, VALIDAR in autonomous mode): the current cycle gets one more fix round, and a reviewer or qa FAIL after
-it asks or stops again; it never carries to the next cycle. extend --task spec|plan is the same for that review loop,
-which runs one more round (also when status says waive: the user overrules it), and each extension is read only by the loop (or the cycle) it was given to. With scope recorded, a task of a later plan cycle may be
-claimed and added while the current cycle is open: its run is held ("after": the plan cycle), out of this cycle, and
-opens the next one once this closes, so the next cycle's range starts at the head that closed this one. waive is refused when the dev ran after that FAIL (the fix needs its review); it
-records the reason as a note and counts as that agent's PASS at the head it reviewed. Notes marked --validar (and
-waivers in autonomous mode) are listed apart, numbered V1, V2... in the order written, for the user to confirm on
-return; validate records the decision, and status lists the items still waiting apart from the decided ones. A
-ledger with no mode entry is supervised.
+Cycles and fix rounds
+---------------------
 
-A run's head is --head when given, else the end of the Range: line of its report (a reviewer's) or the Commit: its
-qa report tested, else the HEAD of the ledger's checkout, which may be another delivery's branch.
+A cycle is a few dev tasks followed by one reviewer pass over their diff and one qa pass; the two run in parallel. It
+closes when the latest reviewer PASS came after the latest dev run, qa PASSed after the cycle's latest regular task,
+and qa ran again after every fix of a blocking (FAIL) finding. The next regular dev run opens the next cycle. A fix
+round (task fix-N) and the cleanup task (task cleanup) stay in the current cycle, even a closed one: they need a
+reviewer pass, and qa again only when a FAIL came before them.
+
+Findings and reports
+--------------------
+
+Every finding carries its origin (design, assumption, plan, execution, environment); --report keeps the path of the
+file the manager saved the agent's report in, so a FAIL still open names it, and is refused when no file is there (an
+agent never saves its own report: the manager saves the report, then adds the run naming it), read from the current
+directory or from the ledger's project root. --from-agent <agent id> saves it instead: the agent's final report (its
+last SubagentHandback message, else its last text) is read from its transcript,
+<config>/projects/*/*/subagents/agent-<id>.jsonl under CLAUDE_CONFIG_DIR and ~/.claude, written to
+reports/<slug>/<agent>-<id>.md beside the ledger and kept as the run's --report, so a report the manager's context
+lost in a compaction is still on disk; with no transcript it is refused, naming --report; a qa --report must hold the
+Verdict:, Commit:, Interface: and Processes: lines of qa.md's report (Verdict the one given, Commit a commit here),
+and the run stores that commit as tested, and stale when it is not the latest dev run's head or later (a run held for
+a later plan cycle left out): a qa dispatched before a fix counts only for what came before it, so its FAIL still asks
+for the fix and the re-run is still asked for; --seconds takes 90, 12m, 1h5m or 12m30s, and --seconds and --tokens are
+optional, from the agent's completion notification when it already arrived, never an estimate (a run without them goes
+unmeasured, its span counting from its timestamp in the cycle's elapsed, which is null when that span comes to zero,
+and 0 is refused).
+
+Measuring runs
+--------------
+
+measure fills the numbers of a run whose completion notification arrived after its add, as its own line naming that
+run: with one run of that agent and task still unmeasured it takes them by itself, and with more than one it refuses
+and lists their at, which --at then names (a waived run takes none, and a run already measured is refused) - guessing
+would move the numbers of every later notification by one run, for the whole delivery. No dispatch ever waits for a
+notification. status lists each run still with no seconds (unmeasured: agent, task, at, oldest first, a waived run
+left out) with the measure --at that fills it, so a notification that arrived after a compaction is never lost.
+
+status gives each claim in flight its waiting_minutes, partial_report (true from 90 minutes on: its line asks for a
+partial report by SendMessage) and, for a claim with no worktree whose delivery head moved since, committed: the dev
+commits straight on the branch, so its work may be in and its report waiting to be added.
+
+Deferred items and recommendations
+----------------------------------
+
+A deferred item with no decision keeps the delivery from the gate. Everything that waits for the user carries
+--recommend, what the manager would decide and why, so every list of what waits (status, the pane, validar) recommends
+without being asked: defer requires it, note takes it with --validar and refuses it without. An entry of an earlier
+version, with no recommendation, reads as before.
+
+Archive and the next delivery
+-----------------------------
+
+start --archive moves an existing delivery to ledger-<old-slug>.jsonl next to the ledger first. start --next opens the
+next delivery in next-<slug>.jsonl beside the ledger, while the current one is still coding; every command run with
+--ledger on that file reads it as in preparation: it takes the spec and plan review rounds (add --task spec|plan,
+waive and extend of those loops), a discovery run, measure, note, defer, resolve, validate, plan and sensitive, and
+refuses the rest (a cycle's review), naming the promotion. Once its plan is approved (plan --path), it also takes the
+claim of a task that collides with nothing of the current delivery (the ledger.jsonl beside it), and that task's dev
+run and release: every item of the task's Touches: line (each `quoted` path, and each other comma- or
+semicolon-separated item) must differ from every file the current delivery changed (<its base>..HEAD) and from every
+Touches: item of its tasks not done (its scope, and its claims in flight), a folder ending in / colliding with what is
+inside it; a task with no Touches: line is refused, and so is each collision, naming it. The run stays in the
+preparation and goes with it into the promotion; its own status is never ready for the gate and leaves leftovers and
+disk to the current one. The current delivery's status lists each one as advice, never pending (next: {slug, ledger,
+pending, validar, claims}: the pending of its review loops, its claims in flight and its open VALIDAR items, validated
+with --ledger on its file).
+
+Promotion
+---------
+
+start of a slug waiting in next-<slug>.jsonl promotes it: after the archive, that file becomes the ledger with its
+rounds, notes and deferred items, its start gets the new --base (and --plan, when given) and the time it was promoted,
+and the file goes. metrics.time.delivery.queued is the wait in the queue, from the last entry before the promotion to
+the promotion, left out of elapsed like a pause.
+
+Items moved from the quality report
+-----------------------------------
+
+start also carries each item the latest quality report (the docs/quality-reports/*.md git added last at the ledger's
+project root, else the last by name) moved to a later delivery, a line of its Deferred section whose decision, after
+the first arrow, starts with "moved to" in any case, as a deferred item of the new delivery (numbered after the ones a
+promoted preparation brought), recommending that decision, so it needs a decision before the gate and is never
+forgotten. An item whose decision names another delivery (a slug right after "moved to", then a colon) is passed on
+instead: deferred and resolved with that same decision, so the next report carries it on and only the delivery it
+names decides it. Its text keeps only the last "(moved here by ...)".
+
+Pending check and fix-round limits
+----------------------------------
+
+--check exits 1 while anything is pending, so the gate can rely on it.
+
+A cycle whose reviewer or qa still fails after a fix round asks the user; in autonomous mode the fix rounds go on up
+to three, then the delivery stops. extend, once status asks the user or stops, records the user's decision to go on (a
+note, VALIDAR in autonomous mode): the current cycle gets one more fix round, and a reviewer or qa FAIL after it asks
+or stops again; it never carries to the next cycle. extend --task spec|plan is the same for that review loop, which
+runs one more round (also when status says waive: the user overrules it), and each extension is read only by the loop
+(or the cycle) it was given to.
+
+Tasks of a later plan cycle
+---------------------------
+
+With scope recorded, a task of a later plan cycle may be claimed and added while the current cycle is open: its run is
+held ("after": the plan cycle), out of this cycle, and opens the next one once this closes, so the next cycle's range
+starts at the head that closed this one.
+
+Waivers and VALIDAR items
+-------------------------
+
+waive is refused when the dev ran after that FAIL (the fix needs its review); it records the reason as a note and
+counts as that agent's PASS at the head it reviewed. Notes marked --validar (and waivers in autonomous mode) are
+listed apart, numbered V1, V2... in the order written, for the user to confirm on return; validate records the
+decision, and status lists the items still waiting apart from the decided ones. A ledger with no mode entry is
+supervised.
+
+Run head, heartbeat and gate runs
+---------------------------------
+
+A run's head is --head when given, else the end of the Range: line of its report (a reviewer's) or the Commit: its qa
+report tested, else the HEAD of the ledger's checkout, which may be another delivery's branch.
+
 status --tick, the heartbeat's call, also records a tick; in autonomous mode, status --json gives heartbeat: {minutes,
 since} once the latest tick (or the latest mode entry, before the first tick) is over 30 minutes old, else null, and
-the text says to check the heartbeat with CronList. It is advice, never pending. gate records a gate.py run (verdict,
-failed checks); status --json lists them as gates, for the quality report and the analysis of where the time went.
+the text says to check the heartbeat with CronList. It is advice, never pending.
 
-approve records the user's standing approval of merge and push, across deliveries, in approval.json beside the
-ledger ({until, conditions, at}; --revoke removes it); status --json gives it as approval, or null. bash-guard.py reads
-it in autonomous mode: a publish passes only when the commit it publishes has the tree of the commit that added the
+gate records a gate.py run (verdict, failed checks); status --json lists them as gates, for the quality report and the
+analysis of where the time went.
+
+Standing approval to publish
+----------------------------
+
+approve records the user's standing approval of merge and push, across deliveries, in approval.json beside the ledger
+({until, conditions, at}; --revoke removes it); status --json gives it as approval, or null. bash-guard.py reads it in
+autonomous mode: a publish passes only when the commit it publishes has the tree of the commit that added the
 delivery's quality report, that report's head differs from it only in docs/quality-reports/, and its version is at
-most --until (the gate writes the report on READY only). The conditions are the user's text, which the manager
-checks before publishing and the status shows.
+most --until (the gate writes the report on READY only). The conditions are the user's text, which the manager checks
+before publishing and the status shows.
 
-A reviewer run with --task spec or plan is one round of that review loop, before the code: it is no part of any
-cycle, and its findings, time and tokens are counted apart in the metrics. --task security is the security scan of a
+Spec, plan and security review loops
+------------------------------------
+
+A reviewer run with --task spec or plan is one round of that review loop, before the code: it is no part of any cycle,
+and its findings, time and tokens are counted apart in the metrics. --task security is the security scan of a
 sensitive delivery, a loop of the same kind run after the last cycle (its open findings, after the 3rd FAIL, are
-deferred with a decision instead of carried to the plan). While the latest round is a FAIL, status
-asks for the next round, on the range from the head the failed round recorded (the corrections only). A loop is the
-rounds since that
-review's latest PASS (a waiver included), so a document reviewed again after a change of scope starts at round 1. After
-the 3rd FAIL with no Critical open, in either mode, status says waive (carry the open findings to the plan's Errata, or
-to the plan's brief for a spec, and waive --task) without asking the user; with a Critical open it asks the user, or
-stops the delivery in autonomous mode. waive --task closes the loop. sensitive --reason marks a delivery of a
-sensitive domain: once the cycle is closed and until a security round is added (or waived), status asks for the scan
-(step security, with the reason), so the gate waits for it.
+deferred with a decision instead of carried to the plan).
+
+While the latest round is a FAIL, status asks for the next round, on the range from the head the failed round recorded
+(the corrections only). A loop is the rounds since that review's latest PASS (a waiver included), so a document
+reviewed again after a change of scope starts at round 1.
+
+After the 3rd FAIL with no Critical open, in either mode, status says waive (carry the open findings to the plan's
+Errata, or to the plan's brief for a spec, and waive --task) without asking the user; with a Critical open it asks the
+user, or stops the delivery in autonomous mode. waive --task closes the loop.
+
+sensitive --reason marks a delivery of a sensitive domain: once the cycle is closed and until a security round is
+added (or waived), status asks for the scan (step security, with the reason), so the gate waits for it.
+
+Unfilled settings
+-----------------
 
 status --json gives settings: {unfilled, together}. unfilled lists, in file order, each "- " line still holding a
 template placeholder _(...)_ in the sections that change speed or cost: Execução em paralelo of CLAUDE.md, and
@@ -142,21 +233,31 @@ text before its colon); a missing CLAUDE.local.md is one {file, section: null, l
 nothing. together, while the parallel section of CLAUDE.md is unfilled, is how many tasks of the current plan cycle
 are running or ready (no dependency left), when two or more; else null. It is advice, never pending.
 
+Status data and plan progress
+-----------------------------
+
 status --json also gives the pending items as data and where the delivery is in its plan. claims: one {task, at,
-worktree, origin, tip, head_moved} per task in flight; paused: {text, at} or null; full_qa: the latest qa run added with
---full, or null. from: the commit the current cycle's diff starts at, for the reviewer's and qa's range: the base for
-cycle 1, else the head the run that closed the previous cycle recorded (a commit made after it and before this cycle's
-first task, such as an errata, falls in the range too). steps: one {"step": resume|dev|reviewer|qa|fix|review|waive|ask|
-stop|decide, ...} per pending item, with its detail (task and verdict, agent, open findings and the report path, a qa
-re-run, a review round with its from and report, a review loop to waive, a deferred id and text, the pause text); a task in flight is no step. scope:
-the plan cycles recorded with scope, in the order first recorded (a later scope for a cycle replaces its tasks in place, an empty one removes
-it), each with the tasks that have no DONE run yet; the current cycle (the one holding the task in flight once the
-open cycle has closed, else the latest task); and how many tasks and cycles are left (a cycle whose tasks are done
-counts until it closes). scope.tasks gives each task of the scope, in order, with its cycle, goal and depends (the
-Goal: and Depends on: lines of its section in the plan, the heading that names the task down to the next heading of
-its level or above; null when the plan or the line is missing) and its state: done, running (with minutes), blocked
-(a task of the scope its depends names is not done) or todo; scope.median_task_seconds is the median time of the
-regular dev tasks done and measured, null before the first. With no scope recorded, scope is null.
+worktree, origin, tip, head_moved} per task in flight; paused: {text, at} or null; full_qa: the latest qa run added
+with --full, or null. from: the commit the current cycle's diff starts at, for the reviewer's and qa's range: the base
+for cycle 1, else the head the run that closed the previous cycle recorded (a commit made after it and before this
+cycle's first task, such as an errata, falls in the range too).
+
+steps: one {"step": resume|dev|reviewer|qa|fix|review|waive|ask| stop|decide, ...} per pending item, with its detail
+(task and verdict, agent, open findings and the report path, a qa re-run, a review round with its from and report, a
+review loop to waive, a deferred id and text, the pause text); a task in flight is no step.
+
+scope: the plan cycles recorded with scope, in the order first recorded (a later scope for a cycle replaces its tasks
+in place, an empty one removes it), each with the tasks that have no DONE run yet; the current cycle (the one holding
+the task in flight once the open cycle has closed, else the latest task); and how many tasks and cycles are left (a
+cycle whose tasks are done counts until it closes). scope.tasks gives each task of the scope, in order, with its
+cycle, goal and depends (the Goal: and Depends on: lines of its section in the plan, the heading that names the task
+down to the next heading of its level or above; null when the plan or the line is missing) and its state: done,
+running (with minutes), blocked (a task of the scope its depends names is not done) or todo; scope.median_task_seconds
+is the median time of the regular dev tasks done and measured, null before the first. With no scope recorded, scope is
+null.
+
+Autonomous mode until a time
+----------------------------
 
 mode autonomous --until records the time the user is back: HH:MM is the next time this machine's clock shows it
 (tomorrow when it is past today), or an ISO time with its offset; a time already past, or --until in supervised mode,
@@ -168,59 +269,86 @@ reached or when no run fits; done_since is {tasks, runs}: the dev tasks done and
 for the morning summary. The text names what does not fit, not to be dispatched, and, once over, says to pause. It is
 advice, never pending, like usage.
 
+Account usage
+-------------
+
 status also reads usage.json from the ledger's folder (the subscription windows the mod writes: five_hour and
 seven_day, each {percent, resets_at}; a window past its resets_at, a missing or broken file and unknown fields are
 ignored; a null resets_at counts as valid; a JSON error is retried once after 200 ms, as the mod's write is not
-atomic; a file still broken is named once in the text) and the optional thresholds
-in CLAUDE.local.md at the root of the ledger's worktree (Economia a partir de quanto uso, em %, default 60; Pausa a
-partir de quanto uso da janela de 5 horas, em %, default 85; Pausa a partir de quanto uso da semana, em %, default
-95; Sempre econômico, default não). A value counts only when it starts with a backtick and holds a number from 1 to
-100 (sim or yes for Sempre econômico); a placeholder such as _(...)_ keeps the default. status --json gives usage:
-{windows, economy, wait} or null: economy is the reason (a window at or above the economy threshold, or Sempre
-econômico) or null; wait is the window whose percent plus its margin is at or above its pause threshold (the one that resets
-later when both are) or null: {window, percent, margin, resets_at, seconds_left}. The margin is the largest of the
-last 5 positive deltas between consecutive usage snapshots of the runs (a negative delta is a reset, skipped; 0 with
-none), the room the next run may use. seconds_left, from now, is null when resets_at is; the text line ends with
-"until <resets_at> (in 2h13m)". It is advice for the manager, never pending: pending, steps and ready_for_gate do not change. Every add records
-the valid windows' percent as usage.
+atomic; a file still broken is named once in the text) and the optional thresholds in CLAUDE.local.md at the root of
+the ledger's worktree (Economia a partir de quanto uso, em %, default 60; Pausa a partir de quanto uso da janela de 5
+horas, em %, default 85; Pausa a partir de quanto uso da semana, em %, default 95; Sempre econômico, default não). A
+value counts only when it starts with a backtick and holds a number from 1 to 100 (sim or yes for Sempre econômico); a
+placeholder such as _(...)_ keeps the default.
+
+status --json gives usage: {windows, economy, wait} or null: economy is the reason (a window at or above the economy
+threshold, or Sempre econômico) or null; wait is the window whose percent plus its margin is at or above its pause
+threshold (the one that resets later when both are) or null: {window, percent, margin, resets_at, seconds_left}.
+
+The margin is the largest of the last 5 positive deltas between consecutive usage snapshots of the runs (a negative
+delta is a reset, skipped; 0 with none), the room the next run may use. seconds_left, from now, is null when resets_at
+is; the text line ends with "until <resets_at> (in 2h13m)". It is advice for the manager, never pending: pending,
+steps and ready_for_gate do not change. Every add records the valid windows' percent as usage.
+
+Diff size and line metrics
+--------------------------
 
 add --agent dev also stores diff {files, added, removed}, the size of the task's own commits (git diff --numstat; a
 binary file counts as one file and no line). A worktree run is measured from the merge-base of the delivery head and
 the worktree's tip (the claim's origin when that fails or is the tip itself, a task integrated by fast-forward before
-its add), so a worktree rebased onto
-later integrations counts only its own commits, to the tip, which the run stores as tip; the next dev run of the
-same task starts at that stored tip when it is an ancestor of the new one and later than the merge-base, so wip
-commits count once. A run with no worktree (or one that is gone) is measured from the head its live claim stored at
-dispatch (claim stores head, the delivery head), so the spec, plan and errata commits are never charged; with no
-claim head (an older ledger, or a run with no claim) from the head the previous run of any agent stored, the
-delivery base for the first. On any git failure nothing is stored and the add goes on.
-status --json gives metrics.lines: tasks {task: added+removed over its dev runs}, total, follow_up
-(fix-N and cleanup), share (follow_up/total, 2 decimals, null at 0) and unmeasured (dev runs with no diff, as every
-run of an older ledger); and metrics.verdicts: {needs_context, blocked} over the dev runs. It is advice, never pending: pending, steps and
-ready_for_gate do not change. metrics.time.delivery is the delivery's clock: {elapsed, from start to the latest
-measured run with the pauses left out; paused; agents, the union of the measured runs, the time some agent was
-running; share, agents over elapsed}, null before the first measured run.
+its add), so a worktree rebased onto later integrations counts only its own commits, to the tip, which the run stores
+as tip; the next dev run of the same task starts at that stored tip when it is an ancestor of the new one and later
+than the merge-base, so wip commits count once. A run with no worktree (or one that is gone) is measured from the head
+its live claim stored at dispatch (claim stores head, the delivery head), so the spec, plan and errata commits are
+never charged; with no claim head (an older ledger, or a run with no claim) from the head the previous run of any
+agent stored, the delivery base for the first. On any git failure nothing is stored and the add goes on.
+
+status --json gives metrics.lines: tasks {task: added+removed over its dev runs}, total, follow_up (fix-N and
+cleanup), share (follow_up/total, 2 decimals, null at 0) and unmeasured (dev runs with no diff, as every run of an
+older ledger); and metrics.verdicts: {needs_context, blocked} over the dev runs. It is advice, never pending: pending,
+steps and ready_for_gate do not change.
+
+Delivery clock
+--------------
+
+metrics.time.delivery is the delivery's clock: {elapsed, from start to the latest measured run with the pauses left
+out; paused; agents, the union of the measured runs, the time some agent was running; share, agents over elapsed},
+null before the first measured run.
+
+Capacity
+--------
 
 capacity answers, before a dispatch that prepares or verifies, how many parallel copies fit: the free memory (Windows
 GlobalMemoryStatusEx, Linux MemAvailable; PIPELINE_CAPACITY_MEMORY_GB and PIPELINE_CAPACITY_DISK_GB override the
 measure, and an empty or invalid value counts as unknown) and the free disk of the worktree root, against the Execução
 em paralelo lines of CLAUDE.local.md (peak of a copy, memory and disk; free-memory floor; heavy copies with the user
-on the machine, which caps copies in supervised mode only; 0 is unknown). The template label wins; else the section's
-free text: "mais de ~N GB livres" is the floor and "<N> cópia(s) pesada(s)" the heavy limit; the disk peak stops at the
-first sentence end and "medir" is unknown. With the floor unknown, dispatch is null (exit 0) and the reason says which
-line to fill. The reason names an env override that replaced a measure. copies is the largest n with free - n*peak >= max(peak,
-floor), so one more copy and the floor stay free (null when the peak or the memory is unknown); dispatch is false below
-the floor. It needs no delivery, exits 1 when dispatch is false, and --json gives memory_free_gb, disk_free_gb, peak_gb,
-disk_peak_gb, floor_gb, heavy_limit, autonomous, dispatch, copies and reason.
+on the machine, which caps copies in supervised mode only; 0 is unknown).
+
+The template label wins; else the section's free text: "mais de ~N GB livres" is the floor and "<N> cópia(s)
+pesada(s)" the heavy limit; the disk peak stops at the first sentence end and "medir" is unknown. With the floor
+unknown, dispatch is null (exit 0) and the reason says which line to fill. The reason names an env override that
+replaced a measure.
+
+copies is the largest n with free - n*peak >= max(peak, floor), so one more copy and the floor stay free (null when
+the peak or the memory is unknown); dispatch is false below the floor. It needs no delivery, exits 1 when dispatch is
+false, and --json gives memory_free_gb, disk_free_gb, peak_gb, disk_peak_gb, floor_gb, heavy_limit, autonomous,
+dispatch, copies and reason.
+
+Free disk
+---------
+
 status --json gives disk: {free_gb, high_gb, dropped_gb, floor_gb, allowed_gb, warning}, or null when the free disk is
 unknown (PIPELINE_CAPACITY_DISK_GB overrides it, as in capacity). high_gb is the delivery's highest reading, kept in
 disk.json beside the ledger (a new slug starts over); warning names a free disk below the "Disco livre mínimo" line of
 CLAUDE.local.md, or a drop from high_gb larger than the claims in flight (at least one) times the disk peak, pointing
 at what verification writes outside the worktree and at leftover copies. It is advice, never pending, like usage.
 
-Without --ledger, the ledger is .superpowers/ledger.jsonl at the root of the current worktree, or of the main
-worktree when the current one has none (a task worktree), except for start, which always uses the current one. A
-line that is not JSON stops every command with its line number, so a truncated write is never skipped silently."""
+Ledger location
+---------------
+
+Without --ledger, the ledger is .superpowers/ledger.jsonl at the root of the current worktree, or of the main worktree
+when the current one has none (a task worktree), except for start, which always uses the current one. A line that is
+not JSON stops every command with its line number, so a truncated write is never skipped silently."""
 import argparse
 import datetime
 import json
