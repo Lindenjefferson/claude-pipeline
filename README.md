@@ -12,11 +12,9 @@ O objetivo é que nada errado saia da máquina sem que você precise acompanhar 
 - **Independente de stack.** Nada de framework, fornecedor ou linguagem. Regra de stack ou de projeto mora no `CLAUDE.md` e no `docs/lessons.md` de cada projeto.
 - **Enxuto.** Toda mudança remove o que ficou desnecessário, duplicado ou sem uso. Uma regra geral curta vale mais que várias específicas.
 
-O que rege o plugin — as premissas que valem tanto para mudá-lo como para o que ele entrega — e as regras para mudá-lo estão no [`CLAUDE.md`](CLAUDE.md).
-
 ## Como funciona
 
-Cada entrega tem um *slug*, o nome curto que vai na branch e nos arquivos dela em `docs/`. O registro do que cada agente fez (o *ledger*) e os relatórios ficam em `.superpowers/`, fora do git. As decisões que o manager tomou por você, quando não pôde perguntar, ficam na lista *VALIDAR*, que você confere depois.
+Cada entrega tem um *slug*, o nome curto que vai na branch e nos arquivos dela em `docs/`. O registro do que cada agente fez (o *ledger*) e os relatórios ficam em `.superpowers/`, fora do git (a pasta de trabalho que ele divide com o plugin `superpowers`). As decisões que o manager tomou por você, quando não pôde perguntar, ficam na lista *VALIDAR*, que você confere depois.
 
 ```
 tamanho → (spec) → plano ✋ → ciclos: dev por tarefa (as independentes em paralelo)
@@ -42,7 +40,7 @@ Com você ausente, o [modo autônomo](plugins/pipeline/skills/manager/references
 - no Windows, o Git Bash, onde rodam os hooks e os comandos do gate;
 - Windows ou Linux (o macOS ainda não foi testado).
 
-Os quatro plugins de que ele depende (`superpowers`, `frontend-design`, `claude-code-setup` e `claude-security`, do marketplace oficial) vêm declarados como dependência, e o kickoff avisa quando falta um e diz como instalar.
+Os quatro plugins de que ele depende (`superpowers`, `frontend-design`, `claude-code-setup` e `claude-security`, do marketplace oficial) são instalados junto com ele, e o kickoff confere que estão lá.
 
 **Instalar:**
 
@@ -55,7 +53,7 @@ cd meu-projeto
 claude plugin install pipeline@linden-plugins --scope local
 ```
 
-**Usar:** abra o Claude Code na pasta do projeto e digite:
+**Usar:** abra o Claude Code na pasta do projeto, ligue o modo de permissão `auto` do Claude Code (sem ele, a entrega para em cada prompt de permissão) e digite:
 
 1. `prepara este projeto com o kickoff` (ou `/pipeline:kickoff`): uma vez, cria a estrutura;
 2. o que você quer entregar, como `implementar a exportação do extrato em CSV` ou `corrigir o bug do login`: o **manager** conduz do plano ao gate.
@@ -65,8 +63,6 @@ Para tirar de um projeto: `claude plugin uninstall pipeline@linden-plugins --sco
 Os scripts leem algumas seções do `CLAUDE.md` do projeto pelo título, em português ("Comandos", "Testes", "Versão" e as outras que o kickoff escreve): mantenha esses títulos como estão. O resto do arquivo, e a conversa com o Claude, podem ser em qualquer língua.
 
 Noutro computador, num projeto que já usa o plugin: clone, instale o plugin e peça o kickoff, que prepara a máquina pelo `CLAUDE.md` do projeto.
-
-Para desenvolver o plugin, use um clone local (`claude plugin marketplace add ./claude-pipeline`), carregado do disco: as edições valem na próxima sessão.
 
 ## Componentes
 
@@ -113,3 +109,5 @@ As ideias em avaliação e as recusadas estão no [roadmap](docs/roadmap.md); o 
 ## Licença
 
 [MIT](LICENSE). Feito e usado no dia a dia pelo autor nos próprios projetos; issues e sugestões são bem-vindas, sem garantia de suporte.
+
+Para contribuir ou mudar o plugin, as premissas e as regras estão no [`CLAUDE.md`](CLAUDE.md); um clone local (`claude plugin marketplace add ./claude-pipeline`) é carregado do disco, e as edições valem na próxima sessão.
