@@ -11,7 +11,6 @@ Nenhuma no momento.
 ## Backlog
 
 - **Defeito: servidor de uma cópia que sobrevive ao "parado por PID"** (um projeto do autor, 1.23.0 e 1.26.0): o `agents-shared.md` e o `qa.md` mandam parar o que a cópia iniciou pelo PID da porta, e o ledger só exige a linha `Processes:` no relatório (1.21.0). A regra foi ignorada quatro vezes numa noite e derrubou rodadas (157 falhas falsas, `EADDRINUSE`): regra de prompt ignorada duas vezes vira checagem. Proposta: o `add` do `dev` e do `qa` de uma cópia confere que a porta dela, da linha "Execução em paralelo", não aceita conexão, e junta o item "o `status` não diz qual processo segura uma pasta", que é o mesmo processo. Número: rodadas derrubadas por porta ocupada (eram 5; deve ser 0). Esforço: M.
-- **Melhoria, decisão do dono: aceite da varredura de segurança no modo autônomo** (um projeto do autor, 1.23.0): a entrega parou 3,1 h à espera do aceite, que hoje é do dono (1.23.0). Mexe na segurança. Recomendação: o `approve` da 1.27.0 passa a aceitar também a varredura junto da aprovação 1, em vez de um fluxo novo. Esforço: P.
 
 ## Em espera (voltam com um sinal)
 
