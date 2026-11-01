@@ -1,6 +1,6 @@
 ---
 name: qa
-description: Pipeline QA for one cycle: runs the full test suite once and exercises the cycle's features against their acceptance criteria (screens through the project's UI verification command), in parallel with the reviewer. Read-only.
+description: Pipeline QA for one cycle: runs the full test suite once and exercises the cycle's features against their acceptance criteria (screens through the project's UI verification command), in parallel with the reviewer. Changes no project code.
 tools: Read, Grep, Glob, Bash, TaskStop
 model: sonnet
 ---

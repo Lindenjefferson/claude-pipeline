@@ -2,9 +2,22 @@
 
 O que cada versão entregou e o que muda para quem atualiza. O arquivo vai junto com cada versão instalada: a skill `atualizar` lê o **Ao atualizar** de cada versão pulada, da mais antiga para a mais nova. Termine a entrega em andamento, ou pause-a, antes de atualizar o plugin (a skill `atualizar` confere). As ideias que ainda não viraram versão estão no [roadmap](../../docs/roadmap.md).
 
-Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o número do PR. Só as versões que o `feedback-plugin` das próximas entregas ainda confere (hoje da 1.9.8 à 1.30.1) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta. O que é major, minor e patch está no [`CLAUDE.md`](../../CLAUDE.md).
+Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o número do PR. Só as versões que o `feedback-plugin` das próximas entregas ainda confere (hoje da 1.9.8 à 1.31.0) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta. O que é major, minor e patch está no [`CLAUDE.md`](../../CLAUDE.md).
 
 **A numeração voltou para 1.x** (decisão do usuário, com o plugin só em instalação local). A 2.12.0 passou a ser a **1.12.0**, e cada versão da linha 2.x segue a mesma conta (a 2.9.9 é a 1.9.9, e assim por diante). A linha 1.x original, de antes da 2.0.0, virou 0.x pela mesma conta (a 1.6.0 de então é a **0.6.0**), para nenhum número valer por duas versões. Nada muda no comportamento. Uma cópia 2.x se atualiza pelo caminho normal — `claude plugin marketplace update linden-plugins` e `claude plugin update pipeline@linden-plugins --scope <escopo>`, depois `/reload-plugins` — porque o instalador compara com o que o marketplace oferece, não a ordem dos números; a skill `atualizar` continua valendo. Conferido na prática, de 2.12.0 para 1.12.0.
+
+## 1.31.0 — plugin legível para quem chega de fora (PR #85)
+
+Pedido do dono, com o repositório aberto (licença MIT); de duas leituras de outro modelo como um desenvolvedor que nunca viu o projeto.
+
+- **Skills sem "personal project" e com gatilhos em inglês** (melhoria): o `kickoff` e o `manager` valem para qualquer projeto e disparam também com "new project", "set up this project", "implement", "new feature" e "fix bug".
+- **O marketplace não fica fixo nas skills** (defeito para quem instala de outro marketplace ou de um fork): o `atualizar` lê o marketplace da entrada `pipeline@<marketplace>` de `claude plugin list --json`, e o `kickoff` e o `manager` não citam mais `pipeline@linden-plugins`.
+- **Termos e frases que confundiam** (defeito de texto): o modo autônomo da entrega e o modo de permissão `auto` do Claude Code têm nomes distintos no `kickoff` e no `bash-guard.py`; a lista de arquivos que o manager edita tinha uma frase quebrada; o `ledger.py` dizia que os agentes não têm `Write` (o `dev` tem; o que vale é que nenhum agente salva o próprio relatório); o `qa` se dizia "read-only" e escreve scripts e capturas (agora: "changes no project code").
+- **README mais curto**: define *slug*, *ledger*, `.superpowers/` e *VALIDAR* no primeiro uso; avisa que os títulos do `CLAUDE.md` que os scripts leem ficam em português; uma linha por componente (o detalhe está no arquivo de cada um); a entrega real mora só em [`docs/como-e-uma-entrega.md`](../../docs/como-e-uma-entrega.md); saem a seção "O que esperar", a menção a outro plugin do marketplace e a repetição da atualização. O começo rápido pede o modo de permissão `auto` e diz que as dependências se instalam junto; o `CLAUDE.md` fica apontado só para quem contribui.
+
+O prompt não cresceu: as descrições trocaram palavras e o resto encurtou.
+
+**Ao atualizar:** nada muda.
 
 ## 1.30.1 — guarda dos comandos lê `bash -o pipefail -c` e `git checkout <arquivo>` (PR #84)
 
