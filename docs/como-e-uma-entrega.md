@@ -48,7 +48,7 @@ No [modo autônomo](../plugins/pipeline/skills/manager/references/autonomous.md)
 
 ## Quanto custa
 
-Uma entrega real de um app web pequeno (o plugin não depende da stack; esta era Next.js e Postgres), com 9 tarefas em 2 ciclos, uma migration e telas:
+Uma entrega típica custa horas de relógio e alguns milhões de tokens. Esta, real, foi de um app web pequeno (o plugin não depende da stack; esta era Next.js e Postgres), com 9 tarefas em 2 ciclos, uma migration e telas:
 
 | | |
 |---|---|
@@ -59,4 +59,4 @@ Uma entrega real de um app web pequeno (o plugin não depende da stack; esta era
 | Achados no código | ciclo 1: 1 Important, 1 rodada de correção; ciclo 2: nenhum |
 | Checagens do gate | 18, todas PASS (uma marcada SKIP) |
 
-O resto do relógio é o manager integrando o trabalho e as esperas por você. A [análise de outra entrega](analises/0.5-launcher-civic.md) mostra para onde o tempo vai e o que o plugin mudou por causa disso.
+O resto do relógio é o manager integrando o trabalho e as esperas por você.
