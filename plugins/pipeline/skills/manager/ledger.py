@@ -65,7 +65,7 @@ text) is read from its transcript, <config>/projects/*/*/subagents/agent-<id>.js
 ~/.claude, written to reports/<slug>/<agent>-<id>.md beside the ledger and kept as the run's --report, so a report
 the manager's context lost in a compaction is still on disk; with no transcript it is refused, naming --report; a qa --report must hold the Verdict:, Commit:,
 Interface: and Processes: lines of qa.md's report (Verdict the one given, Commit a commit here), and the run
-stores that commit as tested, and stale when it is not the latest dev run's head or later: a qa dispatched before a
+stores that commit as tested, and stale when it is not the latest dev run's head or later (a run held for a later plan cycle left out): a qa dispatched before a
 fix counts only for what came before it, so its FAIL still asks for the fix and the re-run is still asked for; --seconds takes 90, 12m, 1h5m or 12m30s, and --seconds and --tokens are optional, from the
 agent's completion notification when it already arrived, never an estimate (a run without them goes unmeasured, its
 span counting from its timestamp in the cycle's elapsed, which is null when that span comes to zero, and 0 is refused). measure fills the numbers
@@ -995,7 +995,8 @@ def gate_run(args):
 
 def qa_report(args, entries):
     """The tested commit of a saved qa report, refused when a line of qa.md's report is missing or disagrees; stale
-    when it is not the latest dev run's head or later (qa was dispatched before that run, as before a fix)."""
+    when it is not the latest dev run's head or later (qa was dispatched before that run, as before a fix), a run held
+    for a later plan cycle left out."""
     path = args.report if os.path.isfile(args.report) else os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(args.ledger))), args.report)
     text = open(path, encoding="utf-8", errors="replace").read()
@@ -1013,7 +1014,8 @@ def qa_report(args, entries):
     tested = git_head(commit, args.ledger) if commit else None
     if not tested:
         sys.exit(f"{args.report} gives Commit: {commit or '(nothing)'}, which is no commit here")
-    devs = [entry for entry in runs(entries) if entry["agent"] == "dev" and entry.get("head")]
+    held = {id(entry) for entry in held_runs(entries)}
+    devs = [entry for entry in runs(entries) if entry["agent"] == "dev" and entry.get("head") and id(entry) not in held]
     where = os.path.dirname(os.path.dirname(os.path.abspath(args.ledger)))
     stale = bool(devs) and subprocess.run(["git", "merge-base", "--is-ancestor", devs[-1]["head"], tested],
                                           capture_output=True, cwd=where).returncode == 1
