@@ -312,7 +312,7 @@ check("ledger.py start outside auto mode asks the user, naming the mode",
       reason and reason[0] == "ask" and "default" in reason[1] and "auto" in reason[1], str(reason))
 check("start --next of the next delivery asks too", (run(bare_start, START.replace("start", "--ledger "
       ".superpowers/next-x.jsonl start --next"), mode="acceptEdits")[1] or ("",))[0] == "ask")
-check("in PowerShell too", (run(bare_start, "& python C:\p\skills\manager\ledger.py start --slug x",
+check("in PowerShell too", (run(bare_start, r"& python C:\p\skills\manager\ledger.py start --slug x",
                                 tool="PowerShell", mode="default")[1] or ("",))[0] == "ask")
 check("in auto mode it passes", run(bare_start, START, mode="auto")[1] is None)
 check("with permissions bypassed it passes", run(bare_start, START, mode="bypassPermissions")[1] is None)

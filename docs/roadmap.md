@@ -10,6 +10,8 @@ Nenhuma no momento.
 
 ## Backlog
 
+Nenhum no momento.
+
 ## Em espera (voltam com um sinal)
 
 Cada item diz o sinal que o traz de volta; o detalhe da análise está no histórico do git deste arquivo.
