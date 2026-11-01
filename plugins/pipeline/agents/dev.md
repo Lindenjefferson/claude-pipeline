@@ -60,5 +60,5 @@ Docs: <file updated, or none needed and why>
 Errata: <one line for the plan's ## Errata per divergence from the plan, or none>
 Lessons: <lines of docs/lessons.md that applied and how the diff meets them, or none applied>; proposed: <a new lesson and the check that could catch it, or none>
 Mock: <screens and formats compared with the mock, differences left and why, or n/a — no screen with a mock>
-Processes: none left running (each one you started, stopped by PID)
+Processes: none left running (each one you started, stopped by PID); ports: <each port you started a server on, or none>
 ```
