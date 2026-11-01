@@ -17,10 +17,6 @@
     "Bash(chmod 777:*)",
     "PowerShell(chmod 777:*)"
   ],
-  "ask": [
-    "Bash(git push:*)",
-    "PowerShell(git push:*)"
-  ],
   "never_allow": [
     "deploy",
     "publish",

@@ -14,7 +14,9 @@ passes), a git merge while it is checked out (--abort and --quit pass), and a pu
 glab mr merge or accept, also behind the tool's own options, and its api on pulls/<n>/merge or
 merge_requests/<n>/merge). A git checkout or switch earlier in the same command counts as what is checked out for
 the rest of it; a cd does not, so the check reads the session's directory. Pushing and merging the work branch pass;
-in supervised mode, or with no ledger, nothing here is denied and the ask rule on git push applies. With the user's
+in supervised mode, or with no ledger, nothing here is denied, and a push of the default branch (the same reading)
+asks the user: approval 2 is theirs, and a push of a work branch passes, since a permission rule cannot tell them
+apart inside a compound command. With the user's
 standing approval (ledger.py approve, read from approval.json beside the ledger), a publish passes when what it
 publishes is a gated delivery: the commit (the ref a git merge names, HEAD for a pull request merge, the source of a
 push, or the default branch a merge earlier in the same command already approved) has the tree of the commit that
@@ -507,8 +509,9 @@ def merges_pull_request(arguments):
 
 
 def reaches_main(command, cwd, powershell=False):
-    """True in autonomous mode when the command merges into or pushes the default branch, or merges a pull request.
-    A git checkout or switch earlier in the same command counts as the branch checked out for what follows it."""
+    """"deny" in autonomous mode when the command merges into or pushes the default branch, or merges a pull request;
+    "ask" otherwise (supervised, or no ledger) when it pushes the default branch; None when neither. A git checkout or
+    switch earlier in the same command counts as the branch checked out for what follows it."""
     calls = []
     for program, arguments, _ in simple_commands(command, powershell):
         if program == "git":
@@ -519,27 +522,28 @@ def reaches_main(command, cwd, powershell=False):
             calls.append((program, "", arguments))
     if not any(name in ("push", "merge") or (program != "git" and merges_pull_request(rest))
                for program, name, rest in calls):
-        return False
+        return None
     state = ledger_state(cwd)
-    if not state or not state[0].autonomous(state[2]):
-        return False
+    autonomous = bool(state) and state[0].autonomous(state[2])
     main, current = main_branch(cwd), git_out(cwd, "branch", "--show-current")
     published = set()
     for program, name, rest in calls:
         if program != "git":
-            if merges_pull_request(rest) and not gated(cwd, "HEAD", state):
-                return True
+            if autonomous and merges_pull_request(rest) and not gated(cwd, "HEAD", state):
+                return "deny"
         elif name in ("checkout", "switch"):
             current = switched_to(rest) or current
         elif main and name == "push" and push_reaches(rest, main, current):
+            if not autonomous:
+                return "ask"
             sources = push_sources(rest, main, current)
             if sources is None or not all(source in published or gated(cwd, source, state) for source in sources):
-                return True
-        elif main and name == "merge" and current == main and not {"--abort", "--quit"} & set(rest):
+                return "deny"
+        elif autonomous and main and name == "merge" and current == main and not {"--abort", "--quit"} & set(rest):
             if not gated(cwd, merged_ref(rest), state):
-                return True
+                return "deny"
             published.add(main)
-    return False
+    return None
 
 
 def commit_skips(arguments):
@@ -600,11 +604,17 @@ def main():
                                               "each permission prompt while the user is away. Start it anyway, or "
                                               "restart the session in auto mode first?")}}, sys.stdout)
         return
+    publishes = None if skips_hook(command, powershell) else reaches_main(command, cwd, powershell)
+    if publishes == "ask":
+        json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                          "permissionDecisionReason": "This pushes the main branch: approval 2 is "
+                                          "the user's."}}, sys.stdout)
+        return
     if skips_hook(command, powershell):
         reason = ("This skips the secret-scan pre-commit hook (--no-verify, -n or a core.hooksPath override), and a "
                   "secret committed stays in the history. Commit without it; if the hook blocks, fix what it reports "
                   "(a false positive is allowlisted by the user, as its message explains).")
-    elif reaches_main(command, cwd, powershell):
+    elif publishes == "deny":
         reason = ("The delivery is in autonomous mode (the ledger says so), and nothing reaches the default branch "
                   "without the user: no push to it, no merge into it, no pull request merge. Leave the merge and the "
                   "push for approval 2, when the user returns.")
