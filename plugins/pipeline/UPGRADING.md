@@ -6,11 +6,13 @@ Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão 
 
 **A numeração voltou para 1.x** (decisão do usuário, com o plugin só em instalação local). A 2.12.0 passou a ser a **1.12.0**, e cada versão da linha 2.x segue a mesma conta (a 2.9.9 é a 1.9.9, e assim por diante). A linha 1.x original, de antes da 2.0.0, virou 0.x pela mesma conta (a 1.6.0 de então é a **0.6.0**), para nenhum número valer por duas versões. Nada muda no comportamento. Uma cópia 2.x se atualiza pelo caminho normal — `claude plugin marketplace update linden-plugins` e `claude plugin update pipeline@linden-plugins --scope <escopo>`, depois `/reload-plugins` — porque o instalador compara com o que o marketplace oferece, não a ordem dos números; a skill `atualizar` continua valendo. Conferido na prática, de 2.12.0 para 1.12.0.
 
-## 1.33.0 — o servidor que o qa deixou de pé barra o relatório dele (PR #88)
+## 1.33.0 — o servidor que o qa deixou de pé barra o relatório dele; a varredura volta a esperar o dono (PR #88)
 
-De um pedido de um projeto do autor (1.23.0 e 1.26.0).
+De pedidos de um projeto do autor (1.23.0, 1.26.0 e o primeiro uso da 1.32.0).
 
 - **O `add` do `qa` recusa o relatório enquanto uma porta em que ele subiu servidor ainda aceita conexão** (defeito): a regra de parar pelo PID o que a cópia iniciou foi ignorada quatro vezes numa noite, e o servidor que sobrou derrubou rodadas seguintes (157 falhas falsas, `EADDRINUSE`). Regra de prompt ignorada duas vezes vira checagem: a linha `Processes:` do relatório do `qa` e do `dev` passa a nomear as portas (`ports: 5173` ou `ports: none`), e o ledger testa cada uma em 127.0.0.1 e ::1. Um relatório do `qa` sem `ports:` é recusado. O do `dev` não passa pelo `add`, então o manager o confere antes de integrar, como os outros campos. O prompt cresceu uma oração no `agents-shared.md` e uma no modelo do relatório, porque a checagem precisa saber as portas. Teste primeiro. Número: rodadas derrubadas por porta ocupada (eram 5; deve ser 0).
+
+- **A aprovação permanente deixa de cobrir a varredura de segurança** (defeito da 1.32.0, achado por um projeto do autor no primeiro uso): a skill `claude-security` faz uma pergunta fixa de custo que só as palavras do próprio dono respondem, nunca um arquivo como o `approval.json` nem um prompt agendado como o heartbeat, e o Remote Control não a mostra; a entrega ficou ~1h30 parada nela. No modo autônomo a varredura volta a esperar o dono com uma `note --validar`, e agora o manager manda um `PushNotification` quando ela fica pronta para rodar. O passo `security` perde o `covered`. Teste primeiro. Número: horas paradas na varredura sem aviso ao dono (eram ~1,5; deve ser 0).
 
 **Ao atualizar:** um `qa` despachado antes da atualização entrega a linha `Processes:` sem `ports:`, e o `add` a recusa: acrescente `ports: none` (ou as portas dele) ao relatório salvo, depois de conferir que nada ficou de pé, e rode o `add` de novo.
 

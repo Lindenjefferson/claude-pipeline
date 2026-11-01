@@ -205,7 +205,7 @@ approve records the user's standing approval of merge and push, across deliverie
 autonomous mode: a publish passes only when the commit it publishes has the tree of the commit that added the
 delivery's quality report, that report's head differs from it only in docs/quality-reports/, and its version is at
 most --until (the gate writes the report on READY only). The conditions are the user's text, which the manager checks
-before publishing and the status shows. In autonomous mode it also covers the security scan of a sensitive delivery.
+before publishing and the status shows.
 
 Spec, plan and security review loops
 ------------------------------------
@@ -225,8 +225,7 @@ user, or stops the delivery in autonomous mode. waive --task closes the loop.
 
 sensitive --reason marks a delivery of a sensitive domain: once the cycle is closed and until a security round is
 added (or waived), status asks for the scan (step security, with the reason), so the gate waits for it. In autonomous
-mode the step says whether a standing approval covers it (covered): with one the scan runs now, without one it waits
-for the user.
+mode it waits for the user, a standing approval or not: the scan asks them its cost, and nothing else may answer it.
 
 Unfilled settings
 -----------------
@@ -1975,15 +1974,11 @@ def status(args):
                                             **advice_of(item)} for item in items if not item["decision"]]
     marks = [entry["reason"] for entry in entries if entry["type"] == "sensitive"]
     if marks and closed and not reviews(entries, "security"):
-        step = {"step": "security", "reason": marks[-1]}
-        when = "run it once the last cycle closes"
-        if autonomous(entries):
-            step["covered"] = bool(standing(args.ledger))
-            when = ("the standing approval covers it: run it now" if step["covered"] else
-                    "it waits for the user: record a note --validar")
+        when = ("it waits for the user, whose answer its cost question takes: record a note --validar and send a "
+                "PushNotification" if autonomous(entries) else "run it once the last cycle closes")
         pending.append(f"security scan has not run, and the delivery touches a sensitive domain ({marks[-1]}): "
                        f"{when} (references/security.md)")
-        steps.append(step)
+        steps.append({"step": "security", "reason": marks[-1]})
     # the copies and the disk are the current delivery's: a preparation sees none of its claims
     left = [] if preparing(entries) else leftovers(entries, args.ledger, head)
     pending += [f"leftover {item['kind']} {item['path'] or item['branch']}, already integrated or abandoned: "
