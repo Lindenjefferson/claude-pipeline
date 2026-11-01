@@ -2021,16 +2021,12 @@ check("a delivery marked sensitive is not ready for the gate until its security 
       and {"step": "security", "reason": "writes money"} in state["steps"], (r.stderr, state["pending"], state["steps"]))
 run("mode", "autonomous", ledger=SENS)
 state = status(SENS)
-check("in autonomous mode without a standing approval, the scan waits for the user",
-      {"step": "security", "reason": "writes money", "covered": False} in state["steps"]
-      and any("security scan" in item and "note --validar" in item for item in state["pending"]),
-      (state["pending"], state["steps"]))
 run("approve", "--until", "9.9.9", "--conditions", "gate READY", ledger=SENS)
 state = status(SENS)
-check("a standing approval covers the scan in autonomous mode: run it now, no stop",
-      {"step": "security", "reason": "writes money", "covered": True} in state["steps"]
-      and any("security scan" in item and "standing approval covers it" in item for item in state["pending"]),
-      (state["pending"], state["steps"]))
+check("in autonomous mode the scan waits for the user even with a standing approval (its cost question is theirs)",
+      {"step": "security", "reason": "writes money"} in state["steps"]
+      and any("security scan" in item and "note --validar" in item and "PushNotification" in item
+              for item in state["pending"]), (state["pending"], state["steps"]))
 run("approve", "--revoke", ledger=SENS)
 run("mode", "supervised", ledger=SENS)
 run("add", "--agent", "reviewer", "--task", "security", "--verdict", "PASS", "--report", report_file("scan.md"),
