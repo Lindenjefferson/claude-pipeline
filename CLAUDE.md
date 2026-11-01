@@ -45,6 +45,7 @@ Cada componente tem **uma** fonte de verdade, o próprio arquivo. Os outros docu
 | Análise de uma entrega real que virou item do backlog | [`docs/analises/`](docs/analises/), um arquivo por entrega, no slug dela |
 | Histórico das versões, com as notas de atualização (vai com a versão instalada) | [`plugins/pipeline/UPGRADING.md`](plugins/pipeline/UPGRADING.md), aplicadas pela skill [`atualizar`](plugins/pipeline/skills/atualizar/SKILL.md) |
 | Apresentação, começo rápido, componentes em uma linha | [`README.md`](README.md) |
+| Uma entrega passo a passo, para quem chega ao repositório | [`docs/como-e-uma-entrega.md`](docs/como-e-uma-entrega.md) |
 | Manifesto e marketplace | [`plugins/pipeline/.claude-plugin/plugin.json`](plugins/pipeline/.claude-plugin/plugin.json), [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) |
 
 ## Como as peças se encaixam
