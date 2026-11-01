@@ -96,6 +96,9 @@ for command in ('git commit --no-verify -m "x"', 'git commit -m "x" --no-verify'
                 "export GIT_CONFIG_KEY_0=core.hooksPath; git commit -m x", "time git commit -n -m x",
                 "command git commit -n -m x", "if true; then git commit -n -m x; fi", "{ git commit -n -m x; }",
                 "! git commit -n -m x", "bash -lc 'git commit -n -m x'", "sh -ec 'git commit -n -m x'",
+                "bash -o pipefail -c 'git commit -n -m x'", "bash -O extglob -c 'git commit -n -m x'",
+                "bash --rcfile f -c 'git commit -n -m x'", "bash --init-file f -c 'git commit -n -m x'",
+                "bash -euo pipefail -c 'git commit -n -m x'", "bash +o history -c 'git commit -n -m x'",
                 "git config --unset core.hooksPath", "git commit -n -m x # don't",
                 "git commit --no-verify -F - <<'MSG-END'\nit's done\nMSG-END"):
     check(f"skipping the pre-commit hook is denied: {command!r}", skips(command))
@@ -158,6 +161,13 @@ sh(sys.executable, LEDGER_PY, "mode", "autonomous")
 for command in main_pushes + ("git push", "git merge feat/x", "git merge --no-ff feat/x"):
     check(f"autonomous, on the main branch: denied {command!r}", reaches_main(command))
 check("autonomous, on the main branch: denied 'git push origin @'", reaches_main("git push origin @"))
+with open(os.path.join(repo, "README.md"), "w", encoding="utf-8") as handle:
+    handle.write("x\n")
+for command in ("git checkout README.md && git push origin", "git checkout . && git push origin",
+                "git checkout -- README.md && git push", "git checkout main -- README.md && git push origin",
+                "git checkout HEAD README.md; git push"):
+    check(f"autonomous, on the main branch: a checkout of a path is no branch change, denied {command!r}",
+          reaches_main(command))
 for command in ("git merge --abort", "git status", "git log -n 3", 'git commit -m "push to main later"',
                 "git push --tags", "git push origin --tags"):
     check(f"autonomous, on the main branch: passes {command!r}", run(repo, command)[1] is None, str(run(repo, command)))
@@ -168,6 +178,8 @@ for command in ("git checkout main && git merge feat/x", "git switch main && git
                 "git switch -q main; git push", "gh -R o/r pr merge 3", "gh api -X PUT repos/o/r/pulls/3/merge",
                 "glab mr merge 3", "glab mr accept 3", "glab -R o/r mr merge 3", "glab api -X PUT projects/1/merge_requests/3/merge"):
     check(f"autonomous, on a work branch: denied {command!r}", reaches_main(command))
+check("autonomous, on a work branch: a checkout of a file from main is no branch change, passes",
+      run(repo, "git checkout main -- README.md && git push origin")[1] is None)
 for command in ("git push", "git push -u origin feat/x", "git push origin HEAD", "git merge main",
                 "git merge --no-ff task-1", "gh pr view 20", "git switch main && git switch feat/x && git push",
                 "git switch -c main2 && git push", "gh api repos/o/r/pulls/3", "glab mr view 3",
