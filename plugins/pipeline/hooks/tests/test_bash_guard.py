@@ -17,9 +17,11 @@ def project(commands):
     return folder
 
 
-def run(folder, command, background=False, tool="Bash", cwd=None):
+def run(folder, command, background=False, tool="Bash", cwd=None, mode=None):
     payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": cwd or folder,
                "tool_input": {"command": command, "run_in_background": background}}
+    if mode:
+        payload["permission_mode"] = mode
     done = subprocess.run([sys.executable, SCRIPT], cwd=tempfile.gettempdir(), input=json.dumps(payload),
                           capture_output=True, text=True, encoding="utf-8", errors="replace")
     reason = None
@@ -270,6 +272,22 @@ check("standing approval: a version past --until is denied", reaches_main("gh pr
 sh("git", "reset", "-q", "--hard", "HEAD~1")
 r = subprocess.run([sys.executable, LEDGER_PY, "approve", "--revoke"], cwd=repo, capture_output=True, text=True)
 check("approve --revoke ends it: denied again", r.returncode == 0 and reaches_main("gh pr merge 3 --merge"), r.stderr)
+
+# A delivery starts only in auto mode unless the user says so: ledger.py start outside it asks first
+START = 'sh "${CLAUDE_PLUGIN_ROOT}/hooks/python.sh" "${CLAUDE_PLUGIN_ROOT}/skills/manager/ledger.py" start --slug x'
+bare_start = tempfile.mkdtemp(prefix="start_")
+reason = run(bare_start, START, mode="default")[1]
+check("ledger.py start outside auto mode asks the user, naming the mode",
+      reason and reason[0] == "ask" and "default" in reason[1] and "auto" in reason[1], str(reason))
+check("start --next of the next delivery asks too", (run(bare_start, START.replace("start", "--ledger "
+      ".superpowers/next-x.jsonl start --next"), mode="acceptEdits")[1] or ("",))[0] == "ask")
+check("in PowerShell too", (run(bare_start, "& python C:\p\skills\manager\ledger.py start --slug x",
+                                tool="PowerShell", mode="default")[1] or ("",))[0] == "ask")
+check("in auto mode it passes", run(bare_start, START, mode="auto")[1] is None)
+check("with permissions bypassed it passes", run(bare_start, START, mode="bypassPermissions")[1] is None)
+check("another ledger command passes in any mode", run(bare_start, START.replace("start --slug x", "status"),
+                                                       mode="default")[1] is None)
+check("with no permission_mode in the payload it passes", run(bare_start, START)[1] is None)
 
 config = json.load(open(os.path.join(HOOKS, "hooks.json"), encoding="utf-8"))
 pre = config["hooks"]["PreToolUse"]
