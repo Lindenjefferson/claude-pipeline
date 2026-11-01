@@ -10,29 +10,30 @@ user is away. A payload with no permission_mode passes.
 In autonomous mode (the latest mode entry of the ledger ledger.py finds from the session's directory), denied in the
 foreground or background: a git push of the default branch (named by origin/HEAD, else init.defaultBranch, main or
 master: as a refspec's target, with --all or --mirror, or with no refspec while it is checked out; --tags alone
-passes), a git merge while it is checked out (--abort and --quit pass), and a pull request merge (gh pr merge or
-glab mr merge or accept, also behind the tool's own options, and its api on pulls/<n>/merge or
-merge_requests/<n>/merge). A git checkout or switch earlier in the same command counts as what is checked out for
-the rest of it (a checkout with -- or of a word that is no branch here restores files and changes nothing); a cd does not, so the check reads the session's directory. Pushing and merging the work branch pass;
-in supervised mode, or with no ledger, nothing here is denied, and a push of the default branch (the same reading)
-asks the user: approval 2 is theirs, and a push of a work branch passes, since a permission rule cannot tell them
-apart inside a compound command. With the user's
-standing approval (ledger.py approve, read from approval.json beside the ledger), a publish passes when what it
-publishes is a gated delivery: the commit (the ref a git merge names, HEAD for a pull request merge, the source of a
-push, or the default branch a merge earlier in the same command already approved) has the tree of the commit that
-last added the delivery's quality report (docs/quality-reports/*-<slug>.md, which the gate writes on READY only), the
-report's head differs from that commit only in docs/quality-reports/, and the report's version is at most the
-approval's --until. A push with --all, --mirror or --delete is still denied.
+passes), a git merge while it is checked out (--abort and --quit pass), and a pull request merge (gh pr merge or glab
+mr merge or accept, also behind the tool's own options, and its api on pulls/<n>/merge or merge_requests/<n>/merge). A
+git checkout or switch earlier in the same command counts as what is checked out for the rest of it (a checkout with
+-- or of a word that is no branch here restores files and changes nothing); a cd does not, so the check reads the
+session's directory. Pushing and merging the work branch pass; in supervised mode, or with no ledger, nothing here is
+denied, and a push of the default branch (the same reading) asks the user: approval 2 is theirs, and a push of a work
+branch passes, since a permission rule cannot tell them apart inside a compound command. With the user's standing
+approval (ledger.py approve, read from approval.json beside the ledger), a publish passes when what it publishes is a
+gated delivery: the commit (the ref a git merge names, HEAD for a pull request merge, the source of a push, or the
+default branch a merge earlier in the same command already approved) has the tree of the commit that last added the
+delivery's quality report (docs/quality-reports/*-<slug>.md, which the gate writes on READY only), the report's head
+differs from that commit only in docs/quality-reports/, and the report's version is at most the approval's --until. A
+push with --all, --mirror or --delete is still denied.
 
 Skipping the hook is denied in any project, in the foreground or background: a git commit with --no-verify (or an
-unambiguous prefix such as --no-veri) or -n (also inside a cluster such as -nm or -an), a git -c or --config-env
-that sets core.hooksPath, a GIT_CONFIG_* assignment naming it (also through env or export), and a git config that
-writes or unsets it. The command is read word by word as the shell splits it, after the heredoc bodies the shell
-only passes along are removed, so a flag quoted inside a commit message is a message, not a flag. Wrappers such as
-env, command, time, nohup, xargs, `!`, `{` and if/then are looked through; a command given to a shell's -c (also
--lc, and after options that take a value, such as -o pipefail) or to eval is read the same way (a script the shell runs is a command of its own), and so is a command substitution outside quotes; one inside double quotes is
-not read. Permission rules match the command as plain text and cannot tell a flag from a message, which is why this
-check lives here. A command that does not parse (an unbalanced quote) passes, since the shell refuses it too.
+unambiguous prefix such as --no-veri) or -n (also inside a cluster such as -nm or -an), a git -c or --config-env that
+sets core.hooksPath, a GIT_CONFIG_* assignment naming it (also through env or export), and a git config that writes or
+unsets it. The command is read word by word as the shell splits it, after the heredoc bodies the shell only passes
+along are removed, so a flag quoted inside a commit message is a message, not a flag. Wrappers such as env, command,
+time, nohup, xargs, `!`, `{` and if/then are looked through; a command given to a shell's -c (also -lc, and after
+options that take a value, such as -o pipefail) or to eval is read the same way (a script the shell runs is a command
+of its own), and so is a command substitution outside quotes; one inside double quotes is not read. Permission rules
+match the command as plain text and cannot tell a flag from a message, which is why this check lives here. A command
+that does not parse (an unbalanced quote) passes, since the shell refuses it too.
 
 A PowerShell call goes through the same checks, read with PowerShell's own rules. Text the command only passes
 along: single quotes literal ('' an escaped quote), double quotes with a backtick escape, the typographic quotes as
@@ -517,9 +518,9 @@ def merges_pull_request(arguments):
 
 
 def reaches_main(command, cwd, powershell=False):
-    """"deny" in autonomous mode when the command merges into or pushes the default branch, or merges a pull request;
-    "ask" otherwise (supervised, or no ledger) when it pushes the default branch; None when neither. A git checkout or
-    switch earlier in the same command counts as the branch checked out for what follows it."""
+    """Returns "deny" in autonomous mode when the command merges into or pushes the default branch, or merges a pull
+    request; "ask" otherwise (supervised, or no ledger) when it pushes the default branch; None when neither. A git
+    checkout or switch earlier in the same command counts as the branch checked out for what follows it."""
     calls = []
     for program, arguments, _ in simple_commands(command, powershell):
         if program == "git":
@@ -612,13 +613,14 @@ def main():
                                               "each permission prompt while the user is away. Start it anyway, or "
                                               "restart the session in auto mode first?")}}, sys.stdout)
         return
-    publishes = None if skips_hook(command, powershell) else reaches_main(command, cwd, powershell)
+    skips = skips_hook(command, powershell)
+    publishes = None if skips else reaches_main(command, cwd, powershell)
     if publishes == "ask":
         json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
                                           "permissionDecisionReason": "This pushes the main branch: approval 2 is "
                                           "the user's."}}, sys.stdout)
         return
-    if skips_hook(command, powershell):
+    if skips:
         reason = ("This skips the secret-scan pre-commit hook (--no-verify, -n or a core.hooksPath override), and a "
                   "secret committed stays in the history. Commit without it; if the hook blocks, fix what it reports "
                   "(a false positive is allowlisted by the user, as its message explains).")
