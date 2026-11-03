@@ -45,6 +45,7 @@ Cada componente tem **uma** fonte de verdade, o próprio arquivo. Os outros docu
 | Análise de uma entrega real que virou item do backlog | [`docs/analises/`](docs/analises/), um arquivo por entrega, no slug dela |
 | Histórico das versões, com as notas de atualização (vai com a versão instalada) | [`plugins/foreman/UPGRADING.md`](plugins/foreman/UPGRADING.md), aplicadas pela skill [`atualizar`](plugins/foreman/skills/atualizar/SKILL.md) |
 | Apresentação, começo rápido, componentes em uma linha | [`README.md`](README.md) |
+| Caminho mínimo para contribuir (clone, hook, testes, PR, quando a versão sobe) | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | Uma entrega passo a passo, para quem chega ao repositório | [`docs/como-e-uma-entrega.md`](docs/como-e-uma-entrega.md) |
 | Manifesto e marketplace | [`plugins/foreman/.claude-plugin/plugin.json`](plugins/foreman/.claude-plugin/plugin.json), [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) |
 
@@ -78,7 +79,7 @@ claude plugin validate plugins/foreman
 claude plugin validate .
 ```
 
-Cada arquivo de teste Python roda sozinho com o Python 3 (sem pytest) e imprime `ALL PASS`; o `claude plugin test` roda os testes `.test.ts` do mod. Cada um sai com código diferente de zero quando um assert falha, e o CI roda esses mesmos quatro comandos a cada push e PR, no Linux e no Windows, e a varredura de segredos de cada commit do PR (`pre-commit-secret-scan.py --range`), a mesma que o gate faz nos projetos ([`.github/workflows/testes.yml`](.github/workflows/testes.yml)).
+Cada arquivo de teste Python roda sozinho com o Python 3 (sem pytest) e imprime `ALL PASS`; o `claude plugin test` roda os testes `.test.ts` do mod. Cada um sai com código diferente de zero quando um assert falha, e o CI roda esses mesmos quatro comandos a cada push e PR (as suítes do Python no Linux e no Windows; o `plugin test` e os `validate` no Linux), e a varredura de segredos de cada commit do PR (`pre-commit-secret-scan.py --range`), a mesma que o gate faz nos projetos ([`.github/workflows/testes.yml`](.github/workflows/testes.yml)).
 
 Num clone novo, instale aqui o mesmo `pre-commit` que o `kickoff` instala em qualquer projeto (a premissa "o plugin não entrega o que não cumpre"), porque um hook mora em `.git/hooks` e não viaja no clone: `python plugins/foreman/hooks/pre-commit-secret-scan.py --install-pre-commit`. Ele lê só linhas adicionadas, então os fixtures de teste já commitados não barram nada; um commit que adicione linha parecida com segredo é barrado com o fingerprint, e só o dono assina o `.foreman-secrets-allow`. As regras de permissão que o kickoff escreve em qualquer projeto valem aqui também, em `.claude/settings.json`: o `deny` do `--no-verify`, do `core.hooksPath`, do `sudo`, do force push e da edição da allowlist; o push da branch principal pergunta pelo `bash-guard.py`.
 
