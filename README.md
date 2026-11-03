@@ -100,12 +100,6 @@ Noutro computador, num projeto que já usa o plugin: clone, instale o plugin e p
 
 Vai para o git, no mesmo slug da entrega: a spec (`docs/specs/<slug>.md`, nas entregas grandes), o plano (`docs/plans/<slug>.md`), o mockup das telas (`docs/mockups/<slug>.html`) e o relatório de qualidade do gate (`docs/quality-reports/`). Ficam também a doc de cada módulo em `docs/modulos/`, com o índice em `docs/README.md`, os padrões que todo código segue e o mapa dos módulos em `docs/arquitetura.md`, o roteiro de publicar, guardar e reverter em `docs/operacao.md`, as lições em `docs/lessons.md`, os achados do `discovery` em `docs/discovery/` e as convenções do projeto no `CLAUDE.md`. Ficam fora do git: `.superpowers/`, com o ledger e os relatórios de cada agente, e o `CLAUDE.local.md`, com o que vale só para este computador.
 
-## Quando não usar
-
-- Produto grande, com muitas equipes e módulos: o plugin foi desenhado e medido em produtos pequenos.
-- Time com vários humanos no mesmo repositório: as aprovações e as decisões de produto são de um dono só.
-- Deploy contínuo pelo agente: o plugin nunca publica nem faz push sem o seu pedido.
-
 ## Atualização
 
 Peça "atualizar o plugin" na sessão do projeto: a skill [`atualizar`](plugins/foreman/skills/atualizar/SKILL.md) espera um ponto de parada da entrega e aplica as notas de cada versão do [histórico](plugins/foreman/UPGRADING.md). Ative também a proteção de push contra segredos do seu provedor (no GitHub, *secret scanning push protection*): o hook local evita acidentes, não quem o pula.
