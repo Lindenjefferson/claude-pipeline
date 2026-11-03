@@ -14,12 +14,14 @@ O objetivo é que nada errado saia da máquina sem que você precise acompanhar 
 
 ## Como funciona
 
-Cada entrega tem um *slug*, o nome curto que vai na branch e nos arquivos dela em `docs/`. O registro do que cada agente fez (o *ledger*) e os relatórios ficam em `.superpowers/`, fora do git (a pasta de trabalho que ele divide com o plugin `superpowers`). As decisões que o manager tomou por você, quando não pôde perguntar, ficam na lista *VALIDAR*, que você confere depois.
+O registro do que cada agente fez (o *ledger*) e os relatórios ficam em `.superpowers/`, fora do git, a pasta de trabalho que o plugin divide com o [`superpowers`](https://github.com/obra/superpowers). Os termos que aparecem daqui em diante (slug, ledger, VALIDAR, gate, modo autônomo) estão no [vocabulário](#vocabulário).
 
 ```
 tamanho → (spec) → plano ✋ → ciclos: dev por tarefa (as independentes em paralelo)
         → reviewer ‖ qa → correção 1× ↺ → limpeza → gate.py → merge/push ✋
 ```
+
+✋ espera a sua aprovação; ‖ rodam ao mesmo tempo; ↺ volta ao `dev` uma vez, para corrigir o que o reviewer e o qa acharam.
 
 1. O `manager` classifica o pedido (pequeno, padrão, grande); isso decide quantas etapas rodam.
 2. Nos pedidos grandes há uma spec; nos padrões e grandes, um plano revisado pelo `reviewer` que você aprova (✋ 1).
@@ -31,14 +33,21 @@ O passo a passo, com o que você digita e o que vê em cada etapa, está em [Com
 
 Com você ausente, o [modo autônomo](plugins/foreman/skills/manager/references/autonomous.md) do manager troca as aprovações por uma lista VALIDAR e não faz merge nem push.
 
+## Vocabulário
+
+- **Slug**: o nome curto de uma entrega, que vai na branch e nos arquivos dela em `docs/` (`exportar-csv`, por exemplo).
+- **Ledger**: o registro da entrega, uma linha por execução de agente, em `.superpowers/ledger-<slug>.jsonl`; o `ledger.py` o escreve e diz o que falta.
+- **VALIDAR**: a lista das decisões que o manager tomou em seu nome quando não pôde perguntar; a skill `validar` percorre a lista com você antes da aprovação do merge.
+- **Gate**: a checagem final do `gate.py`, local e sem agente, que responde READY ou NOT READY antes do merge.
+- **Modo autônomo**: um estado da entrega, ligado por você antes de sair, em que o manager não espera aprovações e nada sai da máquina. Não é o **modo de permissão `auto`** do Claude Code, que apenas libera os comandos dos agentes sem perguntar a cada um; a entrega precisa dele sempre, com você presente ou não.
+
 ## Começo rápido
 
 **Você precisa de:**
 
-- [Claude Code](https://code.claude.com) v2.1.287 ou mais nova (testado na v2.1.302);
+- [Claude Code](https://code.claude.com) v2.1.287 ou mais nova;
 - Python 3 e git no `PATH` (o Python como `python` ou `python3`);
-- no Windows, o Git Bash, onde rodam os hooks e os comandos do gate;
-- Windows ou Linux (o macOS ainda não foi testado).
+- Windows (com o Git Bash, onde rodam os hooks e os comandos do gate) ou Linux; o macOS não foi testado.
 
 Os quatro plugins de que ele depende (`superpowers`, `frontend-design`, `claude-code-setup` e `claude-security`, do marketplace oficial) são instalados junto com ele, e o kickoff confere que estão lá.
 
@@ -79,7 +88,7 @@ Noutro computador, num projeto que já usa o plugin: clone, instale o plugin e p
 | [`qa`](plugins/foreman/agents/qa.md) | Roda a suíte e confere os critérios de aceite do ciclo, com a verificação de interface do projeto quando há tela. |
 | [`ledger.py`](plugins/foreman/skills/manager/ledger.py) | Registro da entrega: o que cada agente concluiu, o que falta, itens adiados e métricas. |
 | [`gate.py`](plugins/foreman/skills/manager/gate.py) | Checagem final local, sem agente: READY ou NOT READY e o relatório de qualidade. |
-| [`general.md`](plugins/foreman/checklists/general.md) | Princípios gerais de qualidade que o `dev` e o `reviewer` aplicam, divididos em fatias lidas conforme o produto. |
+| [`general.md`](plugins/foreman/checklists/general.md) | Princípios gerais de qualidade que o `dev` e o `reviewer` aplicam; é o índice, e os checklists [`access-and-data.md`](plugins/foreman/checklists/access-and-data.md), [`auth-and-sessions.md`](plugins/foreman/checklists/auth-and-sessions.md) e [`web-and-ui.md`](plugins/foreman/checklists/web-and-ui.md) são lidos quando o produto tem o que eles tratam. |
 | [`agents-shared.md`](plugins/foreman/checklists/agents-shared.md) | O que `dev` e `qa` têm em comum (servidor de dev, processos que iniciam). |
 | [`spec-checklist.md`](plugins/foreman/skills/manager/templates/spec-checklist.md) | O que toda spec e todo plano respondem, com o pré-mortem de cada escrita. |
 | [Hook de segredos e UTF-8](plugins/foreman/hooks/pre-commit-secret-scan.py) | `pre-commit` que bloqueia `.env`, linhas com cara de segredo e texto que não é UTF-8 ou tem caracteres invisíveis. |
@@ -97,10 +106,16 @@ Peça "atualizar o plugin" na sessão do projeto: a skill [`atualizar`](plugins/
 
 ## Para onde vai
 
-As ideias em avaliação e as recusadas estão no [roadmap](docs/roadmap.md); o que cada versão entregou, no [histórico](plugins/foreman/UPGRADING.md).
+As ideias em avaliação e as recusadas estão no [roadmap](docs/roadmap.md); o que cada versão entregou, no [histórico](plugins/foreman/UPGRADING.md); as análises de entregas reais que viraram item do backlog, em [`docs/analises/`](docs/analises/). As versões 2.x que aparecem em PRs antigos são as 1.x de hoje (a 2.12.0 virou a 1.12.0, e a linha 1.x anterior virou 0.x); a conta está no topo do histórico.
+
+## Para contribuir
+
+Nesta ordem:
+
+1. [Como é uma entrega](docs/como-e-uma-entrega.md): o que o plugin faz, passo a passo, com os números de uma entrega real.
+2. O [mapa](CLAUDE.md#mapa-onde-cada-informação-mora) do `CLAUDE.md`: em que arquivo mora cada comportamento, e as premissas e regras que valem para toda mudança.
+3. [CONTRIBUTING.md](CONTRIBUTING.md): clonar, instalar o hook, rodar os testes, abrir o PR e quando a versão sobe.
 
 ## Licença
 
 [MIT](LICENSE). Feito e usado no dia a dia pelo autor nos próprios projetos; issues e sugestões são bem-vindas, sem garantia de suporte.
-
-Para contribuir ou mudar o plugin, as premissas e as regras estão no [`CLAUDE.md`](CLAUDE.md); um clone local (`claude plugin marketplace add ./foreman`) é carregado do disco, e as edições valem na próxima sessão.
