@@ -16,7 +16,7 @@
       "name": "account-switcher",
       "source": {
         "source": "git-subdir",
-        "url": "https://github.com/Lindenjefferson/claude-accounts.git",
+        "url": "https://github.com/Lindenjefferson/account-switcher.git",
         "path": "plugins/account-switcher"
       },
       "description": "Várias contas do Claude Code no Windows com `cc <conta>` e atalho no Explorer."
