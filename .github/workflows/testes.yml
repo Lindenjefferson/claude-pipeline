@@ -26,14 +26,14 @@ jobs:
         shell: bash
         run: |
           git config --global user.email "ci@example.invalid"
-          git config --global user.name "pipeline CI"
+          git config --global user.name "foreman CI"
           git config --global init.defaultBranch main
       - name: cada suíte pelo python.sh que os hooks usam
         shell: bash
         run: |
           status=0
-          for t in plugins/pipeline/hooks/tests/test_*.py plugins/pipeline/skills/manager/tests/test_*.py; do
-            if sh plugins/pipeline/hooks/python.sh "$t" > "$RUNNER_TEMP/saida.txt" 2>&1; then
+          for t in plugins/foreman/hooks/tests/test_*.py plugins/foreman/skills/manager/tests/test_*.py; do
+            if sh plugins/foreman/hooks/python.sh "$t" > "$RUNNER_TEMP/saida.txt" 2>&1; then
               printf '%-58s %s\n' "$t" "$(tail -1 "$RUNNER_TEMP/saida.txt")"
             else
               status=1
@@ -54,7 +54,7 @@ jobs:
         shell: bash
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: python3 plugins/pipeline/hooks/pre-commit-secret-scan.py --range "$BASE..HEAD"
+        run: python3 plugins/foreman/hooks/pre-commit-secret-scan.py --range "$BASE..HEAD"
 
   plugin:
     name: mod e manifesto pelo CLI
@@ -65,8 +65,8 @@ jobs:
         with:
           node-version: '22'
       - run: npm install -g @anthropic-ai/claude-code
-      - run: claude plugin validate plugins/pipeline
+      - run: claude plugin validate plugins/foreman
       - run: claude plugin validate .
       - name: testes .test.ts do mod
-        working-directory: plugins/pipeline
+        working-directory: plugins/foreman
         run: claude plugin test

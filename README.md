@@ -1,4 +1,4 @@
-# claude-pipeline
+# Foreman
 
 > *In English:* a Claude Code plugin that runs a small multi-agent dev team (manager, dev, reviewer, qa) in short, test-first cycles, with a delivery ledger and a local gate, so you only decide product questions and approve the plan and the merge. The docs are in Portuguese; the agent prompts are in English.
 
@@ -29,7 +29,7 @@ tamanho → (spec) → plano ✋ → ciclos: dev por tarefa (as independentes em
 
 O passo a passo, com o que você digita e o que vê em cada etapa, está em [Como é uma entrega](docs/como-e-uma-entrega.md).
 
-Com você ausente, o [modo autônomo](plugins/pipeline/skills/manager/references/autonomous.md) do manager troca as aprovações por uma lista VALIDAR e não faz merge nem push.
+Com você ausente, o [modo autônomo](plugins/foreman/skills/manager/references/autonomous.md) do manager troca as aprovações por uma lista VALIDAR e não faz merge nem push.
 
 ## Começo rápido
 
@@ -46,19 +46,19 @@ Os quatro plugins de que ele depende (`superpowers`, `frontend-design`, `claude-
 
 ```bash
 # uma vez por máquina
-claude plugin marketplace add Lindenjefferson/claude-pipeline
+claude plugin marketplace add Lindenjefferson/foreman
 
 # em cada projeto, só nele (o escopo local não vai para o git); num projeto novo basta a pasta vazia
 cd meu-projeto
-claude plugin install pipeline@linden-plugins --scope local
+claude plugin install foreman@linden-plugins --scope local
 ```
 
 **Usar:** abra o Claude Code na pasta do projeto, ligue o modo de permissão `auto` do Claude Code (sem ele, a entrega para em cada prompt de permissão) e digite:
 
-1. `prepara este projeto com o kickoff` (ou `/pipeline:kickoff`): uma vez, cria a estrutura;
+1. `prepara este projeto com o kickoff` (ou `/foreman:kickoff`): uma vez, cria a estrutura;
 2. o que você quer entregar, como `implementar a exportação do extrato em CSV` ou `corrigir o bug do login`: o **manager** conduz do plano ao gate.
 
-Para tirar de um projeto: `claude plugin uninstall pipeline@linden-plugins --scope local`.
+Para tirar de um projeto: `claude plugin uninstall foreman@linden-plugins --scope local`.
 
 Os scripts leem algumas seções do `CLAUDE.md` do projeto pelo título, em português ("Comandos", "Testes", "Versão" e as outras que o kickoff escreve): mantenha esses títulos como estão. O resto do arquivo, e a conversa com o Claude, podem ser em qualquer língua.
 
@@ -68,24 +68,24 @@ Noutro computador, num projeto que já usa o plugin: clone, instale o plugin e p
 
 | Componente | Função |
 |---|---|
-| [`kickoff`](plugins/pipeline/skills/kickoff/SKILL.md) | Prepara um projeto novo ou existente: `CLAUDE.md`, `CLAUDE.local.md`, `docs/`, `.gitignore`, hook de segredos e permissões dos agentes. |
-| [`manager`](plugins/pipeline/skills/manager/SKILL.md) | Conduz a entrega do tamanho ao merge, em ciclos, com duas aprovações suas; o que vale só numa situação (modo autônomo, pausa, telas, paralelo, várias sessões) está em [`references/`](plugins/pipeline/skills/manager/references/), lido quando ela ocorre. |
-| [`validar`](plugins/pipeline/skills/validar/SKILL.md) | Percorre com você, item a item, as decisões tomadas em seu nome (lista VALIDAR) e grava cada resposta. |
-| [`atualizar`](plugins/pipeline/skills/atualizar/SKILL.md) | Atualiza o plugin num projeto num ponto de parada da entrega e, na sessão nova, acrescenta as linhas novas dos templates e aplica as notas de cada versão pulada. |
-| [`feedback-plugin`](plugins/pipeline/skills/feedback-plugin/SKILL.md) | No fim da entrega, escreve o pedido para a sessão do plugin, com métricas e lições candidatas a regra geral. |
-| [`discovery`](plugins/pipeline/agents/discovery.md) | Extrai fatos das fontes brutas (planilhas, apps de referência, documentos) antes do design e prepara o debate da spec (o pré-respondido, opções e sugestão para o resto; stacks num projeto novo). |
-| [`dev`](plugins/pipeline/agents/dev.md) | Implementa uma tarefa com o teste primeiro e atualiza a doc do módulo. |
-| [`reviewer`](plugins/pipeline/agents/reviewer.md) | Revisa a spec, o plano e o diff de cada ciclo; só reporta o que consegue provar. |
-| [`qa`](plugins/pipeline/agents/qa.md) | Roda a suíte e confere os critérios de aceite do ciclo, com a verificação de interface do projeto quando há tela. |
-| [`ledger.py`](plugins/pipeline/skills/manager/ledger.py) | Registro da entrega: o que cada agente concluiu, o que falta, itens adiados e métricas. |
-| [`gate.py`](plugins/pipeline/skills/manager/gate.py) | Checagem final local, sem agente: READY ou NOT READY e o relatório de qualidade. |
-| [`general.md`](plugins/pipeline/checklists/general.md) | Princípios gerais de qualidade que o `dev` e o `reviewer` aplicam, divididos em fatias lidas conforme o produto. |
-| [`agents-shared.md`](plugins/pipeline/checklists/agents-shared.md) | O que `dev` e `qa` têm em comum (servidor de dev, processos que iniciam). |
-| [`spec-checklist.md`](plugins/pipeline/skills/manager/templates/spec-checklist.md) | O que toda spec e todo plano respondem, com o pré-mortem de cada escrita. |
-| [Hook de segredos e UTF-8](plugins/pipeline/hooks/pre-commit-secret-scan.py) | `pre-commit` que bloqueia `.env`, linhas com cara de segredo e texto que não é UTF-8 ou tem caracteres invisíveis. |
-| [Hook de retomada](plugins/pipeline/hooks/session-start.py) | Ao abrir ou retomar uma sessão, devolve ao manager o estado da entrega. |
-| [Guarda dos comandos](plugins/pipeline/hooks/bash-guard.py) | Antes de cada comando: nega pular o `pre-commit`, publicar na branch principal no modo autônomo e o servidor de dev fora do background; pergunta antes do push da principal e antes de iniciar uma entrega fora do modo de permissão `auto` do Claude Code. |
-| [Andamento](plugins/pipeline/hooks/andamento.js) | Mod do Claude Code (uma extensão da interface): até três linhas sob o prompt com o andamento da entrega e o que espera você, e o painel `/andamento`. |
+| [`kickoff`](plugins/foreman/skills/kickoff/SKILL.md) | Prepara um projeto novo ou existente: `CLAUDE.md`, `CLAUDE.local.md`, `docs/`, `.gitignore`, hook de segredos e permissões dos agentes. |
+| [`manager`](plugins/foreman/skills/manager/SKILL.md) | Conduz a entrega do tamanho ao merge, em ciclos, com duas aprovações suas; o que vale só numa situação (modo autônomo, pausa, telas, paralelo, várias sessões) está em [`references/`](plugins/foreman/skills/manager/references/), lido quando ela ocorre. |
+| [`validar`](plugins/foreman/skills/validar/SKILL.md) | Percorre com você, item a item, as decisões tomadas em seu nome (lista VALIDAR) e grava cada resposta. |
+| [`atualizar`](plugins/foreman/skills/atualizar/SKILL.md) | Atualiza o plugin num projeto num ponto de parada da entrega e, na sessão nova, acrescenta as linhas novas dos templates e aplica as notas de cada versão pulada. |
+| [`feedback-plugin`](plugins/foreman/skills/feedback-plugin/SKILL.md) | No fim da entrega, escreve o pedido para a sessão do plugin, com métricas e lições candidatas a regra geral. |
+| [`discovery`](plugins/foreman/agents/discovery.md) | Extrai fatos das fontes brutas (planilhas, apps de referência, documentos) antes do design e prepara o debate da spec (o pré-respondido, opções e sugestão para o resto; stacks num projeto novo). |
+| [`dev`](plugins/foreman/agents/dev.md) | Implementa uma tarefa com o teste primeiro e atualiza a doc do módulo. |
+| [`reviewer`](plugins/foreman/agents/reviewer.md) | Revisa a spec, o plano e o diff de cada ciclo; só reporta o que consegue provar. |
+| [`qa`](plugins/foreman/agents/qa.md) | Roda a suíte e confere os critérios de aceite do ciclo, com a verificação de interface do projeto quando há tela. |
+| [`ledger.py`](plugins/foreman/skills/manager/ledger.py) | Registro da entrega: o que cada agente concluiu, o que falta, itens adiados e métricas. |
+| [`gate.py`](plugins/foreman/skills/manager/gate.py) | Checagem final local, sem agente: READY ou NOT READY e o relatório de qualidade. |
+| [`general.md`](plugins/foreman/checklists/general.md) | Princípios gerais de qualidade que o `dev` e o `reviewer` aplicam, divididos em fatias lidas conforme o produto. |
+| [`agents-shared.md`](plugins/foreman/checklists/agents-shared.md) | O que `dev` e `qa` têm em comum (servidor de dev, processos que iniciam). |
+| [`spec-checklist.md`](plugins/foreman/skills/manager/templates/spec-checklist.md) | O que toda spec e todo plano respondem, com o pré-mortem de cada escrita. |
+| [Hook de segredos e UTF-8](plugins/foreman/hooks/pre-commit-secret-scan.py) | `pre-commit` que bloqueia `.env`, linhas com cara de segredo e texto que não é UTF-8 ou tem caracteres invisíveis. |
+| [Hook de retomada](plugins/foreman/hooks/session-start.py) | Ao abrir ou retomar uma sessão, devolve ao manager o estado da entrega. |
+| [Guarda dos comandos](plugins/foreman/hooks/bash-guard.py) | Antes de cada comando: nega pular o `pre-commit`, publicar na branch principal no modo autônomo e o servidor de dev fora do background; pergunta antes do push da principal e antes de iniciar uma entrega fora do modo de permissão `auto` do Claude Code. |
+| [Andamento](plugins/foreman/hooks/andamento.js) | Mod do Claude Code (uma extensão da interface): até três linhas sob o prompt com o andamento da entrega e o que espera você, e o painel `/andamento`. |
 
 ## O que fica no seu projeto
 
@@ -100,14 +100,14 @@ Vai para o git, no mesmo slug da entrega: a spec (`docs/specs/<slug>.md`, nas en
 
 ## Atualização
 
-Peça "atualizar o plugin" na sessão do projeto: a skill [`atualizar`](plugins/pipeline/skills/atualizar/SKILL.md) espera um ponto de parada da entrega e aplica as notas de cada versão do [histórico](plugins/pipeline/UPGRADING.md). Ative também a proteção de push contra segredos do seu provedor (no GitHub, *secret scanning push protection*): o hook local evita acidentes, não quem o pula.
+Peça "atualizar o plugin" na sessão do projeto: a skill [`atualizar`](plugins/foreman/skills/atualizar/SKILL.md) espera um ponto de parada da entrega e aplica as notas de cada versão do [histórico](plugins/foreman/UPGRADING.md). Ative também a proteção de push contra segredos do seu provedor (no GitHub, *secret scanning push protection*): o hook local evita acidentes, não quem o pula.
 
 ## Para onde vai
 
-As ideias em avaliação e as recusadas estão no [roadmap](docs/roadmap.md); o que cada versão entregou, no [histórico](plugins/pipeline/UPGRADING.md).
+As ideias em avaliação e as recusadas estão no [roadmap](docs/roadmap.md); o que cada versão entregou, no [histórico](plugins/foreman/UPGRADING.md).
 
 ## Licença
 
 [MIT](LICENSE). Feito e usado no dia a dia pelo autor nos próprios projetos; issues e sugestões são bem-vindas, sem garantia de suporte.
 
-Para contribuir ou mudar o plugin, as premissas e as regras estão no [`CLAUDE.md`](CLAUDE.md); um clone local (`claude plugin marketplace add ./claude-pipeline`) é carregado do disco, e as edições valem na próxima sessão.
+Para contribuir ou mudar o plugin, as premissas e as regras estão no [`CLAUDE.md`](CLAUDE.md); um clone local (`claude plugin marketplace add ./foreman`) é carregado do disco, e as edições valem na próxima sessão.

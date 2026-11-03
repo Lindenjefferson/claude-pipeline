@@ -1,6 +1,6 @@
 # Como é uma entrega
 
-O caminho de um pedido do começo ao merge, para quem chega pelo [README](../README.md) e ainda não leu as regras do [`manager`](../plugins/pipeline/skills/manager/SKILL.md), que são a fonte de cada passo. Os números do fim são de uma entrega real.
+O caminho de um pedido do começo ao merge, para quem chega pelo [README](../README.md) e ainda não leu as regras do [`manager`](../plugins/foreman/skills/manager/SKILL.md), que são a fonte de cada passo. Os números do fim são de uma entrega real.
 
 ## 1. Preparar o projeto (uma vez)
 
@@ -8,7 +8,7 @@ Na pasta do projeto, com o plugin instalado, você digita:
 
 > prepara este projeto com o kickoff
 
-(ou `/pipeline:kickoff`). O kickoff cria o `CLAUDE.md` do projeto, com os comandos de build e de teste que o gate vai rodar, a pasta `docs/`, o `.gitignore`, o hook que barra segredos no commit e as permissões dos agentes. Antes de liberar qualquer comando para os agentes, ele mostra a lista a você.
+(ou `/foreman:kickoff`). O kickoff cria o `CLAUDE.md` do projeto, com os comandos de build e de teste que o gate vai rodar, a pasta `docs/`, o `.gitignore`, o hook que barra segredos no commit e as permissões dos agentes. Antes de liberar qualquer comando para os agentes, ele mostra a lista a você.
 
 ## 2. Pedir uma entrega
 
@@ -44,7 +44,7 @@ Com READY, você decide o merge e o push. Nada sai da máquina sem esse pedido.
 
 ## Sem você por perto
 
-No [modo autônomo](../plugins/pipeline/skills/manager/references/autonomous.md), as aprovações viram itens VALIDAR, que você confere quando volta com a skill `validar`. O guarda dos comandos nega o merge e o push na branch principal enquanto o modo estiver ligado, salvo a entrega que você aprovou de antemão.
+No [modo autônomo](../plugins/foreman/skills/manager/references/autonomous.md), as aprovações viram itens VALIDAR, que você confere quando volta com a skill `validar`. O guarda dos comandos nega o merge e o push na branch principal enquanto o modo estiver ligado, salvo a entrega que você aprovou de antemão.
 
 ## Quanto custa
 

@@ -1,15 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(for t in plugins/pipeline/hooks/tests/test_*.py plugins/pipeline/skills/manager/tests/test_*.py; do sh plugins/pipeline/hooks/python.sh \"$t\"; done)",
-      "Bash((cd plugins/pipeline && claude plugin test))",
-      "Bash(claude plugin validate plugins/pipeline)",
-      "PowerShell(claude plugin validate plugins/pipeline)",
+      "Bash(for t in plugins/foreman/hooks/tests/test_*.py plugins/foreman/skills/manager/tests/test_*.py; do sh plugins/foreman/hooks/python.sh \"$t\"; done)",
+      "Bash((cd plugins/foreman && claude plugin test))",
+      "Bash(claude plugin validate plugins/foreman)",
+      "PowerShell(claude plugin validate plugins/foreman)",
       "Bash(claude plugin validate .)",
       "PowerShell(claude plugin validate .)"
     ],
     "deny": [
-      "Edit(.pipeline-secrets-allow)",
+      "Edit(.foreman-secrets-allow)",
       "Bash(git commit --no-v*)",
       "PowerShell(git commit --no-v*)",
       "Bash(git commit -n*)",

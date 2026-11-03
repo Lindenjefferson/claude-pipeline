@@ -8,8 +8,8 @@
   ],
   "plugins": [
     {
-      "name": "pipeline",
-      "source": "./plugins/pipeline",
+      "name": "foreman",
+      "source": "./plugins/foreman",
       "description": "Independent multi-agent dev team in short cycles (manager, dev, reviewer, qa; ledger; local gate script; pre-commit secret scan), enabled per repo."
     },
     {

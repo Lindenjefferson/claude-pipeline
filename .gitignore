@@ -3,4 +3,4 @@ __pycache__/
 .idea/
 .claude/worktrees/
 # gerado pelo Claude Code ao carregar o mod; aponta para .claude-plugin/types/, também gerada
-plugins/pipeline/tsconfig.json
+plugins/foreman/tsconfig.json
