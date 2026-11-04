@@ -12,6 +12,8 @@ O objetivo é que nada errado saia da máquina sem que você precise acompanhar 
 - **Independente de stack.** Nada de framework, fornecedor ou linguagem. Regra de stack ou de projeto mora no `CLAUDE.md` e no `docs/lessons.md` de cada projeto.
 - **Enxuto.** Toda mudança remove o que ficou desnecessário, duplicado ou sem uso. Uma regra geral curta vale mais que várias específicas.
 
+As premissas que regem o plugin e as regras para mudá-lo estão no [`CLAUDE.md`](CLAUDE.md#o-que-rege-o-plugin).
+
 ## Como funciona
 
 O registro do que cada agente fez (o *ledger*) e os relatórios ficam em `.superpowers/`, fora do git, a pasta de trabalho que o plugin divide com o [`superpowers`](https://github.com/obra/superpowers). Os termos que aparecem daqui em diante (slug, ledger, VALIDAR, gate, modo autônomo) estão no [vocabulário](#vocabulário).
