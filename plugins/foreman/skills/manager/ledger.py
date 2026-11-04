@@ -47,9 +47,14 @@ status lists each copy left over, pending (step leftover, with its action) until
 worktree under ../_temp/<project>-worktrees/ (project being the main worktree's folder) or .claude/worktrees/ with no
 claim, its HEAD in the delivery head and nothing uncommitted, a folder of ../_temp/<project>-worktrees/ with no .git
 (not <copy>-saida..., the output of a copy still there, which goes with it),
-and a local branch integrated in this delivery (in the head, not in the base) that is neither the current one nor the
-branch of a claimed worktree or of one with uncommitted work (the next delivery's spec and plan before its start);
-status --json gives them as leftovers: {kind worktree|folder|branch, path, branch, action}. --worktree (an existing
+and a local branch integrated in this delivery (in the head, not in the base) that is neither the current one, the
+branch start --base named (kept as base_ref) or the remote's default (origin/HEAD), which move on after the start, nor
+the branch of a claimed worktree or of one with uncommitted work (the next delivery's spec and plan before its start);
+status --json gives them as leftovers: {kind worktree|folder|branch, path, branch, action}, the action of a worktree
+or folder naming first the PID and command line of each process still running from it (its command line naming the path
+or a file in it, this command and its ancestors left out; one started with a relative path or a Windows short name is not seen), which keeps
+Windows from removing it. A dev's add with a DONE verdict is refused the same way while such a process runs from its
+claim's worktree, listening or not; a listing that fails finds nothing. --worktree (an existing
 directory) and --origin (a commit, resolved to its hash there) are kept with the claim; status shows them and, when
 the delivery head is no longer the origin, names the head (a fact: it moves with every integration). A claim's tip is
 its worktree's current HEAD (null with no worktree or folder): resume prints "- <task> in <worktree> at <tip>", the
@@ -230,12 +235,15 @@ mode it waits for the user, a standing approval or not: the scan asks them its c
 Unfilled settings
 -----------------
 
-status --json gives settings: {unfilled, together}. unfilled lists, in file order, each "- " line still holding a
-template placeholder _(...)_ in the sections that change speed or cost: Execução em paralelo of CLAUDE.md, and
+status --json gives settings: {unfilled, together, idle}. unfilled lists, in file order, each "- " line still holding
+a template placeholder _(...)_ in the sections that change speed or cost: Execução em paralelo of CLAUDE.md, and
 Execução em paralelo and Uso da conta of CLAUDE.local.md, at the ledger's root ({file, section, line}, line being the
 text before its colon); a missing CLAUDE.local.md is one {file, section: null, line: null}, a missing CLAUDE.md
 nothing. together, while the parallel section of CLAUDE.md is unfilled, is how many tasks of the current plan cycle
-are running or ready (no dependency left), when two or more; else null. It is advice, never pending.
+are running or ready (no dependency left), when two or more; else null. idle, once that section is there and filled,
+lists the tasks of the current plan cycle ready and not claimed whose Touches: (read from the plan) meet none of the
+tasks in flight nor of an earlier task of the list, so all of them can start at once; a task with no Touches: is left
+out, and the list is empty while a task in flight has none. Both are advice, never pending.
 
 Status data and plan progress
 -----------------------------
@@ -771,11 +779,14 @@ def start(args):
     base = git_head(args.base, args.ledger)
     if base is None:
         sys.exit(f"not a commit: {args.base}")
+    where = os.path.dirname(os.path.abspath(args.ledger))
+    named = {"base_ref": args.base} if git_ok(where if os.path.isdir(where) else None, "show-ref", "--verify",
+                                              "--quiet", "refs/heads/" + args.base) is not None else {}
     if args.next:
         target = next_path(args.ledger, args.slug)
         if os.path.exists(target):
             sys.exit(f"{args.slug} is already in preparation in {target}")
-        write(target, {"type": "start", "slug": args.slug, "base": base, "plan": args.plan, "next": True})
+        write(target, {"type": "start", "slug": args.slug, "base": base, **named, "plan": args.plan, "next": True})
         print(f"preparing {args.slug} in {target}: pass --ledger {target} to its spec and plan rounds (add, measure, "
               f"note, defer); its code starts once this delivery reaches the gate, with start --slug {args.slug} "
               "--archive")
@@ -793,7 +804,8 @@ def start(args):
         with open(prepared, encoding="utf-8") as handle:
             lines = [line for line in handle.read().splitlines() if line.strip()]
         opening = {key: value for key, value in json.loads(lines[0]).items() if key != "next"}
-        opening.update(base=base, plan=args.plan or opening.get("plan"),
+        opening.pop("base_ref", None)
+        opening.update(base=base, **named, plan=args.plan or opening.get("plan"),
                        promoted=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"))
         os.makedirs(os.path.dirname(os.path.abspath(args.ledger)), exist_ok=True)
         with open(args.ledger, "w", encoding="utf-8", newline="\n") as handle:
@@ -801,7 +813,7 @@ def start(args):
         os.remove(prepared)
         print(f"promoted {args.slug} from {prepared} at {base[:12]}, its preparation kept")
     else:
-        write(args.ledger, {"type": "start", "slug": args.slug, "base": base, "plan": args.plan})
+        write(args.ledger, {"type": "start", "slug": args.slug, "base": base, **named, "plan": args.plan})
         print(f"started {args.slug} at {base[:12]}")
     report, moved = carried(args.ledger)
     passed, offset = [], len(deferred(read(args.ledger)))
@@ -1045,6 +1057,12 @@ def add(args):
     blocking = args.critical + args.important
     if args.agent in ("reviewer", "qa") and (args.verdict == "FAIL") != (blocking > 0):
         sys.exit("FAIL needs open Critical/Important findings (--critical or --important > 0) and PASS none")
+    tree = (claims(entries).get(args.task) or {}).get("worktree") if args.agent == "dev" and args.verdict in DONE         else None
+    held = holders(tree) if tree and os.path.isdir(tree) else []
+    if held:
+        sys.exit(f"still running from {tree}: {'; '.join(held)}. The manager stops what the dev started by that PID "
+                 "(with its children), or tears the copy down as Execução em paralelo says when it is the copy's own, "
+                 "then adds the run again")
     later = None
     if args.agent == "dev" and not FOLLOW_UP.fullmatch(args.task):
         groups = cycles(entries)
@@ -1139,6 +1157,60 @@ def accepts(port):
     return False
 
 
+def processes():
+    """[(pid, parent pid, command line)] of this machine's processes; [] when they cannot be listed."""
+    try:
+        if os.name == "nt":
+            script = ("[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-CimInstance Win32_Process | "
+                      "ForEach-Object { \"$($_.ProcessId)`t$($_.ParentProcessId)`t"
+                      "$($_.CommandLine -replace '[\\r\\n]+', ' ')\" }")
+            out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], timeout=10,
+                                 stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
+                                 errors="replace").stdout
+            rows = [line.rstrip("\r").split("\t", 2) for line in out.splitlines()]
+            return [(int(row[0]), int(row[1] or 0), row[2]) for row in rows if len(row) == 3 and row[0].isdigit()]
+        if os.path.isdir("/proc"):
+            found = []
+            for name in filter(str.isdigit, os.listdir("/proc")):
+                try:
+                    with open(f"/proc/{name}/cmdline", "rb") as handle:
+                        command = handle.read().replace(b"\0", b" ").decode("utf-8", "replace")
+                    with open(f"/proc/{name}/stat", encoding="utf-8", errors="replace") as handle:
+                        parent = int(handle.read().rpartition(")")[2].split()[1])
+                except (OSError, ValueError, IndexError):
+                    continue
+                found.append((int(name), parent, command))
+            return found
+        out = subprocess.run(["ps", "-axo", "pid=,ppid=,command="], capture_output=True, text=True, timeout=10,
+                             stdin=subprocess.DEVNULL).stdout
+        rows = [line.split(None, 2) for line in out.splitlines()]
+        return [(int(row[0]), int(row[1]), row[2]) for row in rows if len(row) == 3 and row[0].isdigit()]
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return []
+
+
+def holders(path, found=None):
+    """'PID <pid> (<command>)' for each process (of found, else listed now), other than this one and its ancestors,
+    whose command line names path or a file in it: a server left up from a copy, listening or not, keeps Windows from
+    removing its folder."""
+    forms = set()
+    for form in {path, os.path.abspath(path), os.path.realpath(path)}:
+        form = form.replace("\\", "/").rstrip("/")
+        forms.add(form)
+        if re.match(r"[A-Za-z]:/", form):
+            forms.add("/" + form[0].lower() + form[2:])
+    pattern = re.compile(r"(?<![\w.-])(?:" + "|".join(map(re.escape, sorted(forms))) + r")(?![\w.-])",
+                         re.IGNORECASE if os.name == "nt" else 0)
+    found = processes() if found is None else found
+    parents = {pid: parent for pid, parent, _ in found}
+    mine, pid = set(), os.getpid()
+    while pid and pid not in mine:
+        mine.add(pid)
+        pid = parents.get(pid)
+    return [f"PID {pid} ({command.strip()[:120]})" for pid, _, command in found
+            if pid not in mine and pattern.search(command.replace("\\", "/"))]
+
+
 def qa_report(args, entries):
     """The tested commit of a saved qa report, refused when a line of qa.md's report is missing or disagrees; stale
     when it is not the latest dev run's head or later (qa was dispatched before that run, as before a fix), a run held
@@ -1220,6 +1292,9 @@ def committed(entry, head):
     return bool(not entry.get("worktree") and entry.get("head") and head and entry["head"] != head)
 
 
+STOP_FIRST = "stop what still runs from it (by the PID of its port), then "
+
+
 def leftovers(entries, ledger, head):
     """Copies left after their task was integrated: worktrees and folders of the copies, and their branches."""
     where = os.path.dirname(os.path.abspath(ledger))
@@ -1255,9 +1330,17 @@ def leftovers(entries, ledger, head):
             continue  # the output folder of a copy still there goes with it
         if os.path.isdir(path) and norm(path) not in trees and not os.path.exists(os.path.join(path, ".git")):
             found.append({"kind": "folder", "path": path, "branch": None,
-                          "action": "stop what still runs from it (by the PID of its port), then delete the folder"})
+                          "action": STOP_FIRST + "delete the folder"})
+    running = processes() if found else []
+    for item in found:
+        held = holders(item["path"], running)
+        if held:
+            item["action"] = (f"stop {'; '.join(held)}, still running from it, then "
+                              + item["action"].removeprefix(STOP_FIRST))
     base = entries[0].get("base")
     current = git_ok(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    remote = (git_ok(root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD") or "").partition("/")[2]
+    busy |= {entries[0].get("base_ref"), remote} - {None, ""}  # the base branch and the remote's default may move on
     for line in (git_ok(root, "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads") or "").splitlines():
         name, _, commit = line.partition(" ")
         if name != current and name not in busy and integrated(commit) and not (
@@ -2022,7 +2105,9 @@ def status(args):
               "validar": validar(entries),
               "metrics": metrics(entries), "usage": usage, "night": night(entries),
               "disk": None if preparing(entries) else disk_watch(entries, args.ledger, held), "next": upcoming, "ready_for_gate": not pending}
-    report["settings"] = settings(args.ledger, report["scope"])
+    text = plan_text(entries, args.ledger) if report["scope"] else ""
+    report["settings"] = settings(args.ledger, report["scope"], lambda task: touch_items(
+        plan_field(text, task, "Touches")) if text else [])
     report["approval"] = standing(args.ledger)
     report["heartbeat"] = heartbeat(entries, auto)
     report["gates"] = [{"verdict": entry["verdict"], "failed": entry.get("failed", []), "at": entry.get("at")}
@@ -2073,6 +2158,10 @@ def status(args):
         if report["settings"]["together"]:
             print(f"settings: {report['settings']['together']} tasks could run together, but Execução em paralelo of "
                   "CLAUDE.md is unfilled: they run one at a time")
+        if report["settings"]["idle"]:
+            print(f"ready: {', '.join(report['settings']['idle'])}, dependencies in and nothing in flight touching "
+                  "them: dispatch them now, as capacity allows; when a setting holds them (the limit of heavy copies), "
+                  "tell the user, with your recommendation")
         for item in pending:
             print(f"pending: {item}")
         for item in upcoming:
@@ -2106,11 +2195,12 @@ HEAVY_WORDS = {"uma": 1, "um": 1, "one": 1, "duas": 2, "dois": 2, "two": 2, "tre
 SETTINGS = {"CLAUDE.md": ("execucao em paralelo",), "CLAUDE.local.md": ("execucao em paralelo", "uso da conta")}
 
 
-def settings(ledger, scope):
-    """The lines of the sections that change speed or cost still holding a placeholder, and the tasks that could run
-    together while the parallel section of CLAUDE.md is unfilled."""
+def settings(ledger, scope, touches):
+    """The lines of the sections that change speed or cost still holding a placeholder, the tasks that could run
+    together while the parallel section of CLAUDE.md is unfilled, and once it is filled the tasks ready and not
+    dispatched that meet nothing in flight."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(ledger)))
-    unfilled = []
+    unfilled, present = [], set()
     for name, sections in SETTINGS.items():
         try:
             with open(os.path.join(root, name), encoding="utf-8") as handle:
@@ -2124,6 +2214,8 @@ def settings(ledger, scope):
             if row.startswith("#"):
                 title = row.lstrip("# ").strip()
                 section = title if plain_text(title) in sections else None
+                if section:
+                    present.add(name)
             elif section and row.lstrip().startswith("- ") and "_(" in row:
                 label = row.strip().lstrip("-* ").partition(":")[0].strip()
                 unfilled.append({"file": name, "section": section, "line": label})
@@ -2132,7 +2224,17 @@ def settings(ledger, scope):
         ready = [task for task in scope["tasks"] if task["cycle"] == scope["current"]
                  and task["state"] in ("todo", "running")]
         together = len(ready) if len(ready) > 1 else None
-    return {"unfilled": unfilled, "together": together}
+    idle = []
+    if scope and "CLAUDE.md" in present and not any(item["file"] == "CLAUDE.md" for item in unfilled):
+        tasks = [task for task in scope["tasks"] if task["cycle"] == scope["current"]]
+        running = [touches(task["task"]) for task in tasks if task["state"] == "running"]
+        busy = [item for items in running for item in items]
+        for task in tasks if all(running) else []:
+            items = touches(task["task"])
+            if task["state"] == "todo" and items and not any(overlaps(a, b) for a in items for b in busy):
+                idle.append(task["task"])
+                busy += items
+    return {"unfilled": unfilled, "together": together, "idle": idle}
 
 
 def plain_text(text):

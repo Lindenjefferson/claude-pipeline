@@ -2245,6 +2245,28 @@ cfg_files(parallel=True)
 settings = status(CFG)["settings"]
 check("the parallel section filled: no count of tasks together, and its lines leave the list",
       settings["together"] is None and all(item["file"] == "CLAUDE.local.md" for item in settings["unfilled"]), settings)
+with open(os.path.join(cfg, "cfg-plan.md"), "w", encoding="utf-8", newline="\n") as handle:
+    handle.write("# Plan\n\n### A1\n- Depends on: none\n- Touches: `a.txt`\n\n### A2\n- Depends on: none\n"
+                 "- Touches: `b.txt`\n\n### A3\n- Depends on: none\n- Touches: `a.txt`\n\n### A4\n- Depends on: A1\n"
+                 "- Touches: `d.txt`\n\n### A5\n- Depends on: none\n\n### A6\n- Depends on: none\n- Touches: `b.txt`\n")
+run("plan", "--path", "cfg-plan.md", ledger=CFG, cwd=cfg)
+run("scope", "--cycle", "1", "--tasks", "A1,A2,A3,A4,A5,A6", ledger=CFG, cwd=cfg)
+run("claim", "--task", "A1", ledger=CFG, cwd=cfg)
+settings = status(CFG)["settings"]
+check("the parallel section filled: status lists the tasks ready and not dispatched whose Touches: meet nothing in "
+      "flight nor each other (not one that waits for a dependency, collides or has no Touches:)",
+      settings["idle"] == ["A2"], settings)
+text = run("status", ledger=CFG, cwd=cfg).stdout
+check("the text says to dispatch them now, and to tell the user when a setting holds them",
+      "A2" in text and "dispatch" in text and "user" in text, text)
+check("the tasks ready are advice, never pending",
+      not any("A2" in item for item in status(CFG)["pending"]), status(CFG)["pending"])
+run("claim", "--task", "A5", ledger=CFG, cwd=cfg)
+check("a task in flight with no Touches: may meet anything: the list is empty",
+      status(CFG)["settings"]["idle"] == [], status(CFG)["settings"])
+run("release", "--task", "A5", ledger=CFG, cwd=cfg)
+run("claim", "--task", "A2", ledger=CFG, cwd=cfg)
+check("with nothing more that can run, the list is empty", status(CFG)["settings"]["idle"] == [], status(CFG)["settings"])
 os.remove(os.path.join(cfg, "CLAUDE.local.md"))
 check("a missing CLAUDE.local.md is listed once, as missing",
       {"file": "CLAUDE.local.md", "section": None, "line": None} in status(CFG)["settings"]["unfilled"],
@@ -2309,6 +2331,24 @@ git(proj, "branch", "-D", "task-done")
 shutil.rmtree(os.path.join(copies, "half"))
 check("once the copies are torn down and the branch deleted, nothing is left over",
       json.loads(run("status", "--json", cwd=proj).stdout).get("leftovers") == [])
+# the default branch moving after the start (an earlier delivery merged into it, then into this stacked one) holds a
+# commit of the head that is not in the base: it is still no leftover, by the name given to --base or by origin/HEAD
+BASED = os.path.join(proj, ".superpowers", "based.jsonl")
+run("start", "--slug", "based", "--base", "main", ledger=BASED, cwd=proj)
+OLD_BASE = os.path.join(proj, ".superpowers", "old-base.jsonl")
+with open(OLD_BASE, "w", encoding="utf-8") as handle:
+    handle.write(json.dumps({"type": "start", "slug": "old", "base": git(proj, "rev-parse", "main")}) + "\n")
+git(proj, "switch", "-q", "main")
+git(proj, "commit", "-q", "--allow-empty", "-m", "an earlier delivery merged")
+git(proj, "switch", "-q", "feat/x")
+git(proj, "merge", "-q", "--no-edit", "main")
+branches = lambda ledger: [item.get("branch") for item in json.loads(run("status", "--json", ledger=ledger, cwd=proj)
+                                                                    .stdout).get("leftovers") or []]
+check("the branch named by start --base is no leftover after it moved", "main" not in branches(BASED), branches(BASED))
+git(proj, "update-ref", "refs/remotes/origin/main", "main")
+git(proj, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+check("a ledger that kept only the base's commit leaves out the remote's default branch (origin/HEAD)",
+      "main" not in branches(OLD_BASE), branches(OLD_BASE))
 
 # The free disk against the delivery's highest reading and the declared floor: advice in status, never pending.
 disk_root = tempfile.mkdtemp(prefix="ledger_disk_")
@@ -2518,6 +2558,67 @@ run("gate", "--verdict", "READY", ledger=TRACE)
 check("gate records each verdict with its failed checks; status --json gives them",
       r.returncode == 0 and [(g["verdict"], g["failed"]) for g in status(TRACE)["gates"]]
       == [("NOT_READY", ["Ledger", "Docs"]), ("READY", [])], status(TRACE).get("gates"))
+
+# a server a dev started in its worktree and left up holds the copy, listening or not (Windows then refuses to remove
+# the folder): the dev's add is refused naming its PID, and a leftover copy names the process that holds it
+HOLD = ".superpowers/hold.jsonl"
+same = lambda one, other: os.path.normcase(os.path.realpath(one)) == os.path.normcase(os.path.realpath(other))
+run("start", "--slug", "hold", ledger=HOLD)
+hold_tree = os.path.normpath(os.path.join(repo, "..", "_temp", os.path.basename(repo) + "-worktrees", "hold"))
+git(repo, "worktree", "add", "-q", "--detach", hold_tree)
+run("claim", "--task", "H1", "--worktree", hold_tree, "--origin", "HEAD", ledger=HOLD)
+stray = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", os.path.join(hold_tree, "server.js")])
+try:
+    r = add("dev", "DONE", "H1", ledger=HOLD)
+    check("add --agent dev is refused while a process still runs from the task's worktree, naming its PID",
+          r.returncode != 0 and str(stray.pid) in r.stderr and status(HOLD)["claims"], r.stderr)
+    r = add("dev", "BLOCKED", "H1", ledger=HOLD)
+    check("a dev that did not finish still records its run: only a DONE one waits for the worktree to be free",
+          r.returncode == 0, r.stderr)
+    run("claim", "--task", "H1", "--worktree", hold_tree, "--origin", "HEAD", ledger=HOLD)
+finally:
+    stray.kill()
+    stray.wait()
+wrapper = f"# {hold_tree}\nimport subprocess, sys\nsys.exit(subprocess.run(sys.argv[1:]).returncode)"
+r = subprocess.run([sys.executable, "-c", wrapper, sys.executable, LEDGER, "--ledger", HOLD, "add", "--agent", "dev",
+                    "--verdict", "DONE", "--task", "H1"], cwd=repo, capture_output=True, text=True, encoding="utf-8")
+check("the add's own shell naming the worktree does not hold it: once the server is stopped, the run is added",
+      r.returncode == 0 and not status(HOLD)["claims"], r.stderr)
+stray = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)",
+                          os.path.join(os.path.realpath(hold_tree), "server.js")])
+try:
+    left = [item for item in status(HOLD)["leftovers"] if item["kind"] == "worktree" and same(item["path"], hold_tree)]
+    check("a leftover copy's action names the PID of the process that still runs from it",
+          left and str(stray.pid) in left[0]["action"], left)
+finally:
+    stray.kill()
+    stray.wait()
+left = [item for item in status(HOLD)["leftovers"] if item["kind"] == "worktree" and same(item["path"], hold_tree)]
+check("with nothing running from it, the leftover's action is the plain one",
+      left and "PID" not in left[0]["action"], left)
+git(repo, "worktree", "remove", "--force", hold_tree)
+shutil.rmtree(os.path.join(repo, "..", "_temp", os.path.basename(repo) + "-worktrees"), ignore_errors=True)
+
+import importlib.util
+spec = importlib.util.spec_from_file_location("ledger_module", LEDGER)
+ledger_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ledger_module)
+base = os.path.realpath(tempfile.mkdtemp(prefix="ledger_holders_"))
+atexit.register(shutil.rmtree, base, True)
+tree = os.path.join(base, "T1")
+me, top = os.getpid(), 10 ** 9
+found = [(me, top + 1, f"python {tree}"), (top + 1, top + 2, f"sh -c 'cd {tree}'"), (top + 2, 0, f"bash {tree}"),
+         (top + 3, me, f"node {tree}{os.sep}server.js"), (top + 4, 0, f"node {tree}0{os.sep}server.js"),
+         (top + 5, 0, f"node {tree}-x{os.sep}a.js"), (top + 6, 0, f"node x{tree}{os.sep}a.js"),
+         (top + 7, 0, f'node "{tree}"')]
+held = [line.split()[1] for line in ledger_module.holders(tree, found)]
+check("holders names the processes whose command line is in the folder, never this one nor its ancestors, nor a "
+      "sibling folder that starts with the same name or a path that only ends with it",
+      held == [str(top + 3), str(top + 7)], held)
+if os.name == "nt":
+    bash_form = "/" + tree[0].lower() + tree[2:].replace("\\", "/")
+    held = ledger_module.holders(tree, [(top + 8, 0, f"node {bash_form}/server.js")])
+    check("holders also reads the Git Bash form of a Windows path", len(held) == 1, held)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)
