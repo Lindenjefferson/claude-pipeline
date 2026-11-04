@@ -848,8 +848,8 @@ check("Version FAILs on a pre-release, which it never reads as the final version
 sh("git", "reset", "-q", "--hard", released)
 commit("docs/nota.md", "# nota\n", "docs: only documentation")
 r = gate("--base", released)
-check("Version is SKIP when the delivery changed only documentation",
-      re.search(r"Version:\s+SKIP", r.stdout) and "only documentation" in r.stdout, r.stdout)
+check("Version FAILs when a delivery that changed only documentation keeps the version: docs raise the patch",
+      re.search(r"Version:\s+FAIL", r.stdout) and "not above the base" in r.stdout, r.stdout)
 
 # The report keeps the gate's warnings and the delivery's clock, so the next feedback-plugin can count them
 repo = os.path.join(base_dir, "repo6")

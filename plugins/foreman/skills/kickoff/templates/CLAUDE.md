@@ -26,7 +26,7 @@ Os agentes (`dev`, `qa`) usam esta seção para rodar e verificar o projeto, e o
 - Testes (verificação do projeto): _(comando dos testes que vigiam o projeto inteiro, como o que proíbe um padrão em qualquer arquivo; o `dev` o roda a cada tarefa e o `reviewer` confere o plano contra eles; opcional)_
 - Arquivos de teste (globs separados por espaço; o `gate.py` procura neles o id de cada critério de aceite): _(globs)_
 - Auditoria (vulnerabilidades das dependências; opcional): _(comando)_
-- Versão (os arquivos que guardam a versão do produto, separados por espaço; todos com o mesmo `x.y.z`, sem sufixo de pré-lançamento, que o `gate.py` exige acima do da branch principal): _(ex.: `package.json`)_
+- Versão (os arquivos que guardam a versão do produto, separados por espaço; todos com o mesmo `x.y.z`, sem sufixo de pré-lançamento, que o `gate.py` exige acima do da branch principal, a cada entrega; o manager a sobe no passo 6): _(ex.: `package.json`)_
 - Tempo máximo de cada comando do gate, em minutos (padrão 15): _(número entre crases, só quando um comando passa disso)_
 - Verificação de interface (se houver tela): _(comando)_
 - Servidor para a verificação de interface (o mesmo que o runner sobe, com as variáveis do ambiente de teste; quem sobe o servidor à mão usa este): _(comando)_
