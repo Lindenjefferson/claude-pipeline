@@ -51,7 +51,7 @@ and a local branch integrated in this delivery (in the head, not in the base) th
 branch of a claimed worktree or of one with uncommitted work (the next delivery's spec and plan before its start);
 status --json gives them as leftovers: {kind worktree|folder|branch, path, branch, action}, the action of a worktree
 or folder naming first the PID and command line of each process still running from it (its command line naming the path
-or a file in it, this command and its ancestors left out; one started with a relative path is not seen), which keeps
+or a file in it, this command and its ancestors left out; one started with a relative path or a Windows short name is not seen), which keeps
 Windows from removing it. A dev's add with a DONE verdict is refused the same way while such a process runs from its
 claim's worktree, listening or not; a listing that fails finds nothing. --worktree (an existing
 directory) and --origin (a commit, resolved to its hash there) are kept with the claim; status shows them and, when

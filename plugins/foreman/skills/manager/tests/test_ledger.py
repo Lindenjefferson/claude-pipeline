@@ -2566,7 +2566,8 @@ r = subprocess.run([sys.executable, "-c", wrapper, sys.executable, LEDGER, "--le
                     "--verdict", "DONE", "--task", "H1"], cwd=repo, capture_output=True, text=True, encoding="utf-8")
 check("the add's own shell naming the worktree does not hold it: once the server is stopped, the run is added",
       r.returncode == 0 and not status(HOLD)["claims"], r.stderr)
-stray = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", os.path.join(hold_tree, "server.js")])
+stray = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)",
+                          os.path.join(os.path.realpath(hold_tree), "server.js")])
 try:
     left = [item for item in status(HOLD)["leftovers"] if item["kind"] == "worktree" and same(item["path"], hold_tree)]
     check("a leftover copy's action names the PID of the process that still runs from it",
