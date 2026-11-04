@@ -2245,6 +2245,23 @@ cfg_files(parallel=True)
 settings = status(CFG)["settings"]
 check("the parallel section filled: no count of tasks together, and its lines leave the list",
       settings["together"] is None and all(item["file"] == "CLAUDE.local.md" for item in settings["unfilled"]), settings)
+with open(os.path.join(cfg, "cfg-plan.md"), "w", encoding="utf-8", newline="\n") as handle:
+    handle.write("# Plan\n\n### A1\n- Depends on: none\n- Touches: `a.txt`\n\n### A2\n- Depends on: none\n"
+                 "- Touches: `b.txt`\n\n### A3\n- Depends on: none\n- Touches: `a.txt`\n\n### A4\n- Depends on: A1\n"
+                 "- Touches: `d.txt`\n\n### A5\n- Depends on: none\n")
+run("plan", "--path", "cfg-plan.md", ledger=CFG, cwd=cfg)
+run("scope", "--cycle", "1", "--tasks", "A1,A2,A3,A4,A5", ledger=CFG, cwd=cfg)
+run("claim", "--task", "A1", ledger=CFG, cwd=cfg)
+settings = status(CFG)["settings"]
+check("the parallel section filled: status lists the tasks ready and not dispatched whose Touches: meet nothing in "
+      "flight (not one that waits for a dependency, collides or has no Touches:)", settings["idle"] == ["A2"], settings)
+text = run("status", ledger=CFG, cwd=cfg).stdout
+check("the text says to dispatch them now, and to tell the user when a setting holds them",
+      "A2" in text and "dispatch" in text and "user" in text, text)
+check("the tasks ready are advice, never pending",
+      not any("A2" in item for item in status(CFG)["pending"]), status(CFG)["pending"])
+run("claim", "--task", "A2", ledger=CFG, cwd=cfg)
+check("with nothing more that can run, the list is empty", status(CFG)["settings"]["idle"] == [], status(CFG)["settings"])
 os.remove(os.path.join(cfg, "CLAUDE.local.md"))
 check("a missing CLAUDE.local.md is listed once, as missing",
       {"file": "CLAUDE.local.md", "section": None, "line": None} in status(CFG)["settings"]["unfilled"],
@@ -2518,6 +2535,41 @@ run("gate", "--verdict", "READY", ledger=TRACE)
 check("gate records each verdict with its failed checks; status --json gives them",
       r.returncode == 0 and [(g["verdict"], g["failed"]) for g in status(TRACE)["gates"]]
       == [("NOT_READY", ["Ledger", "Docs"]), ("READY", [])], status(TRACE).get("gates"))
+
+# a server a dev started in its worktree and left up holds the copy, listening or not (Windows then refuses to remove
+# the folder): the dev's add is refused naming its PID, and a leftover copy names the process that holds it
+HOLD = ".superpowers/hold.jsonl"
+same = lambda one, other: os.path.normcase(os.path.realpath(one)) == os.path.normcase(os.path.realpath(other))
+run("start", "--slug", "hold", ledger=HOLD)
+hold_tree = os.path.normpath(os.path.join(repo, "..", "_temp", os.path.basename(repo) + "-worktrees", "hold"))
+git(repo, "worktree", "add", "-q", "--detach", hold_tree)
+run("claim", "--task", "H1", "--worktree", hold_tree, "--origin", "HEAD", ledger=HOLD)
+stray = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", os.path.join(hold_tree, "server.js")])
+try:
+    r = add("dev", "DONE", "H1", ledger=HOLD)
+    check("add --agent dev is refused while a process still runs from the task's worktree, naming its PID",
+          r.returncode != 0 and str(stray.pid) in r.stderr and status(HOLD)["claims"], r.stderr)
+finally:
+    stray.kill()
+    stray.wait()
+wrapper = f"# {hold_tree}\nimport subprocess, sys\nsys.exit(subprocess.run(sys.argv[1:]).returncode)"
+r = subprocess.run([sys.executable, "-c", wrapper, sys.executable, LEDGER, "--ledger", HOLD, "add", "--agent", "dev",
+                    "--verdict", "DONE", "--task", "H1"], cwd=repo, capture_output=True, text=True, encoding="utf-8")
+check("the add's own shell naming the worktree does not hold it: once the server is stopped, the run is added",
+      r.returncode == 0 and not status(HOLD)["claims"], r.stderr)
+stray = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", os.path.join(hold_tree, "server.js")])
+try:
+    left = [item for item in status(HOLD)["leftovers"] if item["kind"] == "worktree" and same(item["path"], hold_tree)]
+    check("a leftover copy's action names the PID of the process that still runs from it",
+          left and str(stray.pid) in left[0]["action"], left)
+finally:
+    stray.kill()
+    stray.wait()
+left = [item for item in status(HOLD)["leftovers"] if item["kind"] == "worktree" and same(item["path"], hold_tree)]
+check("with nothing running from it, the leftover's action is the plain one",
+      left and "PID" not in left[0]["action"], left)
+git(repo, "worktree", "remove", "--force", hold_tree)
+shutil.rmtree(os.path.join(repo, "..", "_temp", os.path.basename(repo) + "-worktrees"), ignore_errors=True)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)
