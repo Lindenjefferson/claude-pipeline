@@ -157,6 +157,27 @@ for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t.com"), 
     subprocess.run(["git", *args], cwd=loose, check=True, capture_output=True)
 check("with no ledger, a push to the main branch asks too", asks("git push origin main", loose))
 check("with no ledger, a push of a work branch passes", run(loose, "git push origin feat/y")[1] is None)
+
+
+def relative_cd(command, tool="Bash"):
+    reason = run(repo, command, tool=tool)[1]
+    return reason is not None and reason[0] == "deny" and "git -C" in reason[1]
+
+
+for command in ("cd ../../proj; git merge --ff-only feat/t1", "cd ../proj && git worktree remove ../proj-t1",
+                "cd sub; git commit -m x", "cd .. && git cherry-pick abc", "cd ../proj; git branch -d task-1",
+                "pushd ../proj && git merge task-1", "cd - ; git branch -D task-1", "cd ../proj; git branch -fd t",
+                "cd ../proj && git pull", "cd /c/p && cd ../q && git commit -m x"):
+    check(f"a delivery: a relative cd before integrating, committing or removing a copy is denied {command!r}",
+          relative_cd(command), str(run(repo, command)))
+check("a delivery: in PowerShell too", relative_cd(r"Set-Location ..\proj; git merge task-1", "PowerShell"))
+for command in ("cd /c/p/proj && git merge feat/x", "cd C:/p/proj; git commit -m x", r"cd C:\p\proj; git commit -m x",
+                "cd ~/proj && git merge x", "git -C /c/p/proj merge task-1", "cd sub && git status",
+                "git merge task-1; cd ..", 'git commit -m "cd .. first"', "cd $HOME && git commit -m x",
+                'cd "$ROOT" && git merge x', "(cd sub && make); git commit -m x", "x=$(cd sub && pwd); git commit",
+                "cd sub && cd /c/p && git commit -m x", "cd sub && git -C /c/p commit -m x"):
+    check(f"a delivery: passes {command!r}", run(repo, command)[1] is None, str(run(repo, command)))
+check("with no ledger, a relative cd before a commit passes", run(loose, "cd .. && git commit -m x")[1] is None)
 sh(sys.executable, LEDGER_PY, "mode", "autonomous")
 for command in main_pushes + ("git push", "git merge feat/x", "git merge --no-ff feat/x"):
     check(f"autonomous, on the main branch: denied {command!r}", reaches_main(command))

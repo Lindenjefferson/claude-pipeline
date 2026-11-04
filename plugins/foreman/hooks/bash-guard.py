@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
 """PreToolUse hook (matcher Bash|PowerShell, see hooks.json): denies skipping the secret-scan pre-commit hook,
-anything that reaches the default branch while the delivery is in autonomous mode, and the project's dev server
-outside background mode; asks the user before a delivery starts
+anything that reaches the default branch while the delivery is in autonomous mode, a relative cd before a git step
+that lands work, and the project's dev server outside background mode; asks the user before a delivery starts
 outside Claude Code's auto permission mode (not the delivery's autonomous mode).
+
+With a ledger (any mode), denied in the foreground or background: a relative change of directory (cd, pushd,
+Set-Location and their aliases, to a path that does not start at a root, a drive or ~, or cd -) followed in the same
+command by a git merge, cherry-pick, commit, rebase, pull, worktree remove or branch delete, dev agents' commands in
+their worktree included. Not read: a cd inside ( ) or $( ), which stays in its subshell, a target held in a variable,
+and a git step after a later rooted cd or with git -C and a rooted path. From a copy's worktree a
+relative path lands somewhere else, and a failed cd lets the steps after it run in the wrong folder or not at all
+without anyone noticing (an integration skipped twice in one delivery); git -C with an absolute path names the folder.
 
 A ledger.py start (also start --next), run in a session whose permission_mode is neither auto nor
 bypassPermissions, asks the user first, naming the mode: the delivery would stop at each permission prompt while the
@@ -598,6 +606,34 @@ def starts_delivery(command, powershell=False):
     return False
 
 
+CHANGES_DIRECTORY = {"cd", "pushd", "set-location", "sl", "chdir", "push-location"}
+# The git steps that integrate, commit or remove a copy: run in the wrong folder they do the wrong thing or nothing.
+LANDS = {"merge", "cherry-pick", "commit", "rebase", "pull"}
+ROOTED = re.compile(r"[/\\~]|[A-Za-z]:")
+
+
+def relative_cd_before_git(command, powershell=False):
+    """True when a relative change of directory comes before a git step that integrates, commits or removes a
+    copy, in the same command. A cd inside ( ) or $( ) stays in its subshell, a target held in a variable is not
+    read, a rooted cd after it puts the folder back on firm ground, and git -C with a rooted path names its own."""
+    while (inner := re.sub(r"\$?\([^()]*\)", " ", command)) != command:
+        command = inner
+    moved = False
+    for program, arguments, _ in simple_commands(command, powershell):
+        if program.lower() in CHANGES_DIRECTORY:
+            target = next((word for word in arguments if not word.startswith("-") or word == "-"), None)
+            if target is not None and not re.match(r"[$%`]", target):
+                moved = not ROOTED.match(target)
+        elif moved and program == "git":
+            name, rest, _ = git_command(arguments)
+            named = any(word == "-C" and ROOTED.match(after) for word, after in zip(arguments, arguments[1:]))
+            deletes = name == "branch" and any(word == "--delete" or re.fullmatch(r"-[A-Za-z]*[dD][A-Za-z]*", word)
+                                               for word in rest)
+            if not named and (name in LANDS or (name == "worktree" and rest[:1] == ["remove"]) or deletes):
+                return True
+    return False
+
+
 def main():
     payload = json.load(sys.stdin)
     if payload.get("tool_name") not in ("Bash", "PowerShell"):
@@ -629,6 +665,11 @@ def main():
         reason = ("The delivery is in autonomous mode (the ledger says so), and nothing reaches the default branch "
                   "without the user: no push to it, no merge into it, no pull request merge. Leave the merge and the "
                   "push for approval 2, when the user returns.")
+    elif relative_cd_before_git(command, powershell) and (ledger_state(cwd) or (0, 0, []))[2]:
+        reason = ("A relative cd before a git merge, cherry-pick, commit, rebase, pull, worktree remove or branch "
+                  "delete runs that step from wherever the cd lands, or not at all when it fails, and the steps "
+                  "after it go on silently. Name the folder instead, with git -C <absolute path>, one step per "
+                  "command (as references/parallel.md integrates).")
     elif tool_input.get("run_in_background"):
         return
     else:

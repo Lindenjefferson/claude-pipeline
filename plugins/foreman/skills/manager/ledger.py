@@ -6,7 +6,7 @@ Commands
 
   start   --slug <slug> [--base <rev>] [--plan <path>] [--archive]       once per delivery
   start   --slug <slug> --next [--base <rev>]                 the next delivery's spec and plan, while this one codes
-  add     --agent dev --task <id> --verdict <v> [--seconds <duration>] [--tokens N]
+  add     --agent dev --task <id> --verdict <v> [--from-agent <agent id>] [--seconds <duration>] [--tokens N]
   add     --agent reviewer|qa --verdict PASS|FAIL [--critical N --important N --minor N --origin <origin>=N,...]
           [--report <path> | --from-agent <agent id>] [--head <rev>] [--seconds <duration>] [--tokens N]
   add     --agent reviewer --task spec|plan|security --verdict PASS|FAIL ...
@@ -91,7 +91,11 @@ directory or from the ledger's project root. --from-agent <agent id> saves it in
 last SubagentHandback message, else its last text) is read from its transcript,
 <config>/projects/*/*/subagents/agent-<id>.jsonl under CLAUDE_CONFIG_DIR and ~/.claude, written to
 reports/<slug>/<agent>-<id>.md beside the ledger and kept as the run's --report, so a report the manager's context
-lost in a compaction is still on disk; with no transcript it is refused, naming --report; a qa --report must hold the
+lost in a compaction is still on disk; with no transcript it is refused, naming --report. It also measures the run
+from that transcript, as the completion notification counts it (from its first to its last timestamp, and the four
+token counts of its last message with usage), unless --seconds or --tokens is given; a dev run takes it for that
+alone (the dev's report is checked before integrating, never saved), and with no transcript it is refused, naming
+--seconds; a qa --report must hold the
 Verdict:, Commit:, Interface: and Processes: lines of qa.md's report (Verdict the one given, Commit a commit here,
 Processes naming the ports qa started a server on, ports: none when none, and none of them still accepting
 connections, on 127.0.0.1 or ::1),
@@ -498,9 +502,8 @@ def saved_report(path, ledger):
     return os.path.isfile(path) or os.path.isfile(os.path.join(root, path))
 
 
-def transcript_report(agent_id):
-    """The final report of a finished subagent, read from its transcript: its last SubagentHandback message, else
-    the text of its last message that has any; None when no transcript is found."""
+def transcript(agent_id):
+    """The path of a subagent's transcript, or None when none is found."""
     agent_id = agent_id.removeprefix("agent-")
     roots = dict.fromkeys(os.path.abspath(root) for root in (os.environ.get("CLAUDE_CONFIG_DIR"),
                                                              os.path.join(os.path.expanduser("~"), ".claude")) if root)
@@ -511,30 +514,64 @@ def transcript_report(agent_id):
             for session in sorted(os.listdir(sessions)) if os.path.isdir(sessions) else []:
                 path = os.path.join(sessions, session, "subagents", f"agent-{agent_id}.jsonl")
                 if os.path.isfile(path):
-                    return last_report(path)
+                    return path
     return None
 
 
-def last_report(path):
-    handback, text = None, None
+def transcript_messages(path):
+    """(timestamp, message) of each line of a transcript that parses, message {} when it has none."""
     with open(path, encoding="utf-8") as handle:
         for line in handle:
             try:
-                content = (json.loads(line).get("message") or {}).get("content")
-            except (ValueError, AttributeError):
+                item = json.loads(line)
+            except ValueError:
                 continue
-            for block in content if isinstance(content, list) else []:
-                if not isinstance(block, dict):
-                    continue
-                if block.get("type") == "tool_use" and block.get("name") == "SubagentHandback":
-                    handback = (block.get("input") or {}).get("message") or handback
-                elif block.get("type") == "text" and block.get("text", "").strip():
-                    text = block["text"]
+            if isinstance(item, dict):
+                message = item.get("message")
+                yield item.get("timestamp"), message if isinstance(message, dict) else {}
+
+
+def last_report(path):
+    """A finished subagent's final report: its last SubagentHandback message, else the text of its last message
+    that has any."""
+    handback, text = None, None
+    for _, message in transcript_messages(path):
+        content = message.get("content")
+        for block in content if isinstance(content, list) else []:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use" and block.get("name") == "SubagentHandback":
+                handback = (block.get("input") or {}).get("message") or handback
+            elif block.get("type") == "text" and block.get("text", "").strip():
+                text = block["text"]
     return handback or text
 
 
-def save_agent_report(args, entries):
-    report = transcript_report(args.from_agent)
+TOKEN_FIELDS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+
+
+def transcript_measure(path):
+    """(seconds, tokens) of a finished subagent, as its completion notification counts them: from its first to its
+    last timestamp, and the four token counts of its last message with usage; each None when the transcript lacks
+    it. An agent resumed later counts the wait between its turns too."""
+    stamps, usage = [], None
+    for stamp, message in transcript_messages(path):
+        try:
+            moment = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        except (AttributeError, TypeError, ValueError):
+            moment = None
+        if moment:
+            stamps.append(moment if moment.tzinfo else moment.replace(tzinfo=datetime.timezone.utc))
+        if isinstance(message.get("usage"), dict):
+            usage = message["usage"]
+    span = round((max(stamps) - min(stamps)).total_seconds()) if len(stamps) > 1 else None
+    tokens = sum(value for key in TOKEN_FIELDS if isinstance(value := usage.get(key), int)
+                 and not isinstance(value, bool) and value > 0) if usage else None
+    return span or None, tokens or None
+
+
+def save_agent_report(args, entries, path):
+    report = last_report(path) if path else None
     if not report:
         sys.exit(f"--from-agent {args.from_agent}: no transcript of that agent with a report was found; save the "
                  "report yourself and add the run with --report")
@@ -1038,12 +1075,20 @@ def add(args):
     if args.agent != "dev" and args.task and not (args.agent == "reviewer" and args.task in REVIEWS):
         sys.exit("--task on a reviewer run is spec, plan or security (one round of that review loop); qa runs take "
                  "none")
-    if args.agent == "dev" and (args.report or args.from_agent):
+    if args.agent == "dev" and args.report:
         sys.exit("--report keeps the file of a reviewer or qa report; the dev's report is checked before integrating")
     if args.report and args.from_agent:
         sys.exit("--report names a file you saved, --from-agent saves it: give one")
     if args.from_agent:
-        args.report = save_agent_report(args, entries)
+        found = transcript(args.from_agent)
+        if args.agent == "dev" and not found:
+            sys.exit(f"--from-agent {args.from_agent}: no transcript of that agent was found; add the run without "
+                     "it, with --seconds and --tokens from its completion notification")
+        if args.agent != "dev":
+            args.report = save_agent_report(args, entries, found)
+        span, used = transcript_measure(found)
+        args.seconds = str(span) if args.seconds is None and span else args.seconds
+        args.tokens = used if args.tokens is None and used else args.tokens
     named = git_head(args.head, args.ledger) if args.head else None
     if args.head and not named:
         sys.exit(f"--head {args.head} is no commit here")
@@ -2473,7 +2518,8 @@ def main():
         command.add_argument(f"--{severity}", type=count, default=0)
     command.add_argument("--origin", default="", help="design=N,assumption=N,plan=N,execution=N,environment=N")
     command.add_argument("--report", help="the file the manager saved a reviewer or qa report in")
-    command.add_argument("--from-agent", help="the reviewer or qa agent id: its report is saved from its transcript")
+    command.add_argument("--from-agent", help="the agent id: the run is measured from its transcript, and a reviewer "
+                         "or qa report is saved from it")
     command.add_argument("--head", help="the commit the run reviewed or tested, when the checkout is elsewhere")
     command.add_argument("--seconds", help="how long the run took, from its completion notification: 90, 12m, 1h5m or 12m30s")
     command.add_argument("--tokens", type=count, help="the tokens the run used, from its completion notification")
