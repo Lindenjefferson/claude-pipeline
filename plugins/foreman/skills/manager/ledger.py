@@ -47,8 +47,9 @@ status lists each copy left over, pending (step leftover, with its action) until
 worktree under ../_temp/<project>-worktrees/ (project being the main worktree's folder) or .claude/worktrees/ with no
 claim, its HEAD in the delivery head and nothing uncommitted, a folder of ../_temp/<project>-worktrees/ with no .git
 (not <copy>-saida..., the output of a copy still there, which goes with it),
-and a local branch integrated in this delivery (in the head, not in the base) that is neither the current one nor the
-branch of a claimed worktree or of one with uncommitted work (the next delivery's spec and plan before its start);
+and a local branch integrated in this delivery (in the head, not in the base) that is neither the current one, the
+branch start --base named (kept as base_ref) or the remote's default (origin/HEAD), which move on after the start, nor
+the branch of a claimed worktree or of one with uncommitted work (the next delivery's spec and plan before its start);
 status --json gives them as leftovers: {kind worktree|folder|branch, path, branch, action}, the action of a worktree
 or folder naming first the PID and command line of each process still running from it (its command line naming the path
 or a file in it, this command and its ancestors left out; one started with a relative path or a Windows short name is not seen), which keeps
@@ -778,11 +779,14 @@ def start(args):
     base = git_head(args.base, args.ledger)
     if base is None:
         sys.exit(f"not a commit: {args.base}")
+    where = os.path.dirname(os.path.abspath(args.ledger))
+    named = {"base_ref": args.base} if git_ok(where if os.path.isdir(where) else None, "show-ref", "--verify",
+                                              "--quiet", "refs/heads/" + args.base) is not None else {}
     if args.next:
         target = next_path(args.ledger, args.slug)
         if os.path.exists(target):
             sys.exit(f"{args.slug} is already in preparation in {target}")
-        write(target, {"type": "start", "slug": args.slug, "base": base, "plan": args.plan, "next": True})
+        write(target, {"type": "start", "slug": args.slug, "base": base, **named, "plan": args.plan, "next": True})
         print(f"preparing {args.slug} in {target}: pass --ledger {target} to its spec and plan rounds (add, measure, "
               f"note, defer); its code starts once this delivery reaches the gate, with start --slug {args.slug} "
               "--archive")
@@ -800,7 +804,8 @@ def start(args):
         with open(prepared, encoding="utf-8") as handle:
             lines = [line for line in handle.read().splitlines() if line.strip()]
         opening = {key: value for key, value in json.loads(lines[0]).items() if key != "next"}
-        opening.update(base=base, plan=args.plan or opening.get("plan"),
+        opening.pop("base_ref", None)
+        opening.update(base=base, **named, plan=args.plan or opening.get("plan"),
                        promoted=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"))
         os.makedirs(os.path.dirname(os.path.abspath(args.ledger)), exist_ok=True)
         with open(args.ledger, "w", encoding="utf-8", newline="\n") as handle:
@@ -808,7 +813,7 @@ def start(args):
         os.remove(prepared)
         print(f"promoted {args.slug} from {prepared} at {base[:12]}, its preparation kept")
     else:
-        write(args.ledger, {"type": "start", "slug": args.slug, "base": base, "plan": args.plan})
+        write(args.ledger, {"type": "start", "slug": args.slug, "base": base, **named, "plan": args.plan})
         print(f"started {args.slug} at {base[:12]}")
     report, moved = carried(args.ledger)
     passed, offset = [], len(deferred(read(args.ledger)))
@@ -1334,6 +1339,8 @@ def leftovers(entries, ledger, head):
                               + item["action"].removeprefix(STOP_FIRST))
     base = entries[0].get("base")
     current = git_ok(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    remote = (git_ok(root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD") or "").partition("/")[2]
+    busy |= {entries[0].get("base_ref"), remote} - {None, ""}  # the base branch and the remote's default may move on
     for line in (git_ok(root, "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads") or "").splitlines():
         name, _, commit = line.partition(" ")
         if name != current and name not in busy and integrated(commit) and not (

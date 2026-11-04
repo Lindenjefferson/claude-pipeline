@@ -2331,6 +2331,24 @@ git(proj, "branch", "-D", "task-done")
 shutil.rmtree(os.path.join(copies, "half"))
 check("once the copies are torn down and the branch deleted, nothing is left over",
       json.loads(run("status", "--json", cwd=proj).stdout).get("leftovers") == [])
+# the default branch moving after the start (an earlier delivery merged into it, then into this stacked one) holds a
+# commit of the head that is not in the base: it is still no leftover, by the name given to --base or by origin/HEAD
+BASED = os.path.join(proj, ".superpowers", "based.jsonl")
+run("start", "--slug", "based", "--base", "main", ledger=BASED, cwd=proj)
+OLD_BASE = os.path.join(proj, ".superpowers", "old-base.jsonl")
+with open(OLD_BASE, "w", encoding="utf-8") as handle:
+    handle.write(json.dumps({"type": "start", "slug": "old", "base": git(proj, "rev-parse", "main")}) + "\n")
+git(proj, "switch", "-q", "main")
+git(proj, "commit", "-q", "--allow-empty", "-m", "an earlier delivery merged")
+git(proj, "switch", "-q", "feat/x")
+git(proj, "merge", "-q", "--no-edit", "main")
+branches = lambda ledger: [item.get("branch") for item in json.loads(run("status", "--json", ledger=ledger, cwd=proj)
+                                                                    .stdout).get("leftovers") or []]
+check("the branch named by start --base is no leftover after it moved", "main" not in branches(BASED), branches(BASED))
+git(proj, "update-ref", "refs/remotes/origin/main", "main")
+git(proj, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+check("a ledger that kept only the base's commit leaves out the remote's default branch (origin/HEAD)",
+      "main" not in branches(OLD_BASE), branches(OLD_BASE))
 
 # The free disk against the delivery's highest reading and the declared floor: advice in status, never pending.
 disk_root = tempfile.mkdtemp(prefix="ledger_disk_")
