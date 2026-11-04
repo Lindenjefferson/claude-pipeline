@@ -2,9 +2,17 @@
 
 O que cada versão entregou e o que muda para quem atualiza. O arquivo vai junto com cada versão instalada: a skill `atualizar` lê o **Ao atualizar** de cada versão pulada, da mais antiga para a mais nova. Termine a entrega em andamento, ou pause-a, antes de atualizar o plugin (a skill `atualizar` confere). As ideias que ainda não viraram versão estão no [roadmap](../../docs/roadmap.md).
 
-Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o número do PR. Só as versões que o `feedback-plugin` das próximas entregas ainda confere (hoje da 1.9.8 à 1.36.0) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta. O que é major, minor e patch está no [`CLAUDE.md`](../../CLAUDE.md).
+Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o número do PR. Só as versões que o `feedback-plugin` das próximas entregas ainda confere (hoje da 1.9.8 à 1.37.0) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta. O que é major, minor e patch está no [`CLAUDE.md`](../../CLAUDE.md).
 
 **A numeração voltou para 1.x** (decisão do usuário, com o plugin só em instalação local). A 2.12.0 passou a ser a **1.12.0**, e cada versão da linha 2.x segue a mesma conta (a 2.9.9 é a 1.9.9, e assim por diante). A linha 1.x original, de antes da 2.0.0, virou 0.x pela mesma conta (a 1.6.0 de então é a **0.6.0**), para nenhum número valer por duas versões. Nada muda no comportamento. Uma cópia 2.x se atualiza pelo caminho normal — `claude plugin marketplace update linden-plugins` e `claude plugin update foreman@linden-plugins --scope <escopo>`, depois `/reload-plugins` — porque o instalador compara com o que o marketplace oferece, não a ordem dos números; a skill `atualizar` continua valendo. Conferido na prática, de 2.12.0 para 1.12.0.
+
+## 1.37.0 — documentação e trabalho pequeno sobem o patch
+
+- **Toda entrega de um projeto sobe a versão; documentação e trabalho `small` sobem o patch** (melhoria, decisão do dono): o gate deixava passar sem aumento a entrega que só mudou documentação, e o `SKILL.md` reservava o patch à correção, de modo que um item pequeno com comportamento novo subia o minor. Agora o gate exige a versão acima da base também numa entrega só de documentação, e o passo 6 sobe o patch para correção, documentação e trabalho do porte `small` da tabela de tamanhos (1 a 3 arquivos, mudança óbvia, nenhum contrato novo); o minor fica para comportamento novo de um trabalho maior. O molde do `CLAUDE.md` diz, na linha "Versão", que ela sobe a cada entrega no passo 6. Teste primeiro. Número: entregas fechadas sem aumento de versão (deve ser 0).
+
+O prompt cresceu meia linha no `SKILL.md` e no molde: o porte que decide o patch nenhum script sabe.
+
+**Ao atualizar:** nada muda nos ledgers. Uma entrega só de documentação passa a precisar do aumento do patch antes do gate. O plugin em si continua sem subir a versão numa mudança só de documentação fora do que se instala, porque ela não chega a nenhuma instalação.
 
 ## 1.36.0 — a execução medida pelo transcript e o `cd` relativo antes de integrar
 

@@ -15,8 +15,8 @@ decision, a delivery marked sensitive had its security scan and no copy of an in
 or operacao/, lessons.md, modulos/ with module docs only, discovery/, specs/, plans/, mockups/, quality-reports/, or a
 folder or file the index names); and no relative link of README.md, docs/README.md or docs/arquitetura.md points to a missing file); the files of the
 "Versão" line of "Comandos" (space-separated) hold one version x.y.z (after a version, versionName or __version__ key,
-quoted, bare or an XML element, or alone in the file; a pre-release fails) above the one they held at <base> (none there passes, and so does a delivery that changed only
-documentation; with no line, a project with docs/README.md fails and any other skips), named on the GATE line and in the report header; every acceptance-criterion id of the plan recorded in the ledger (tokens like AC-T3-2)
+quoted, bare or an XML element, or alone in the file; a pre-release fails) above the one they held at <base> (none there passes; a delivery that changed only documentation
+must raise it too; with no line, a project with docs/README.md fails and any other skips), named on the GATE line and in the report header; every acceptance-criterion id of the plan recorded in the ledger (tokens like AC-T3-2)
 appears in a tracked test file, as written or, for a test named by an identifier, in any case with _ for - and .
 (ac_t3_2, test_AC_T3_2; a longer id such as AC-T3-21, AC-T3-2.1 or ac_t3_2_1 is another id); the plan names no path inside .superpowers/, the agent workspace the kickoff
 ignores, since no clone would have it (the globs on the
@@ -353,9 +353,6 @@ def version(base):
     before = [version_in(out) for code, out in (git("show", f"{base}:{path}") for path in files) if code == 0]
     old = max((value for value in before if value), key=semver, default=None)
     if old and semver(now) <= semver(old):
-        changed = [name for name in git("diff", "--name-only", base, "HEAD")[1].split() if name]
-        if changed and all(name.startswith("docs/") or name.endswith(".md") for name in changed):
-            return True, f"only documentation changed since the base (version {now})", now
         return False, (f"the version is {now}, not above the base's {old}: the manager raises it before the gate "
                        "(manager step 6)"), now
     return True, "", now
