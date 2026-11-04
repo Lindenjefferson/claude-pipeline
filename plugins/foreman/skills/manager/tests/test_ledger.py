@@ -2248,18 +2248,23 @@ check("the parallel section filled: no count of tasks together, and its lines le
 with open(os.path.join(cfg, "cfg-plan.md"), "w", encoding="utf-8", newline="\n") as handle:
     handle.write("# Plan\n\n### A1\n- Depends on: none\n- Touches: `a.txt`\n\n### A2\n- Depends on: none\n"
                  "- Touches: `b.txt`\n\n### A3\n- Depends on: none\n- Touches: `a.txt`\n\n### A4\n- Depends on: A1\n"
-                 "- Touches: `d.txt`\n\n### A5\n- Depends on: none\n")
+                 "- Touches: `d.txt`\n\n### A5\n- Depends on: none\n\n### A6\n- Depends on: none\n- Touches: `b.txt`\n")
 run("plan", "--path", "cfg-plan.md", ledger=CFG, cwd=cfg)
-run("scope", "--cycle", "1", "--tasks", "A1,A2,A3,A4,A5", ledger=CFG, cwd=cfg)
+run("scope", "--cycle", "1", "--tasks", "A1,A2,A3,A4,A5,A6", ledger=CFG, cwd=cfg)
 run("claim", "--task", "A1", ledger=CFG, cwd=cfg)
 settings = status(CFG)["settings"]
 check("the parallel section filled: status lists the tasks ready and not dispatched whose Touches: meet nothing in "
-      "flight (not one that waits for a dependency, collides or has no Touches:)", settings["idle"] == ["A2"], settings)
+      "flight nor each other (not one that waits for a dependency, collides or has no Touches:)",
+      settings["idle"] == ["A2"], settings)
 text = run("status", ledger=CFG, cwd=cfg).stdout
 check("the text says to dispatch them now, and to tell the user when a setting holds them",
       "A2" in text and "dispatch" in text and "user" in text, text)
 check("the tasks ready are advice, never pending",
       not any("A2" in item for item in status(CFG)["pending"]), status(CFG)["pending"])
+run("claim", "--task", "A5", ledger=CFG, cwd=cfg)
+check("a task in flight with no Touches: may meet anything: the list is empty",
+      status(CFG)["settings"]["idle"] == [], status(CFG)["settings"])
+run("release", "--task", "A5", ledger=CFG, cwd=cfg)
 run("claim", "--task", "A2", ledger=CFG, cwd=cfg)
 check("with nothing more that can run, the list is empty", status(CFG)["settings"]["idle"] == [], status(CFG)["settings"])
 os.remove(os.path.join(cfg, "CLAUDE.local.md"))
@@ -2549,6 +2554,10 @@ try:
     r = add("dev", "DONE", "H1", ledger=HOLD)
     check("add --agent dev is refused while a process still runs from the task's worktree, naming its PID",
           r.returncode != 0 and str(stray.pid) in r.stderr and status(HOLD)["claims"], r.stderr)
+    r = add("dev", "BLOCKED", "H1", ledger=HOLD)
+    check("a dev that did not finish still records its run: only a DONE one waits for the worktree to be free",
+          r.returncode == 0, r.stderr)
+    run("claim", "--task", "H1", "--worktree", hold_tree, "--origin", "HEAD", ledger=HOLD)
 finally:
     stray.kill()
     stray.wait()
@@ -2570,6 +2579,27 @@ check("with nothing running from it, the leftover's action is the plain one",
       left and "PID" not in left[0]["action"], left)
 git(repo, "worktree", "remove", "--force", hold_tree)
 shutil.rmtree(os.path.join(repo, "..", "_temp", os.path.basename(repo) + "-worktrees"), ignore_errors=True)
+
+import importlib.util
+spec = importlib.util.spec_from_file_location("ledger_module", LEDGER)
+ledger_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ledger_module)
+base = os.path.realpath(tempfile.mkdtemp(prefix="ledger_holders_"))
+atexit.register(shutil.rmtree, base, True)
+tree = os.path.join(base, "T1")
+me, top = os.getpid(), 10 ** 9
+found = [(me, top + 1, f"python {tree}"), (top + 1, top + 2, f"sh -c 'cd {tree}'"), (top + 2, 0, f"bash {tree}"),
+         (top + 3, me, f"node {tree}{os.sep}server.js"), (top + 4, 0, f"node {tree}0{os.sep}server.js"),
+         (top + 5, 0, f"node {tree}-x{os.sep}a.js"), (top + 6, 0, f"node x{tree}{os.sep}a.js"),
+         (top + 7, 0, f'node "{tree}"')]
+held = [line.split()[1] for line in ledger_module.holders(tree, found)]
+check("holders names the processes whose command line is in the folder, never this one nor its ancestors, nor a "
+      "sibling folder that starts with the same name or a path that only ends with it",
+      held == [str(top + 3), str(top + 7)], held)
+if os.name == "nt":
+    bash_form = "/" + tree[0].lower() + tree[2:].replace("\\", "/")
+    held = ledger_module.holders(tree, [(top + 8, 0, f"node {bash_form}/server.js")])
+    check("holders also reads the Git Bash form of a Windows path", len(held) == 1, held)
 
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)

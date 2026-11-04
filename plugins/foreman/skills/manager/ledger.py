@@ -50,9 +50,10 @@ claim, its HEAD in the delivery head and nothing uncommitted, a folder of ../_te
 and a local branch integrated in this delivery (in the head, not in the base) that is neither the current one nor the
 branch of a claimed worktree or of one with uncommitted work (the next delivery's spec and plan before its start);
 status --json gives them as leftovers: {kind worktree|folder|branch, path, branch, action}, the action of a worktree
-or folder naming first the PID and command line of each process still running from it (its command line or working
-directory in the path, this command and its ancestors left out), which keeps Windows from removing it. A dev's add is
-refused the same way while such a process runs from its claim's worktree, listening or not. --worktree (an existing
+or folder naming first the PID and command line of each process still running from it (its command line naming the path
+or a file in it, this command and its ancestors left out; one started with a relative path is not seen), which keeps
+Windows from removing it. A dev's add with a DONE verdict is refused the same way while such a process runs from its
+claim's worktree, listening or not; a listing that fails finds nothing. --worktree (an existing
 directory) and --origin (a commit, resolved to its hash there) are kept with the claim; status shows them and, when
 the delivery head is no longer the origin, names the head (a fact: it moves with every integration). A claim's tip is
 its worktree's current HEAD (null with no worktree or folder): resume prints "- <task> in <worktree> at <tip>", the
@@ -240,7 +241,8 @@ text before its colon); a missing CLAUDE.local.md is one {file, section: null, l
 nothing. together, while the parallel section of CLAUDE.md is unfilled, is how many tasks of the current plan cycle
 are running or ready (no dependency left), when two or more; else null. idle, once that section is there and filled,
 lists the tasks of the current plan cycle ready and not claimed whose Touches: (read from the plan) meet none of the
-tasks in flight; a task with no Touches: is left out. Both are advice, never pending.
+tasks in flight nor of an earlier task of the list, so all of them can start at once; a task with no Touches: is left
+out, and the list is empty while a task in flight has none. Both are advice, never pending.
 
 Status data and plan progress
 -----------------------------
@@ -1050,12 +1052,12 @@ def add(args):
     blocking = args.critical + args.important
     if args.agent in ("reviewer", "qa") and (args.verdict == "FAIL") != (blocking > 0):
         sys.exit("FAIL needs open Critical/Important findings (--critical or --important > 0) and PASS none")
-    tree = (claims(entries).get(args.task) or {}).get("worktree") if args.agent == "dev" else None
+    tree = (claims(entries).get(args.task) or {}).get("worktree") if args.agent == "dev" and args.verdict in DONE         else None
     held = holders(tree) if tree and os.path.isdir(tree) else []
     if held:
-        sys.exit(f"still running from {tree}: {'; '.join(held)}. Stop what the dev started by that PID (with its "
-                 "children), or tear the copy down as Execução em paralelo says when it is the copy's own, then add "
-                 "the run again")
+        sys.exit(f"still running from {tree}: {'; '.join(held)}. The manager stops what the dev started by that PID "
+                 "(with its children), or tears the copy down as Execução em paralelo says when it is the copy's own, "
+                 "then adds the run again")
     later = None
     if args.agent == "dev" and not FOLLOW_UP.fullmatch(args.task):
         groups = cycles(entries)
@@ -1151,12 +1153,13 @@ def accepts(port):
 
 
 def processes():
-    """[(pid, parent pid, command line and working directory)] of this machine's processes; [] when not listed."""
+    """[(pid, parent pid, command line)] of this machine's processes; [] when they cannot be listed."""
     try:
         if os.name == "nt":
             script = ("[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-CimInstance Win32_Process | "
-                      "ForEach-Object { \"$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CommandLine)\" }")
-            out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], timeout=60,
+                      "ForEach-Object { \"$($_.ProcessId)`t$($_.ParentProcessId)`t"
+                      "$($_.CommandLine -replace '[\\r\\n]+', ' ')\" }")
+            out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], timeout=10,
                                  stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
                                  errors="replace").stdout
             rows = [line.rstrip("\r").split("\t", 2) for line in out.splitlines()]
@@ -1171,13 +1174,9 @@ def processes():
                         parent = int(handle.read().rpartition(")")[2].split()[1])
                 except (OSError, ValueError, IndexError):
                     continue
-                try:
-                    command += " " + os.readlink(f"/proc/{name}/cwd")
-                except OSError:
-                    pass
                 found.append((int(name), parent, command))
             return found
-        out = subprocess.run(["ps", "-axo", "pid=,ppid=,command="], capture_output=True, text=True, timeout=60,
+        out = subprocess.run(["ps", "-axo", "pid=,ppid=,command="], capture_output=True, text=True, timeout=10,
                              stdin=subprocess.DEVNULL).stdout
         rows = [line.split(None, 2) for line in out.splitlines()]
         return [(int(row[0]), int(row[1]), row[2]) for row in rows if len(row) == 3 and row[0].isdigit()]
@@ -1187,15 +1186,15 @@ def processes():
 
 def holders(path, found=None):
     """'PID <pid> (<command>)' for each process (of found, else listed now), other than this one and its ancestors,
-    whose command line or working directory is in path: a server left up from a copy, listening or not, keeps Windows
-    from removing its folder."""
+    whose command line names path or a file in it: a server left up from a copy, listening or not, keeps Windows from
+    removing its folder."""
     forms = set()
     for form in {path, os.path.abspath(path), os.path.realpath(path)}:
         form = form.replace("\\", "/").rstrip("/")
         forms.add(form)
         if re.match(r"[A-Za-z]:/", form):
             forms.add("/" + form[0].lower() + form[2:])
-    pattern = re.compile("(?:" + "|".join(map(re.escape, sorted(forms))) + r")(?![\w.-])",
+    pattern = re.compile(r"(?<![\w.-])(?:" + "|".join(map(re.escape, sorted(forms))) + r")(?![\w.-])",
                          re.IGNORECASE if os.name == "nt" else 0)
     found = processes() if found is None else found
     parents = {pid: parent for pid, parent, _ in found}
@@ -2221,9 +2220,13 @@ def settings(ledger, scope, touches):
     idle = []
     if scope and "CLAUDE.md" in present and not any(item["file"] == "CLAUDE.md" for item in unfilled):
         tasks = [task for task in scope["tasks"] if task["cycle"] == scope["current"]]
-        busy = [item for task in tasks if task["state"] == "running" for item in touches(task["task"])]
-        idle = [task["task"] for task in tasks if task["state"] == "todo" and touches(task["task"]) and not any(
-            overlaps(item, other) for item in touches(task["task"]) for other in busy)]
+        running = [touches(task["task"]) for task in tasks if task["state"] == "running"]
+        busy = [item for items in running for item in items]
+        for task in tasks if all(running) else []:
+            items = touches(task["task"])
+            if task["state"] == "todo" and items and not any(overlaps(a, b) for a in items for b in busy):
+                idle.append(task["task"])
+                busy += items
     return {"unfilled": unfilled, "together": together, "idle": idle}
 
 
