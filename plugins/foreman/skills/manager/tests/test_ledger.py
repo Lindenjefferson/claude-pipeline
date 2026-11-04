@@ -688,10 +688,18 @@ config = os.path.join(repo, "config")
 transcripts = os.path.join(config, "projects", "proj", "session", "subagents")
 os.makedirs(transcripts)
 with open(os.path.join(transcripts, "agent-a1b2c3.jsonl"), "w", encoding="utf-8") as handle:
-    for line in ({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "draft"}]}},
-                 {"type": "assistant", "message": {"role": "assistant", "content": [
-                     {"type": "tool_use", "name": "SubagentHandback",
-                      "input": {"message": "Verdict: FAIL\nRange: a..b\nCounts: 0 Critical, 1 Important"}}]}}):
+    for line in ({"type": "user", "timestamp": "2026-11-04T10:00:00.000Z", "message": {"role": "user", "content": "go"}},
+                 {"type": "assistant", "timestamp": "2026-11-04T10:01:00.000Z", "message": {
+                     "role": "assistant", "content": [{"type": "text", "text": "draft"}],
+                     "usage": {"input_tokens": 5, "output_tokens": 5, "cache_read_input_tokens": 10}}},
+                 {"type": "assistant", "timestamp": "2026-11-04T10:12:29.600Z", "message": {
+                     "role": "assistant", "content": [
+                         {"type": "tool_use", "name": "SubagentHandback",
+                          "input": {"message": "Verdict: FAIL\nRange: a..b\nCounts: 0 Critical, 1 Important"}}],
+                     "usage": {"input_tokens": 3, "output_tokens": 700, "cache_creation_input_tokens": 300,
+                               "cache_read_input_tokens": 41000}}},
+                 {"type": "user", "timestamp": "2026-11-04T10:12:30.000Z", "message": {"role": "user", "content": [
+                     {"type": "tool_result", "content": "delivered"}]}}):
         handle.write(json.dumps(line) + "\n")
 with open(os.path.join(transcripts, "agent-d4e5f6.jsonl"), "w", encoding="utf-8") as handle:
     handle.write(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
@@ -704,7 +712,35 @@ check("add --from-agent saves the agent's handback from its transcript and keeps
       r.returncode == 0 and status(REPORTS)["reviewer"][0].get("report") == saved
       and open(os.path.join(repo, saved), encoding="utf-8").read().startswith("Verdict: FAIL\nRange: a..b"),
       (r.stderr, status(REPORTS)["reviewer"][0]))
+
+
+def last_run(ledger):
+    with open(os.path.join(repo, ledger), encoding="utf-8") as handle:
+        return [entry for entry in map(json.loads, handle) if entry.get("type") == "run"][-1]
+
+
+check("add --from-agent measures the run from its transcript: first to last timestamp, and the tokens of its last "
+      "message with usage, as the completion notification counts them",
+      last_run(REPORTS).get("seconds") == 750 and last_run(REPORTS).get("tokens") == 42003, last_run(REPORTS))
+r = run("add", "--agent", "reviewer", "--verdict", "PASS", "--from-agent", "a1b2c3", "--seconds", "5m",
+        "--tokens", "9", ledger=REPORTS)
+check("--seconds and --tokens given with --from-agent win over the transcript",
+      r.returncode == 0 and last_run(REPORTS).get("seconds") == 300 and last_run(REPORTS).get("tokens") == 9,
+      (r.stderr, last_run(REPORTS)))
 r = run("add", "--agent", "reviewer", "--verdict", "PASS", "--from-agent", "agent-d4e5f6", ledger=REPORTS)
+check("a transcript with no timestamps or usage leaves the run unmeasured",
+      r.returncode == 0 and "seconds" not in last_run(REPORTS) and "tokens" not in last_run(REPORTS),
+      (r.stderr, last_run(REPORTS)))
+with open(os.path.join(transcripts, "agent-g7h8i9.jsonl"), "w", encoding="utf-8") as handle:
+    for line in ({"type": "user", "timestamp": "2026-11-04T10:00:00Z", "message": {"role": "user", "content": "go"}},
+                 {"type": "assistant", "timestamp": "2026-11-04T10:00:30", "message": {
+                     "role": "assistant", "content": [{"type": "text", "text": "Verdict: PASS"}],
+                     "usage": {"input_tokens": True, "output_tokens": -5, "cache_read_input_tokens": 40}}}):
+        handle.write(json.dumps(line) + "\n")
+r = run("add", "--agent", "reviewer", "--verdict", "PASS", "--from-agent", "g7h8i9", ledger=REPORTS)
+check("a timestamp with no zone reads as UTC, and a token count that is no positive integer is left out",
+      r.returncode == 0 and last_run(REPORTS).get("seconds") == 30 and last_run(REPORTS).get("tokens") == 40,
+      (r.stderr, last_run(REPORTS)))
 check("with no handback, --from-agent takes the agent's last text (the agent- prefix is optional)",
       r.returncode == 0 and "last text" in open(os.path.join(repo, ".superpowers/reports/reports/reviewer-d4e5f6.md"),
                                                 encoding="utf-8").read(), r.stderr)
@@ -712,7 +748,14 @@ r = run("add", "--agent", "reviewer", "--verdict", "PASS", "--from-agent", "zzz9
 check("--from-agent with no transcript is refused, naming the fallback", r.returncode != 0
       and "--report" in r.stderr, r.stderr)
 r = run("add", "--agent", "dev", "--task", "T9", "--verdict", "DONE", "--from-agent", "a1b2c3", ledger=REPORTS)
-check("a dev run takes no --from-agent", r.returncode != 0, r.stderr)
+check("a dev run with --from-agent is only measured from its transcript: the dev's report is checked before "
+      "integrating, never saved", r.returncode == 0 and last_run(REPORTS).get("agent") == "dev"
+      and last_run(REPORTS).get("seconds") == 750 and "report" not in last_run(REPORTS)
+      and not os.path.exists(os.path.join(repo, ".superpowers/reports/reports/dev-a1b2c3.md")),
+      (r.stderr, last_run(REPORTS)))
+r = run("add", "--agent", "dev", "--task", "T9", "--verdict", "DONE", "--from-agent", "zzz999", ledger=REPORTS)
+check("a dev --from-agent with no transcript is refused, naming --seconds", r.returncode != 0
+      and "--seconds" in r.stderr, r.stderr)
 del os.environ["CLAUDE_CONFIG_DIR"]
 add("dev", "DONE", "fix-1", ledger=REPORTS)
 check("a run without --report has no report key", "report" not in status(REPORTS)["runs"][0]

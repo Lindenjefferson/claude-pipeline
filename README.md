@@ -93,7 +93,7 @@ Noutro computador, num projeto que já usa o plugin: clone, instale o plugin e p
 | [`spec-checklist.md`](plugins/foreman/skills/manager/templates/spec-checklist.md) | O que toda spec e todo plano respondem, com o pré-mortem de cada escrita. |
 | [Hook de segredos e UTF-8](plugins/foreman/hooks/pre-commit-secret-scan.py) | `pre-commit` que bloqueia `.env`, linhas com cara de segredo e texto que não é UTF-8 ou tem caracteres invisíveis. |
 | [Hook de retomada](plugins/foreman/hooks/session-start.py) | Ao abrir ou retomar uma sessão, devolve ao manager o estado da entrega. |
-| [Guarda dos comandos](plugins/foreman/hooks/bash-guard.py) | Antes de cada comando: nega pular o `pre-commit`, publicar na branch principal no modo autônomo e o servidor de dev fora do background; pergunta antes do push da principal e antes de iniciar uma entrega fora do modo de permissão `auto` do Claude Code. |
+| [Guarda dos comandos](plugins/foreman/hooks/bash-guard.py) | Antes de cada comando: nega pular o `pre-commit`, publicar na branch principal no modo autônomo, um `cd` relativo antes de integrar ou comitar e o servidor de dev fora do background; pergunta antes do push da principal e antes de iniciar uma entrega fora do modo de permissão `auto` do Claude Code. |
 | [Andamento](plugins/foreman/hooks/andamento.js) | Mod do Claude Code (uma extensão da interface): até três linhas sob o prompt com o andamento da entrega e o que espera você, e o painel `/andamento`. |
 
 ## O que fica no seu projeto
