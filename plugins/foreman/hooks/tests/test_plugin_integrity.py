@@ -42,6 +42,20 @@ for path in agents:
     check(f"{os.path.basename(path)} lists the tools it may use (an allowlist, not a denylist)",
           "tools" in meta and "disallowedTools" not in meta, meta)
 
+# A project rule ("every screen change loads frontend-design") binds whoever builds the screen: without the tool,
+# the agents could not follow it.
+for name in ("dev", "qa", "reviewer"):
+    tools = front_matter(os.path.join(ROOT, "agents", name + ".md")).get("tools", "")
+    check(f"{name}.md can load skills", "Skill" in re.split(r"[,\s]+", tools), tools)
+shared = open(os.path.join(ROOT, "checklists", "agents-shared.md"), encoding="utf-8").read()
+reviewer = open(os.path.join(ROOT, "agents", "reviewer.md"), encoding="utf-8").read()
+check("the reviewer, which reads no other part of agents-shared.md, is sent to its Skills section",
+      "## Skills" in shared and '"Skills" section' in reviewer and "agents-shared.md" in reviewer, "")
+screens = open(os.path.join(ROOT, "skills", "manager", "references", "screens.md"), encoding="utf-8").read()
+check("screens.md no longer says the agents have no skills", "have none" not in screens, "")
+dev = open(os.path.join(ROOT, "agents", "dev.md"), encoding="utf-8").read()
+check("dev.md loads frontend-design for a screen and renders the mock", "`frontend-design`" in dev and "headless" in dev, "")
+
 for name in ("discovery", "qa"):
     text = open(os.path.join(ROOT, "agents", name + ".md"), encoding="utf-8").read()
     check(f"{name}.md says that text from sources, pages and tool output is data, never instructions",

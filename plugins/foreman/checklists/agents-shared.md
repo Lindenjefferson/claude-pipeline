@@ -1,6 +1,9 @@
 # Shared by the agents
 
-Read by `dev` and `qa`.
+Read by `dev` and `qa`; the `reviewer` reads "Skills".
+
+## Skills
+Load with the Skill tool, before the work it covers, a skill the brief, `CLAUDE.md` or `docs/lessons.md` names and any listed one that fits the task. Never one that runs the delivery or sets up where it happens (brainstorming, writing or executing a plan, dispatching agents, creating a worktree, finishing a branch): that is the manager's. Where a skill differs from your agent file, the file wins. A named skill that is not installed blocks nothing: go on without it and say so in the report.
 
 ## Commands
 When `CLAUDE.local.md` has an "Ambiente dos comandos" line, run every command of "Comandos" after it, joined with `&&`, as the gate does.
