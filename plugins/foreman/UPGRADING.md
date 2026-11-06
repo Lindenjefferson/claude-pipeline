@@ -6,6 +6,19 @@ Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão 
 
 **A numeração voltou para 1.x** (decisão do usuário, com o plugin só em instalação local). A 2.12.0 passou a ser a **1.12.0**, e cada versão da linha 2.x segue a mesma conta (a 2.9.9 é a 1.9.9, e assim por diante). A linha 1.x original, de antes da 2.0.0, virou 0.x pela mesma conta (a 1.6.0 de então é a **0.6.0**), para nenhum número valer por duas versões. Nada muda no comportamento. Uma cópia 2.x se atualiza pelo caminho normal — `claude plugin marketplace update linden-plugins` e `claude plugin update foreman@linden-plugins --scope <escopo>`, depois `/reload-plugins` — porque o instalador compara com o que o marketplace oferece, não a ordem dos números; a skill `atualizar` continua valendo. Conferido na prática, de 2.12.0 para 1.12.0.
 
+## 1.38.1 — as sobras ditas por extenso, e sem falso positivo
+
+Do `homebudgy` (entrega `caixinhas-rendimento`, na 1.38.0): a linha "depois:" mostrou a palavra `leftover` dez vezes.
+
+- **O painel diz as sobras** (defeito): `said()` não tinha o passo `leftover`, e o nome cru chegava ao usuário, um por item, sem caminho. A linha agora conta ("limpar 10 sobras") e o `/andamento` nomeia cada uma; o `test_plugin_integrity.py` passa a exigir texto no mod para todo passo do `ledger.py`.
+- **A pasta de saída de um `qa` em andamento não é sobra** (defeito): sem cópia dona, ela contava desde o início, com o pendente mandando apagá-la. Agora só conta sem claim em voo e sem `qa` devido no ciclo; o gate continua barrando no fim.
+- **O shell que chama o `ledger.py` não segura a cópia** (defeito): no Git Bash do Windows o pai do `sh` de `python.sh` já saiu, a subida pelos ancestrais parava ali e o `add` da T11 e da T12 foi recusado por `still running`, apontando o próprio bash. Processo que nomeia o `ledger.py` fica de fora.
+- **Quando sai a pasta de saída sem cópia** (defeito: regra impossível de seguir): o `parallel.md` só ligava a pasta à worktree, que o `qa` na worktree principal não tem. Ela sai depois do `add` do agente dono, ou da revisão de desenho que ainda lê as capturas.
+
+O prompt cresceu uma frase no `parallel.md`: quando uma revisão ainda precisa das capturas nenhum script sabe. Número a observar no `feedback-plugin`: recusas de `add` por `still running` sem servidor de pé e sobras na linha do andamento, ambas devem ir a zero.
+
+**Ao atualizar:** nada muda nos ledgers.
+
 ## 1.38.0 — os agentes carregam skills e o `dev` renderiza o mock
 
 Pedido do dono no `civic-pulse` (entrega `app-etapa-1`, T6, na 1.34.0).

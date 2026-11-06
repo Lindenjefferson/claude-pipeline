@@ -145,6 +145,7 @@ function said(step) {
     case 'decide': return `decidir ${step.id}: ${step.text}`
     case 'resume': return `retomar a entrega (pausada: ${step.text})`
     case 'security': return `varredura de segurança (${step.reason})`
+    case 'leftover': return `limpar a sobra ${step.path ?? step.branch}`
     default: return step.step
   }
 }
@@ -205,7 +206,10 @@ export function bandRows(r, now, columns = Infinity) {
   if (r.ready_for_gate) current.push({ text: '✓ pronto para o gate', tone: 'ready' })
   else if (steps.length || wait) {
     const decide = steps.filter((step) => step.step === 'decide').map((step) => step.id)
-    const next = [...(wait ? [waitText(wait)] : []), ...steps.filter((step) => step.step !== 'decide').map((step) => said(step))]
+    const left = steps.filter((step) => step.step === 'leftover').length
+    const next = [...(wait ? [waitText(wait)] : []),
+                  ...steps.filter((step) => !['decide', 'leftover'].includes(step.step)).map((step) => said(step)),
+                  ...(left ? [`limpar ${plural(left, 'sobra', 'sobras')}`] : [])]
     current.push({ text: `depois: ${listed(decide.length ? [...next, `decidir ${listed(decide)}`] : next)}`, tone: 'next' })
   }
   const items = waiting(r).length

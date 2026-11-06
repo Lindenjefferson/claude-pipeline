@@ -108,6 +108,17 @@ test('the band names a cycle by its plan name, shows a verdict only when no step
   expect(shown(failed)[1]).toBe('✗ qa reprovou, 3 abertos   depois: revisão')
 })
 
+test('leftovers are counted in the band and named one by one in the pane', () => {
+  const steps = [{ step: 'qa' }, { step: 'leftover', kind: 'folder', path: '/t/cr-saida', branch: null },
+                 { step: 'leftover', kind: 'branch', path: null, branch: 'cr-t1' }, { step: 'decide', id: 'D1', text: 'x' }]
+  const left = { ...STATUS, dispatched: {}, reviewer: [], steps }
+  expect(shown(left)[1]).toBe('depois: qa, limpar 2 sobras e decidir D1')
+  expect(shown({ ...left, steps: steps.slice(1, 2) })[1]).toBe('depois: limpar 1 sobra')
+  const pane = paneLines(left, [], NOW)
+  expect(pane).toContain('- limpar a sobra /t/cr-saida')
+  expect(pane).toContain('- limpar a sobra cr-t1')
+})
+
 test('a plan cycle named "Ciclo 3" is not called "ciclo Ciclo 3", and its position reads as an ordinal', () => {
   const named = { ...STATUS, scope: { ...STATUS.scope, current: 'Ciclo 3', position: 4, total: 4 } }
   expect(shown(named)[0]).toMatch(/^etapa 5, ciclo 3 \(4º de 4\), /)

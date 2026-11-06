@@ -2374,6 +2374,20 @@ git(proj, "branch", "-D", "task-done")
 shutil.rmtree(os.path.join(copies, "half"))
 check("once the copies are torn down and the branch deleted, nothing is left over",
       json.loads(run("status", "--json", cwd=proj).stdout).get("leftovers") == [])
+# an agent that runs on the main worktree has no copy, so its output folder has no owner: it is that agent's until its
+# add is in, and only then a leftover (the gate still waits for it)
+named = lambda: [name for name in (os.path.basename(item["path"] or "") for item in json.loads(
+    run("status", "--json", cwd=proj).stdout)["leftovers"]) if "-saida" in name]
+os.makedirs(os.path.join(copies, "qa-c1-saida"))
+check("the output folder of a copy gone is no leftover while a dev is in flight", named() == [], named())
+run("release", "--task", "H1", cwd=proj)
+check("once nothing is in flight and no qa is due, that output folder is a leftover", named() == ["qa-c1-saida"], named())
+run("claim", "--task", "H2", cwd=proj)
+run("add", "--agent", "dev", "--verdict", "DONE", "--task", "H2", cwd=proj)
+check("while the cycle's qa is due, its output folder is no leftover",
+      named() == [] and "qa" in [step["step"] for step in json.loads(run("status", "--json", cwd=proj).stdout)["steps"]],
+      run("status", "--json", cwd=proj).stdout[:400])
+shutil.rmtree(os.path.join(copies, "qa-c1-saida"))
 # the default branch moving after the start (an earlier delivery merged into it, then into this stacked one) holds a
 # commit of the head that is not in the base: it is still no leftover, by the name given to --base or by origin/HEAD
 BASED = os.path.join(proj, ".superpowers", "based.jsonl")
@@ -2627,6 +2641,17 @@ r = subprocess.run([sys.executable, "-c", wrapper, sys.executable, LEDGER, "--le
                     "--verdict", "DONE", "--task", "H1"], cwd=repo, capture_output=True, text=True, encoding="utf-8")
 check("the add's own shell naming the worktree does not hold it: once the server is stopped, the run is added",
       r.returncode == 0 and not status(HOLD)["claims"], r.stderr)
+# Git Bash on Windows: the parent of the sh that runs python.sh is gone, so the walk up never reaches the shell that
+# called the ledger, whose command line names the worktree: naming the ledger is what tells it from a server
+run("claim", "--task", "H2", "--worktree", hold_tree, "--origin", "HEAD", ledger=HOLD)
+caller = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", hold_tree, LEDGER, "add"])
+try:
+    r = add("dev", "DONE", "H2", ledger=HOLD)
+    check("a shell out of the ancestors that names the worktree and the ledger does not hold it",
+          r.returncode == 0 and not status(HOLD)["claims"], r.stderr)
+finally:
+    caller.kill()
+    caller.wait()
 stray = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)",
                           os.path.join(os.path.realpath(hold_tree), "server.js")])
 try:
