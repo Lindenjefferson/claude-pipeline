@@ -114,7 +114,10 @@ for term in ("sudo", "--force", "chmod 777", "| sh", "| bash"):
 
 ledger_text = open(os.path.join(ROOT, "skills", "manager", "ledger.py"), encoding="utf-8").read()
 mod_text = open(os.path.join(ROOT, "hooks", "andamento.js"), encoding="utf-8").read()
-unsaid = set(re.findall(r'"step": "(\w+)"', ledger_text)) - set(re.findall(r"case '(\w+)'", mod_text))
+given = set(re.findall(r'"step": "(\w+)"', ledger_text))
+given |= set(re.findall(r'need\(f?"(?:[^"\n]|"\s+f?")*",\s*"(\w+)"', ledger_text))
+check("the steps of ledger.py are read from both places that give them", {"leftover", "fix", "ask"} <= given, given)
+unsaid = given - set(re.findall(r"case '(\w+)'", mod_text))
 check("every step ledger.py gives has its text in the mod (with none, the raw step name reaches the user)",
       not unsaid, unsaid)
 

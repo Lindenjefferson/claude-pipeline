@@ -12,10 +12,10 @@ Do `homebudgy` (entrega `caixinhas-rendimento`, na 1.38.0): a linha "depois:" mo
 
 - **O painel diz as sobras** (defeito): `said()` não tinha o passo `leftover`, e o nome cru chegava ao usuário, um por item, sem caminho. A linha agora conta ("limpar 10 sobras") e o `/andamento` nomeia cada uma; o `test_plugin_integrity.py` passa a exigir texto no mod para todo passo do `ledger.py`.
 - **A pasta de saída de um `qa` em andamento não é sobra** (defeito): sem cópia dona, ela contava desde o início, com o pendente mandando apagá-la. Agora só conta sem claim em voo e sem `qa` devido no ciclo; o gate continua barrando no fim.
-- **O shell que chama o `ledger.py` não segura a cópia** (defeito): no Git Bash do Windows o pai do `sh` de `python.sh` já saiu, a subida pelos ancestrais parava ali e o `add` da T11 e da T12 foi recusado por `still running`, apontando o próprio bash. Processo que nomeia o `ledger.py` fica de fora.
-- **Quando sai a pasta de saída sem cópia** (defeito: regra impossível de seguir): o `parallel.md` só ligava a pasta à worktree, que o `qa` na worktree principal não tem. Ela sai depois do `add` do agente dono, ou da revisão de desenho que ainda lê as capturas.
+- **O shell que chama o `ledger.py` não segura a cópia** (defeito): no Git Bash do Windows o pai do `sh` de `python.sh` já saiu, a subida pelos ancestrais parava ali e o `add` da T11 e da T12 foi recusado por `still running`, apontando o próprio bash. Processo que chama o `ledger.py` do plugin fica de fora; um `src/ledger.py` do produto continua segurando a cópia.
+- **Quando sai a pasta de saída sem cópia** (defeito: regra impossível de seguir): o `parallel.md` só ligava a pasta à worktree, que o `qa` na worktree principal não tem. Ela sai depois do `add` do agente dono.
 
-O prompt cresceu uma frase no `parallel.md`: quando uma revisão ainda precisa das capturas nenhum script sabe. Número a observar no `feedback-plugin`: recusas de `add` por `still running` sem servidor de pé e sobras na linha do andamento, ambas devem ir a zero.
+O prompt cresceu uma frase no `parallel.md`: apagar a pasta é ação do manager, e o ledger só cobra depois. Número a observar no `feedback-plugin`: recusas de `add` por `still running` sem servidor de pé e sobras na linha do andamento, ambas devem ir a zero.
 
 **Ao atualizar:** nada muda nos ledgers.
 

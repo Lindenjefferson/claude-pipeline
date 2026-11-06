@@ -2652,6 +2652,19 @@ try:
 finally:
     caller.kill()
     caller.wait()
+for server in ("src/ledger.py", "tests/test_ledger.py"):
+    stray = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)",
+                              os.path.join(hold_tree, server)])
+    try:
+        run("claim", "--task", "H3", "--worktree", hold_tree, "--origin", "HEAD", ledger=HOLD)
+        r = add("dev", "DONE", "H3", ledger=HOLD)
+        check(f"a process of the product named like the ledger ({server}) still holds the copy",
+              r.returncode != 0 and str(stray.pid) in r.stderr, r.stderr)
+    finally:
+        stray.kill()
+        stray.wait()
+r = add("dev", "DONE", "H3", ledger=HOLD)
+check("with those stopped, the run is added", r.returncode == 0, r.stderr)
 stray = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)",
                           os.path.join(os.path.realpath(hold_tree), "server.js")])
 try:
@@ -2675,6 +2688,8 @@ base = os.path.realpath(tempfile.mkdtemp(prefix="ledger_holders_"))
 atexit.register(shutil.rmtree, base, True)
 tree = os.path.join(base, "T1")
 me, top = os.getpid(), 10 ** 9
+check("a multi-line shell calling the ledger, as /proc gives it, does not hold the copy", ledger_module.holders(
+    tree, [(top + 3, 0, f"bash -c cd {tree}\nD=/p/skills/manager\nsh $D/ledger.py add")]) == [])
 found = [(me, top + 1, f"python {tree}"), (top + 1, top + 2, f"sh -c 'cd {tree}'"), (top + 2, 0, f"bash {tree}"),
          (top + 3, me, f"node {tree}{os.sep}server.js"), (top + 4, 0, f"node {tree}0{os.sep}server.js"),
          (top + 5, 0, f"node {tree}-x{os.sep}a.js"), (top + 6, 0, f"node x{tree}{os.sep}a.js"),

@@ -53,8 +53,9 @@ branch start --base named (kept as base_ref) or the remote's default (origin/HEA
 the branch of a claimed worktree or of one with uncommitted work (the next delivery's spec and plan before its start);
 status --json gives them as leftovers: {kind worktree|folder|branch, path, branch, action}, the action of a worktree
 or folder naming first the PID and command line of each process still running from it (its command line naming the path
-or a file in it, this command, its ancestors and any process naming ledger.py left out, since on Windows a Git Bash
-parent may be gone and the walk up stop short of the calling shell; one started with a relative path or a Windows short name is not seen), which keeps
+or a file in it, this command, its ancestors and any process calling this ledger.py left out, since on Windows a Git
+Bash parent may be gone and the walk up stop short of the calling shell; one started with a relative path or a Windows
+short name is not seen), which keeps
 Windows from removing it. A dev's add with a DONE verdict is refused the same way while such a process runs from its
 claim's worktree, listening or not; a listing that fails finds nothing. --worktree (an existing
 directory) and --origin (a commit, resolved to its hash there) are kept with the claim; status shows them and, when
@@ -1236,9 +1237,13 @@ def processes():
         return []
 
 
+CALLER = re.compile(r"skills/manager.*(?<![\w-])ledger\.py", re.S)
+
+
 def holders(path, found=None):
     """'PID <pid> (<command>)' for each process (of found, else listed now), other than this one, its ancestors and
-    those naming this script (the calling shell, when the walk up stops at a parent gone), whose command line names path or a file in it: a server left up from a copy, listening or not, keeps Windows from
+    those calling this script, whose command line names path or a file in it: a server left up from a copy, listening
+    or not, keeps Windows from
     removing its folder."""
     forms = set()
     for form in {path, os.path.abspath(path), os.path.realpath(path)}:
@@ -1255,8 +1260,8 @@ def holders(path, found=None):
         mine.add(pid)
         pid = parents.get(pid)
     return [f"PID {pid} ({command.strip()[:120]})" for pid, _, command in found
-            if pid not in mine and os.path.basename(__file__) not in command
-            and pattern.search(command.replace("\\", "/"))]
+            if pid not in mine and pattern.search(command.replace("\\", "/"))
+            and not CALLER.search(command.replace("\\", "/"))]
 
 
 def qa_report(args, entries):
@@ -2112,7 +2117,7 @@ def status(args):
                        f"{when} (references/security.md)")
         steps.append({"step": "security", "reason": marks[-1]})
     # the copies and the disk are the current delivery's: a preparation sees none of its claims
-    testing = bool(in_flight(entries)) or any(step["step"] == "qa" for step in steps)
+    testing = bool(held) or any(step["step"] == "qa" for step in steps)
     left = [] if preparing(entries) else leftovers(entries, args.ledger, head, testing)
     pending += [f"leftover {item['kind']} {item['path'] or item['branch']}, already integrated or abandoned: "
                 f"{item['action']}" for item in left]
