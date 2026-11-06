@@ -112,5 +112,14 @@ for term in ("sudo", "--force", "chmod 777", "| sh", "| bash"):
     check(f"the kickoff template never allows a command containing {term!r}", term in settings["never_allow"],
           settings["never_allow"])
 
+ledger_text = open(os.path.join(ROOT, "skills", "manager", "ledger.py"), encoding="utf-8").read()
+mod_text = open(os.path.join(ROOT, "hooks", "andamento.js"), encoding="utf-8").read()
+given = set(re.findall(r'"step": "(\w+)"', ledger_text))
+given |= set(re.findall(r'need\(f?"(?:[^"\n]|"\s+f?")*",\s*"(\w+)"', ledger_text))
+check("the steps of ledger.py are read from both places that give them", {"leftover", "fix", "ask"} <= given, given)
+unsaid = given - set(re.findall(r"case '(\w+)'", mod_text))
+check("every step ledger.py gives has its text in the mod (with none, the raw step name reaches the user)",
+      not unsaid, unsaid)
+
 print("ALL PASS" if all(results) else "SOME FAILED", f"({sum(results)}/{len(results)})")
 sys.exit(0 if all(results) else 1)

@@ -46,13 +46,16 @@ claim refuses a task that is in flight or already DONE in the current cycle, so 
 status lists each copy left over, pending (step leftover, with its action) until it is gone, so the gate waits: a
 worktree under ../_temp/<project>-worktrees/ (project being the main worktree's folder) or .claude/worktrees/ with no
 claim, its HEAD in the delivery head and nothing uncommitted, a folder of ../_temp/<project>-worktrees/ with no .git
-(not <copy>-saida..., the output of a copy still there, which goes with it),
+(not <copy>-saida..., the output of a copy still there, which goes with it, nor of one gone while a dev is in flight or
+the cycle's qa is due, as the output of a qa on the main worktree, which has no copy),
 and a local branch integrated in this delivery (in the head, not in the base) that is neither the current one, the
 branch start --base named (kept as base_ref) or the remote's default (origin/HEAD), which move on after the start, nor
 the branch of a claimed worktree or of one with uncommitted work (the next delivery's spec and plan before its start);
 status --json gives them as leftovers: {kind worktree|folder|branch, path, branch, action}, the action of a worktree
 or folder naming first the PID and command line of each process still running from it (its command line naming the path
-or a file in it, this command and its ancestors left out; one started with a relative path or a Windows short name is not seen), which keeps
+or a file in it, this command, its ancestors and any process calling this ledger.py left out, since on Windows a Git
+Bash parent may be gone and the walk up stop short of the calling shell; one started with a relative path or a Windows
+short name is not seen), which keeps
 Windows from removing it. A dev's add with a DONE verdict is refused the same way while such a process runs from its
 claim's worktree, listening or not; a listing that fails finds nothing. --worktree (an existing
 directory) and --origin (a commit, resolved to its hash there) are kept with the claim; status shows them and, when
@@ -1234,9 +1237,13 @@ def processes():
         return []
 
 
+CALLER = re.compile(r"skills/manager.*(?<![\w-])ledger\.py", re.S)
+
+
 def holders(path, found=None):
-    """'PID <pid> (<command>)' for each process (of found, else listed now), other than this one and its ancestors,
-    whose command line names path or a file in it: a server left up from a copy, listening or not, keeps Windows from
+    """'PID <pid> (<command>)' for each process (of found, else listed now), other than this one, its ancestors and
+    those calling this script, whose command line names path or a file in it: a server left up from a copy, listening
+    or not, keeps Windows from
     removing its folder."""
     forms = set()
     for form in {path, os.path.abspath(path), os.path.realpath(path)}:
@@ -1253,7 +1260,8 @@ def holders(path, found=None):
         mine.add(pid)
         pid = parents.get(pid)
     return [f"PID {pid} ({command.strip()[:120]})" for pid, _, command in found
-            if pid not in mine and pattern.search(command.replace("\\", "/"))]
+            if pid not in mine and pattern.search(command.replace("\\", "/"))
+            and not CALLER.search(command.replace("\\", "/"))]
 
 
 def qa_report(args, entries):
@@ -1340,8 +1348,9 @@ def committed(entry, head):
 STOP_FIRST = "stop what still runs from it (by the PID of its port), then "
 
 
-def leftovers(entries, ledger, head):
-    """Copies left after their task was integrated: worktrees and folders of the copies, and their branches."""
+def leftovers(entries, ledger, head, testing=False):
+    """Copies left after their task was integrated: worktrees and folders of the copies, and their branches.
+    testing: an agent may be writing an output folder that has no copy (a qa on the main worktree)."""
     where = os.path.dirname(os.path.abspath(ledger))
     common = git_ok(where, "rev-parse", "--path-format=absolute", "--git-common-dir") if os.path.isdir(where) else None
     if not common or not head:
@@ -1371,8 +1380,8 @@ def leftovers(entries, ledger, head):
     for name in sorted(os.listdir(copies)) if os.path.isdir(copies) else []:
         path = os.path.join(copies, name)
         owner = os.path.join(copies, name.partition("-saida")[0]) if "-saida" in name else None
-        if owner and norm(owner) in trees:
-            continue  # the output folder of a copy still there goes with it
+        if owner and (testing or norm(owner) in trees):
+            continue  # the output folder of a copy still there goes with it; one with no copy, with its agent's add
         if os.path.isdir(path) and norm(path) not in trees and not os.path.exists(os.path.join(path, ".git")):
             found.append({"kind": "folder", "path": path, "branch": None,
                           "action": STOP_FIRST + "delete the folder"})
@@ -2108,7 +2117,8 @@ def status(args):
                        f"{when} (references/security.md)")
         steps.append({"step": "security", "reason": marks[-1]})
     # the copies and the disk are the current delivery's: a preparation sees none of its claims
-    left = [] if preparing(entries) else leftovers(entries, args.ledger, head)
+    testing = bool(held) or any(step["step"] == "qa" for step in steps)
+    left = [] if preparing(entries) else leftovers(entries, args.ledger, head, testing)
     pending += [f"leftover {item['kind']} {item['path'] or item['branch']}, already integrated or abandoned: "
                 f"{item['action']}" for item in left]
     steps += [{"step": "leftover", **item} for item in left]
