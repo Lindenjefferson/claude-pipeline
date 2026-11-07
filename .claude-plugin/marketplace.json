@@ -11,16 +11,7 @@
       "name": "foreman",
       "source": "./plugins/foreman",
       "description": "Independent multi-agent dev team in short cycles (manager, dev, reviewer, qa; ledger; local gate script; pre-commit secret scan), enabled per repo."
-    },
-    {
-      "name": "account-switcher",
-      "source": {
-        "source": "git-subdir",
-        "url": "https://github.com/Lindenjefferson/account-switcher.git",
-        "path": "plugins/account-switcher"
-      },
-      "description": "Várias contas do Claude Code no Windows com `cc <conta>` e atalho no Explorer."
     }
   ],
-  "description": "Claude Code plugins by Lindenjefferson."
+  "description": "Plugin Foreman para o Claude Code."
 }
