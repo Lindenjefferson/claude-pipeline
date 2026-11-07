@@ -61,7 +61,7 @@ claude plugin marketplace add Lindenjefferson/foreman
 
 # em cada projeto, só nele (o escopo local não vai para o git); num projeto novo basta a pasta vazia
 cd meu-projeto
-claude plugin install foreman@linden-plugins --scope local
+claude plugin install foreman@foreman --scope local
 ```
 
 **Usar:** abra o Claude Code na pasta do projeto, ligue o modo de permissão `auto` do Claude Code (sem ele, a entrega para em cada prompt de permissão) e digite:
@@ -69,7 +69,7 @@ claude plugin install foreman@linden-plugins --scope local
 1. `prepara este projeto com o kickoff` (ou `/foreman:kickoff`): uma vez, cria a estrutura;
 2. o que você quer entregar, como `implementar a exportação do extrato em CSV` ou `corrigir o bug do login`: o **manager** conduz do plano ao gate.
 
-Para tirar de um projeto: `claude plugin uninstall foreman@linden-plugins --scope local`.
+Para tirar de um projeto: `claude plugin uninstall foreman@foreman --scope local`.
 
 Os scripts leem algumas seções do `CLAUDE.md` do projeto pelo título, em português ("Comandos", "Testes", "Versão" e as outras que o kickoff escreve): mantenha esses títulos como estão. O resto do arquivo, e a conversa com o Claude, podem ser em qualquer língua.
 
@@ -108,7 +108,7 @@ Peça "atualizar o plugin" na sessão do projeto: a skill [`atualizar`](plugins/
 
 ## Para onde vai
 
-As ideias em avaliação e as recusadas estão no [roadmap](docs/roadmap.md); o que cada versão entregou, no [histórico](plugins/foreman/UPGRADING.md); as análises de entregas reais que viraram item do backlog, em [`docs/analises/`](docs/analises/). As versões 2.x que aparecem em PRs antigos são as 1.x de hoje (a 2.12.0 virou a 1.12.0, e a linha 1.x anterior virou 0.x); a conta está no topo do histórico.
+As ideias em avaliação e as recusadas estão no [roadmap](docs/roadmap.md); o que cada versão entregou, no [histórico](plugins/foreman/UPGRADING.md); as análises de entregas reais que viraram item do backlog, em [`docs/analises/`](docs/analises/).
 
 ## Para contribuir
 

@@ -139,7 +139,7 @@ check("a secret on a line that starts with ++ is blocked", r.returncode != 0 and
 sh(repo, "git", "reset", "-q")
 os.remove(os.path.join(repo, "plus.txt"))
 
-# --range scans every commit of a range, as the gate and the CI read a branch: a commit made with the hook skipped
+# --range scans every commit of a range, as the gate reads a branch: a commit made with the hook skipped
 start = sh(repo, "git", "rev-parse", "HEAD").stdout.strip()
 write(repo, "skipped.txt", SECRET_LINE)
 sh(repo, "git", "add", "skipped.txt")
