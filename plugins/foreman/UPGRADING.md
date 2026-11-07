@@ -4,7 +4,14 @@ O que cada versão entregou e o que muda para quem atualiza. O arquivo vai junto
 
 Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o número do PR. Só as versões que o `feedback-plugin` das próximas entregas ainda confere (hoje da 1.9.8 à 1.38.0) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta. O que é major, minor e patch está no [`CLAUDE.md`](../../CLAUDE.md).
 
-**A numeração voltou para 1.x** (decisão do usuário, com o plugin só em instalação local). A 2.12.0 passou a ser a **1.12.0**, e cada versão da linha 2.x segue a mesma conta (a 2.9.9 é a 1.9.9, e assim por diante). A linha 1.x original, de antes da 2.0.0, virou 0.x pela mesma conta (a 1.6.0 de então é a **0.6.0**), para nenhum número valer por duas versões. Nada muda no comportamento. Uma cópia 2.x se atualiza pelo caminho normal — `claude plugin marketplace update linden-plugins` e `claude plugin update foreman@linden-plugins --scope <escopo>`, depois `/reload-plugins` — porque o instalador compara com o que o marketplace oferece, não a ordem dos números; a skill `atualizar` continua valendo. Conferido na prática, de 2.12.0 para 1.12.0.
+## 1.38.2 — testes só locais, e o histórico sem a renumeração
+
+Simplificação: os testes passam a rodar só localmente, antes de cada PR.
+
+- **Sai o `.github/workflows/testes.yml`**: o "Testar e validar" do `CLAUDE.md` ganha um quinto comando, a varredura de segredos da branch (`--range main..HEAD`), que era a única garantia do CI fora do alcance do `pre-commit`, e diz por que o risco é outro aqui. Os comentários do scanner e do teste deixam de citar o CI.
+- **O histórico deixa de contar a renumeração**: sai a nota do topo, o item dela na 1.12.2 e a 1.12.1, que só corrigia essa nota; o `CLAUDE.md` e o README também deixam de citá-la.
+
+**Ao atualizar:** nada muda.
 
 ## 1.38.1 — as sobras ditas por extenso, e sem falso positivo
 
@@ -388,19 +395,12 @@ Os dois defeitos vieram do feedback da entrega `0.5-launcher-civic` (projeto `la
 
 **Ao atualizar:** lê os ledgers da 1.12.2 e nada muda nos arquivos do projeto. Na ferramenta PowerShell, o guard passa a negar as formas de expressão e de bloco que deixava passar (atribuição de saída, bloco colado à chave, parênteses, `cmd /c`, `Start-Process`, `powershell` posicional, `-EncodedCommand`, `${env:X}`, `Set-Item env:X`): um comando que usava uma dessas para commitar com `-n` passa a ser negado, como já era o `git commit -n` direto. Depois do `/reload-plugins`, uma sessão aberta já usa o guard novo. No gate, o aviso sobre o teste de um critério muda de texto — de "test-first not proven" para "test and code in the same commit" — e deixa de sair quando o commit do teste traz material de teste (fixture ou helper numa pasta que os globs de "Arquivos de teste" nomeiam), o plano, as lições, a allowlist, um relatório de qualidade ou um rename sem conteúdo; commits que um merge trouxe deixam de ser olhados. Quem automatizou leitura do texto antigo precisa ajustar.
 
-## 1.12.2 — a conta da renumeração, e a premissa de não entregar o que não cumpre (PR #52)
+## 1.12.2 — a premissa de não entregar o que não cumpre (PR #52)
 
-- **A nota da renumeração afirmava duas coisas falsas** (defeito; revisão independente, por outro modelo, da própria 1.12.1): "o plugin nasceu na 2.0.0" e "nenhuma versão quebrou compatibilidade". Existia uma linha 1.x anterior (PRs #3 a #5) e a 2.0.0 quebrou o formato do ledger — pela regra adotada, o 2 tinha sido ganho. Voltar para 1.x é decisão do usuário, não consequência da regra, e é assim que os arquivos passam a dizer. A linha 1.x original virou 0.x, porque a renumeração havia criado três números valendo por duas versões cada (1.4.0, 1.5.0 e 1.6.0). A conta mora só no `UPGRADING.md`: o `CLAUDE.md` guarda a regra, e o roadmap, um ponteiro.
 - **Premissa: o plugin não entrega o que não cumpre** (a pedido do usuário, depois de perguntar se as premissas valiam para o próprio plugin): o que ele passa a exigir de uma entrega vale para ele mesmo, ou o `CLAUDE.md` diz por que o risco é diferente. Número: lacunas declaradas entre o que o plugin exige e o que vale neste repositório — eram três e fecharam em zero (o `pre-commit` de scan de segredos e as regras de permissão de `.claude/settings.json`, as duas documentadas no `CLAUDE.md`, e o CI da 1.13.1); nenhuma versão nova acrescenta uma quarta. Se duas entregas não fecharem nenhuma, a premissa não está cobrando nada e sai.
 - **O campo `entry` do template de allowlist volta a ser modelo** (defeito; mesma revisão): a 1.11.0 o trocou pela prosa `"Bash(<command>) e PowerShell(<command>)"` dentro de um arquivo que o kickoff copia. Agora são dois modelos numa lista, e o passo 7 do kickoff diz que cada comando rende uma entrada por ferramenta.
 
-**Ao atualizar:** nada muda no comportamento. Corrige a conta da renumeração acima (existia uma linha 1.x antes da 2.0.0, que virou 0.x) e o campo `entry` do template de allowlist do kickoff, que havia virado prosa; num projeto que já rodou o kickoff, as regras no `.claude/settings.json` continuam as mesmas.
-
-## 1.12.1 — a nota da renumeração estava errada (PR #51)
-
-- **Atualizar de 2.x para 1.x funciona pelo caminho normal** (defeito; conferido na prática): a nota que a renumeração (PR #50) pôs no `UPGRADING.md` afirmava que o instalador não trata 1 como posterior a 2 e mandava remover e instalar de novo. Ele compara com o que o marketplace oferece, não a ordem dos números: `claude plugin update` levou a cópia do `launcher-multimidia` de 2.12.0 para 1.12.0 sem reinstalar. Patch porque a nota é arquivo instalado e é o que a skill `atualizar` lê.
-
-**Ao atualizar:** nada muda no comportamento. Corrige a nota da renumeração acima, que mandava remover e instalar de novo: a atualização de 2.x para 1.x funciona pelo caminho normal.
+**Ao atualizar:** nada muda no comportamento. Corrige o campo `entry` do template de allowlist do kickoff, que havia virado prosa; num projeto que já rodou o kickoff, as regras no `.claude/settings.json` continuam as mesmas.
 
 ## 1.12.0 — TDD deixa de ser promessa e passa a ser conferido (PR #49)
 

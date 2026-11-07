@@ -17,8 +17,8 @@
                         file with --path <path>).
   --range <a>..<b>      scans every commit of the range the same way (each commit's diff, merges on each side, so
                         a line a later commit removed still counts: the history carries it), against the allowlist
-                        at HEAD; exits 1 on a finding and 2 when git cannot read the range. The gate and the CI use
-                        it for the whole branch, where a commit made with the hook skipped would pass.
+                        at HEAD; exits 1 on a finding and 2 when git cannot read the range. The gate uses it for the
+                        whole branch, where a commit made with the hook skipped would pass.
 
 The hook stores no path: it finds this scanner through CLAUDE_FOREMAN_HOME or `git config foreman.home` (the
 plugin root, which the install writes into the repository's config and the plugin's session-start hook keeps on the

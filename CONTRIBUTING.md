@@ -12,19 +12,20 @@ cd foreman
 python plugins/foreman/hooks/pre-commit-secret-scan.py --install-pre-commit
 ```
 
-Você precisa de Python 3, git e o [Claude Code](https://code.claude.com) no `PATH` (no Windows, os comandos rodam no Git Bash). As suítes criam repositórios git de teste, então o git precisa de identidade configurada (`git config user.email` e `user.name`), como o CI faz.
+Você precisa de Python 3, git e o [Claude Code](https://code.claude.com) no `PATH` (no Windows, os comandos rodam no Git Bash). As suítes criam repositórios git de teste, então o git precisa de identidade configurada (`git config user.email` e `user.name`).
 
 Para testar o plugin de verdade, carregue o clone do disco num projeto de teste: `claude plugin marketplace add ./foreman` e `claude plugin install foreman@linden-plugins --scope local`. As edições valem na próxima sessão (ou depois de `/reload-plugins`).
 
 ## Testar e validar
 
-Os quatro comandos do `CLAUDE.md`, os mesmos que o CI roda a cada push e PR (as suítes do Python no Linux e no Windows; os outros no Linux):
+Os cinco comandos do `CLAUDE.md`, rodados antes de abrir o PR (não há CI):
 
 ```bash
 for t in plugins/foreman/hooks/tests/test_*.py plugins/foreman/skills/manager/tests/test_*.py; do sh plugins/foreman/hooks/python.sh "$t"; done
 (cd plugins/foreman && claude plugin test)
 claude plugin validate plugins/foreman
 claude plugin validate .
+python plugins/foreman/hooks/pre-commit-secret-scan.py --range main..HEAD
 ```
 
 Cada suíte Python roda sozinha, sem pytest, e termina em `ALL PASS`. As dos hooks levam pouco mais de um minuto no total (`test_bash_guard.py` é a mais longa); as do manager demoram mais, porque criam repositórios e rodam comandos de verdade: `test_gate.py` uns dois minutos e `test_ledger.py` uns quatro. O laço inteiro fica em torno de sete a oito minutos. O `claude plugin test` roda os testes do mod em cerca de um segundo, e os dois `validate` conferem o manifesto e o marketplace.

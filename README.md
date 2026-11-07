@@ -108,7 +108,7 @@ Peça "atualizar o plugin" na sessão do projeto: a skill [`atualizar`](plugins/
 
 ## Para onde vai
 
-As ideias em avaliação e as recusadas estão no [roadmap](docs/roadmap.md); o que cada versão entregou, no [histórico](plugins/foreman/UPGRADING.md); as análises de entregas reais que viraram item do backlog, em [`docs/analises/`](docs/analises/). As versões 2.x que aparecem em PRs antigos são as 1.x de hoje (a 2.12.0 virou a 1.12.0, e a linha 1.x anterior virou 0.x); a conta está no topo do histórico.
+As ideias em avaliação e as recusadas estão no [roadmap](docs/roadmap.md); o que cada versão entregou, no [histórico](plugins/foreman/UPGRADING.md); as análises de entregas reais que viraram item do backlog, em [`docs/analises/`](docs/analises/).
 
 ## Para contribuir
 
