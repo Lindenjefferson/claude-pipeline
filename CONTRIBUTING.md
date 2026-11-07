@@ -14,7 +14,7 @@ python plugins/foreman/hooks/pre-commit-secret-scan.py --install-pre-commit
 
 Você precisa de Python 3, git e o [Claude Code](https://code.claude.com) no `PATH` (no Windows, os comandos rodam no Git Bash). As suítes criam repositórios git de teste, então o git precisa de identidade configurada (`git config user.email` e `user.name`).
 
-Para testar o plugin de verdade, carregue o clone do disco num projeto de teste: `claude plugin marketplace add ./foreman` e `claude plugin install foreman@linden-plugins --scope local`. As edições valem na próxima sessão (ou depois de `/reload-plugins`).
+Para testar o plugin de verdade, carregue o clone do disco num projeto de teste: `claude plugin marketplace add ./foreman` e `claude plugin install foreman@foreman --scope local`. As edições valem na próxima sessão (ou depois de `/reload-plugins`).
 
 ## Testar e validar
 

@@ -4,15 +4,15 @@ O que cada versão entregou e o que muda para quem atualiza. O arquivo vai junto
 
 Cada versão diz de onde veio cada item (feedback de uma entrega real, revisão do próprio plugin, pedido do usuário ou ideia adaptada de outro projeto) e o número do PR. Só as versões que o `feedback-plugin` das próximas entregas ainda confere (hoje da 1.9.8 à 1.38.0) têm seção própria; as anteriores ficam numa linha cada, e o detalhe está no PR. O fluxo nasceu inspirado no [ECC](https://github.com/affaan-m/ecc) (o pipeline `orch-*`, o `code-reviewer` e o `verification-loop`), em versão enxuta. O que é major, minor e patch está no [`CLAUDE.md`](../../CLAUDE.md).
 
-## 1.38.2 — testes só locais, marketplace só do Foreman e o histórico sem a renumeração
+## 1.38.2 — testes só locais, o marketplace `foreman` e o histórico sem a renumeração
 
 Simplificação: os testes passam a rodar só localmente, antes de cada PR.
 
 - **Sai o `.github/workflows/testes.yml`**: o "Testar e validar" do `CLAUDE.md` ganha um quinto comando, a varredura de segredos da branch (`--range main..HEAD`), que era a única garantia do CI fora do alcance do `pre-commit`, e diz por que o risco é outro aqui. Os comentários do scanner e do teste deixam de citar o CI.
-- **O marketplace `linden-plugins` lista só o Foreman**: o account-switcher passa a ter marketplace no próprio repositório, e uma mudança nele deixa de pedir commit aqui.
+- **Um marketplace por projeto, com o nome dele**: o `linden-plugins` passa a se chamar `foreman` e lista só o Foreman; o account-switcher ganha marketplace no próprio repositório, e uma mudança nele deixa de pedir commit aqui.
 - **O histórico deixa de contar a renumeração**: sai a nota do topo, o item dela na 1.12.2 e a 1.12.1, que só corrigia essa nota; o `CLAUDE.md` e o README também deixam de citá-la.
 
-**Ao atualizar:** nada muda.
+**Ao atualizar:** o marketplace muda de nome, então a skill `atualizar` não alcança esta versão. Termine ou pause a entrega em andamento e, uma vez na máquina, rode `claude plugin marketplace add Lindenjefferson/foreman`. Depois, em cada projeto, rode `claude plugin uninstall foreman@linden-plugins --scope local` e `claude plugin install foreman@foreman --scope local`, e no fim `claude plugin marketplace remove linden-plugins`. Os ledgers e os arquivos do projeto não mudam.
 
 ## 1.38.1 — as sobras ditas por extenso, e sem falso positivo
 
